@@ -8,6 +8,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { ConnectionGuard } from "@/components/common/ConnectionGuard";
 import { themeScript } from "@/lib/theme-script";
 import { I18nProvider } from "@/components/providers/I18nProvider";
+import { RBACProvider } from "@/lib/contexts/rbac-context";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -31,10 +32,12 @@ export default function RootLayout({
           <ThemeProvider>
             <QueryProvider>
               <I18nProvider>
-                <ConnectionGuard>
-                  {children}
-                  <Toaster />
-                </ConnectionGuard>
+                <RBACProvider>
+                  <ConnectionGuard>
+                    {children}
+                    <Toaster />
+                  </ConnectionGuard>
+                </RBACProvider>
               </I18nProvider>
             </QueryProvider>
           </ThemeProvider>

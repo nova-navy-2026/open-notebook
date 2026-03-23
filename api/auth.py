@@ -32,8 +32,8 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
         if not self.password:
             return await call_next(request)
 
-        # Skip authentication for excluded paths
-        if request.url.path in self.excluded_paths:
+        # Skip authentication for excluded paths (prefix matching)
+        if any(request.url.path.startswith(path) for path in self.excluded_paths):
             return await call_next(request)
 
         # Skip authentication for CORS preflight requests (OPTIONS)

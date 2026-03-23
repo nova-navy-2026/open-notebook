@@ -4,7 +4,7 @@ DEFINE TABLE IF NOT EXISTS source SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS
     asset
     ON TABLE source
-    FLEXIBLE TYPE option<object>;
+    TYPE option<object> FLEXIBLE;
 
 DEFINE FIELD IF NOT EXISTS title ON TABLE source TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS topics ON TABLE source TYPE option<array<string>>;
@@ -64,12 +64,12 @@ DEFINE TABLE IF NOT EXISTS podcast_config SCHEMALESS;
 -- entender o analyzer
 DEFINE ANALYZER IF NOT EXISTS my_analyzer TOKENIZERS blank,class,camel,punct FILTERS snowball(english), lowercase;
 
-DEFINE INDEX IF NOT EXISTS idx_source_title ON TABLE source COLUMNS title SEARCH ANALYZER my_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX IF NOT EXISTS idx_source_full_text ON TABLE source COLUMNS full_text SEARCH ANALYZER my_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX IF NOT EXISTS idx_source_embed_chunk ON TABLE source_embedding COLUMNS content SEARCH ANALYZER my_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX IF NOT EXISTS idx_source_insight ON TABLE source_insight COLUMNS content SEARCH ANALYZER my_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX IF NOT EXISTS idx_note ON TABLE note COLUMNS content SEARCH ANALYZER my_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX IF NOT EXISTS idx_note_title ON TABLE note COLUMNS title SEARCH ANALYZER my_analyzer BM25 HIGHLIGHTS;
+DEFINE INDEX IF NOT EXISTS idx_source_title ON source FIELDS title CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_source_full_text ON source FIELDS full_text CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_source_embed_chunk ON source_embedding FIELDS content CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_source_insight ON source_insight FIELDS content CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_note ON note FIELDS content CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_note_title ON note FIELDS title CONCURRENTLY;
 
 DEFINE FUNCTION IF NOT EXISTS fn::text_search($query_text: string, $match_count: int, $sources:bool, $show_notes:bool) {
   

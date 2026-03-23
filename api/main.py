@@ -11,6 +11,11 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from api.middleware.jwt_auth import JWTAuthMiddleware
+from api.middleware.rbac import RBACMiddleware
+from api.audit_service import AuditLoggingMiddleware
+from api.routers import auth
+
 from api.auth import PasswordAuthMiddleware
 from open_notebook.exceptions import (
     AuthenticationError,
@@ -24,6 +29,7 @@ from open_notebook.exceptions import (
 )
 from api.routers import (
     auth,
+    audit,
     chat,
     config,
     context,
@@ -31,11 +37,13 @@ from api.routers import (
     embedding,
     embedding_rebuild,
     episode_profiles,
+    health,
     insights,
     languages,
     models,
     notebooks,
     notes,
+    permissions,
     podcasts,
     search,
     settings,
@@ -43,6 +51,7 @@ from api.routers import (
     sources,
     speaker_profiles,
     transformations,
+    users,
 )
 from api.routers import commands as commands_router
 from open_notebook.database.async_migrate import AsyncMigrationManager
@@ -132,7 +141,7 @@ app.add_middleware(
         "/docs",
         "/openapi.json",
         "/redoc",
-        "/api/auth/status",
+        "/api/",  # Exclude all /api/* endpoints - JWT middleware handles auth
         "/api/config",
     ],
 )
@@ -145,7 +154,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(JWTAuthMiddleware)
+app.add_middleware(RBACMiddleware)
+app.add_middleware(AuditLoggingMiddleware)
 
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 
 # Custom exception handler to ensure CORS headers are included in error responses
 # This helps when errors occur before the CORS middleware can process them
@@ -280,6 +293,10 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(source_chat.router, prefix="/api", tags=["source-chat"])
 app.include_router(credentials.router, prefix="/api", tags=["credentials"])
 app.include_router(languages.router, prefix="/api", tags=["languages"])
+app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(users.router, prefix="/api", tags=["users"])
+app.include_router(permissions.router, prefix="/api", tags=["permissions"])
+app.include_router(audit.router, prefix="/api", tags=["audit"])
 
 
 @app.get("/")

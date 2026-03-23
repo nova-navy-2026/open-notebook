@@ -33,19 +33,19 @@ DEFINE FIELD IF NOT EXISTS created ON episode DEFAULT time::now() VALUE $before 
 DEFINE FIELD IF NOT EXISTS updated ON episode DEFAULT time::now() VALUE time::now();
 DEFINE FIELD IF NOT EXISTS name ON TABLE episode TYPE string;
 DEFINE FIELD IF NOT EXISTS briefing ON TABLE episode TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS episode_profile ON TABLE episode FLEXIBLE TYPE object;
-DEFINE FIELD IF NOT EXISTS speaker_profile ON TABLE episode FLEXIBLE TYPE object;
-DEFINE FIELD IF NOT EXISTS transcript ON TABLE episode FLEXIBLE TYPE option<object>;
-DEFINE FIELD IF NOT EXISTS outline ON TABLE episode FLEXIBLE TYPE option<object>;
+DEFINE FIELD IF NOT EXISTS episode_profile ON TABLE episode TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS speaker_profile ON TABLE episode TYPE object FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS transcript ON TABLE episode TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS outline ON TABLE episode TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS command ON TABLE episode TYPE option<record<command>>;
 DEFINE FIELD IF NOT EXISTS content ON TABLE episode TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS audio_file ON TABLE episode TYPE option<string>;
 
 -- Create indexes for better performance
-DEFINE INDEX IF NOT EXISTS idx_episode_profile_name ON TABLE episode_profile COLUMNS name UNIQUE CONCURRENTLY;
-DEFINE INDEX IF NOT EXISTS idx_speaker_profile_name ON TABLE speaker_profile COLUMNS name UNIQUE CONCURRENTLY;
-DEFINE INDEX IF NOT EXISTS idx_episode_profile ON TABLE episode COLUMNS episode_profile CONCURRENTLY;
-DEFINE INDEX IF NOT EXISTS idx_episode_command ON TABLE episode COLUMNS command CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_episode_profile_name ON episode_profile FIELDS name UNIQUE CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_speaker_profile_name ON speaker_profile FIELDS name UNIQUE CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_episode_profile ON episode FIELDS episode_profile CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_episode_command ON episode FIELDS command CONCURRENTLY;
 
 
 --Sample data
