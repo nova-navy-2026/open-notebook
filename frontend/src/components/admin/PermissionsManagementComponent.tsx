@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuthStore } from "@/lib/stores/auth-store";
-import { getApiUrl } from "@/lib/config";
+import { apiClient } from "@/lib/api/client";
 import {
   Card,
   CardContent,
@@ -13,6 +12,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { AlertCircle, Check } from "lucide-react";
 
@@ -43,7 +43,6 @@ const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
 };
 
 export function PermissionsManagementComponent() {
-  const { token } = useAuthStore();
   const [permissions, setPermissions] = useState<RolePermissions>(
     DEFAULT_ROLE_PERMISSIONS,
   );
@@ -54,26 +53,15 @@ export function PermissionsManagementComponent() {
 
   useEffect(() => {
     const fetchPermissions = async () => {
-      if (!token) return;
-
       try {
         setIsLoading(true);
-        const apiUrl = await getApiUrl();
-
-        const response = await fetch(`${apiUrl}/api/permissions`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+        const response = await apiClient.get<RolePermissions>("/permissions");
+        const data = response.data;
+        setPermissions({
+          admin: data?.admin ?? DEFAULT_ROLE_PERMISSIONS.admin,
+          editor: data?.editor ?? DEFAULT_ROLE_PERMISSIONS.editor,
+          viewer: data?.viewer ?? DEFAULT_ROLE_PERMISSIONS.viewer,
         });
-
-        if (response.ok) {
-          const data = await response.json();
-          setPermissions(data || DEFAULT_ROLE_PERMISSIONS);
-        } else {
-          // Use defaults if endpoint not available
-          setPermissions(DEFAULT_ROLE_PERMISSIONS);
-        }
         setError(null);
       } catch (err) {
         console.error("Failed to fetch permissions:", err);
@@ -84,7 +72,7 @@ export function PermissionsManagementComponent() {
     };
 
     fetchPermissions();
-  }, [token]);
+  }, []);
 
   const handlePermissionChange = (
     role: "admin" | "editor" | "viewer",
@@ -101,34 +89,18 @@ export function PermissionsManagementComponent() {
   };
 
   const handleSave = async () => {
-    if (!token) return;
-
     try {
       setIsSaving(true);
-      const apiUrl = await getApiUrl();
-
-      const response = await fetch(`${apiUrl}/api/permissions`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(permissions),
-      });
-
-      if (!response.ok) {
-        const statusText = response.statusText || "Unknown error";
-        throw new Error(
-          `Failed to save permissions: ${response.status} ${statusText}`,
-        );
-      }
+      await apiClient.put("/permissions", permissions);
 
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
       setError(null);
-    } catch (err) {
+    } catch (err: any) {
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to save permissions";
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Failed to save permissions";
       console.error("Permissions save error:", err);
       setError(errorMessage);
     } finally {
@@ -176,50 +148,52 @@ export function PermissionsManagementComponent() {
           </div>
         )}
 
-        <div className="grid md:grid-cols-3 gap-6">
-          {(["admin", "editor", "viewer"] as const).map((role) => (
-            <div key={role} className="border rounded-lg p-4 space-y-3">
-              <div>
-                <h3 className="font-semibold capitalize">{role}</h3>
-                <p className="text-xs text-muted-foreground">
-                  {role === "admin" && "Full system access"}
-                  {role === "editor" && "Can create and modify"}
-                  {role === "viewer" && "Read-only access"}
-                </p>
-              </div>
+        <ScrollArea className="border rounded-lg p-4">
+          <div className="grid md:grid-cols-3 gap-6">
+            {(["admin", "editor", "viewer"] as const).map((role) => (
+              <div key={role} className="border rounded-lg p-4 space-y-3">
+                <div>
+                  <h3 className="font-semibold capitalize">{role}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {role === "admin" && "Full system access"}
+                    {role === "editor" && "Can create and modify"}
+                    {role === "viewer" && "Read-only access"}
+                  </p>
+                </div>
 
-              <div className="space-y-2">
-                {allPermissions.map((permission) => (
-                  <div key={permission} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`${role}-${permission}`}
-                      checked={permissions[role].includes(permission)}
-                      onCheckedChange={(checked) =>
-                        handlePermissionChange(role, permission, !!checked)
-                      }
-                      disabled={isSaving}
-                    />
-                    <Label
-                      htmlFor={`${role}-${permission}`}
-                      className="text-sm cursor-pointer"
-                    >
-                      {permission
-                        .split("-")
-                        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                        .join(" ")}
-                    </Label>
-                  </div>
-                ))}
+                <div className="space-y-2">
+                  {allPermissions.map((permission) => (
+                    <div key={permission} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`${role}-${permission}`}
+                        checked={
+                          permissions[role]?.includes(permission) ?? false
+                        }
+                        onCheckedChange={(checked) =>
+                          handlePermissionChange(role, permission, !!checked)
+                        }
+                        disabled={isSaving}
+                      />
+                      <Label
+                        htmlFor={`${role}-${permission}`}
+                        className="text-sm cursor-pointer"
+                      >
+                        {permission
+                          .split("-")
+                          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                          .join(" ")}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ScrollArea>
 
-        <div className="flex justify-end">
-          <Button onClick={handleSave} disabled={isSaving}>
-            {isSaving ? "Saving..." : "Save Permissions"}
-          </Button>
-        </div>
+        <Button onClick={handleSave} disabled={isSaving} className="w-full">
+          {isSaving ? "Saving..." : "Save Permissions"}
+        </Button>
       </CardContent>
     </Card>
   );

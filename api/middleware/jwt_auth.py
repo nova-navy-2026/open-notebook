@@ -21,17 +21,19 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     Falls back to password authentication for backward compatibility.
     """
     
-    # Paths that don't require authentication
+    # Paths that don't require JWT authentication
+    # (login/status endpoints that must work without a token)
     EXEMPT_PATHS = [
-        "/",
         "/health",
         "/docs",
         "/openapi.json",
         "/redoc",
+        "/api/auth/status",
+        "/api/auth/login",
+        "/api/auth/oauth",
+        "/api/config",
         "/auth/status",
-        "/auth/login/local",
-        "/auth/me",
-        "/auth/verify",
+        "/auth/login",
         "/auth/oauth",
     ]
     
@@ -46,7 +48,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         """
         
         # Skip auth for exempt paths
-        if any(request.url.path.startswith(path) for path in self.excluded_paths):
+        path = request.url.path
+        if path == "/" or any(path.startswith(p) for p in self.excluded_paths):
             return await call_next(request)
         
         # Skip auth for CORS preflight
@@ -79,13 +82,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
             
             except Exception as e:
-                logger.warning(f"❌ JWT verification failed: {e}")
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Invalid or expired token"}
-                )
+                # JWT verification failed - try password auth as fallback
+                logger.debug(f"JWT verification failed, trying password auth: {e}")
         
-        # Fall back to password authentication
+        # No valid JWT token - try password authentication
         if not self.password:
             # No auth method configured, allow access
             logger.debug("ℹ️ No authentication configured, allowing access")

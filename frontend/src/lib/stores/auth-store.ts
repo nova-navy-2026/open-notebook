@@ -386,8 +386,10 @@ export const useAuthStore = create<AuthState>()(
         const state = get();
         if (!state.user) return false;
 
+        const roles = state.user.roles ?? [];
+
         // Admin has all permissions
-        if (state.user.roles.includes("admin")) return true;
+        if (roles.includes("admin")) return true;
 
         // Check specific permissions based on role
         const rolePermissions: Record<UserRole, string[]> = {
@@ -396,7 +398,7 @@ export const useAuthStore = create<AuthState>()(
           viewer: ["read", "search", "view-shared"],
         };
 
-        for (const role of state.user.roles) {
+        for (const role of roles) {
           if (
             rolePermissions[role]?.includes(permission) ||
             rolePermissions[role]?.includes("*")

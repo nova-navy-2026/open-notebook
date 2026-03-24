@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getApiUrl } from "@/lib/config";
-import { useAuthStore } from "@/lib/stores/auth-store";
+import { apiClient } from "@/lib/api/client";
 import {
   Card,
   CardContent,
@@ -35,44 +34,28 @@ interface HealthData {
 }
 
 export function StatusDashboard() {
-  const { token } = useAuthStore();
   const [health, setHealth] = useState<HealthData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const checkHealth = async () => {
-    if (!token) return;
-
     try {
       setIsLoading(true);
-      const apiUrl = await getApiUrl();
       const startTime = Date.now();
 
       // Check API health
-      const apiResponse = await Promise.race<Response>([
-        fetch(`${apiUrl}/api/health`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        new Promise<Response>((_, reject) =>
-          setTimeout(() => reject(new Error("Timeout")), 5000),
-        ),
-      ]);
-
+      const apiResponse = await apiClient.get("/health").catch(() => null);
       const apiTime = Date.now() - startTime;
-      const apiHealthy = (apiResponse as Response).ok;
+      const apiHealthy = !!apiResponse;
 
       // Try to get system info (this also validates auth)
-      const authResponse = await fetch(`${apiUrl}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const authHealthy = authResponse.ok;
+      const authResponse = await apiClient.get("/auth/me").catch(() => null);
+      const authHealthy = !!authResponse;
 
       // Try database health (if available)
-      const dbResponse = await fetch(`${apiUrl}/api/health/db`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => null);
-      const dbHealthy = dbResponse?.ok ?? true; // Assume healthy if not available
+      const dbResponse = await apiClient.get("/health/db").catch(() => null);
+      const dbHealthy = !!dbResponse;
 
       setHealth({
         api: {
@@ -131,7 +114,7 @@ export function StatusDashboard() {
     }, 30000); // Refresh every 30 seconds
 
     return () => clearInterval(interval);
-  }, [token, autoRefresh]);
+  }, [autoRefresh]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

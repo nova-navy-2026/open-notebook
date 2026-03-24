@@ -111,27 +111,36 @@ class RBACMiddleware(BaseHTTPMiddleware):
     # Paths that don't require authentication/authorization
     # (endpoints handle their own auth/authz)
     EXEMPT_PATHS = [
-        "/",
         "/health",
         "/docs",
         "/openapi.json",
         "/redoc",
-        "/oauth",
-        "/api/users",        # User management endpoints handle their own auth
-        "/api/permissions",  # Permission endpoints handle their own auth
-        "/api/audit",        # Audit endpoints handle their own auth
-        "/api/health",       # Health check endpoints
     ]
     
     async def dispatch(self, request: Request, call_next):
         """
         Check user role against route permission requirements.
+        Only enforces auth for routes with explicit ROUTE_PERMISSIONS entries.
         """
+        path = request.url.path
+        
         # Skip authorization for exempt paths
-        if any(request.url.path.startswith(path) for path in self.EXEMPT_PATHS):
+        if path == "/" or any(path.startswith(p) for p in self.EXEMPT_PATHS):
             return await call_next(request)
         
-        # Get user from request state (set by JWT middleware)
+        # Skip CORS preflight requests
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
+        # Build route key for permission check
+        route_key = f"{request.method}:{path}"
+        required_roles = ROUTE_PERMISSIONS.get(route_key, [])
+        
+        # If route has no explicit permission requirements, allow through
+        if not required_roles:
+            return await call_next(request)
+        
+        # Route requires specific roles - check user authentication
         user = getattr(request.state, 'user', None)
         
         if not user:

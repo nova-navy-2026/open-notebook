@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAuthStore } from "@/lib/stores/auth-store";
 import { useRBAC } from "@/lib/contexts/rbac-context";
-import { getApiUrl } from "@/lib/config";
+import { apiClient } from "@/lib/api/client";
 import {
   Table,
   TableBody,
@@ -21,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { AlertCircle, Search, Download } from "lucide-react";
 import {
@@ -44,7 +44,6 @@ interface AuditLog {
 }
 
 export function AuditLogViewer() {
-  const { token, user } = useAuthStore();
   const { isAdmin } = useRBAC();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,51 +55,21 @@ export function AuditLogViewer() {
 
   useEffect(() => {
     const fetchLogs = async () => {
-      // Ensure we have both token and user before fetching
-      if (!token) {
-        setError("No authentication token available");
-        setIsLoading(false);
-        return;
-      }
-
-      if (!user) {
-        setError("User information not available");
-        setIsLoading(false);
-        return;
-      }
-
       try {
         setIsLoading(true);
-        const apiUrl = await getApiUrl();
 
-        // Build query based on user role
-        let endpoint = `${apiUrl}/api/audit/logs`;
+        // Build endpoint based on user role
+        const endpoint = isAdmin ? "/audit/logs" : "/audit/logs";
 
-        // Non-admin users can only see their own activity or team activity
-        if (!isAdmin) {
-          endpoint = `${apiUrl}/api/audit/user/${user.id}/activity`;
-        }
-
-        const response = await fetch(endpoint, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          const statusText = response.statusText || "Unknown error";
-          throw new Error(
-            `Failed to fetch audit logs: ${response.status} ${statusText}`,
-          );
-        }
-
-        const data = await response.json();
-        setLogs(Array.isArray(data) ? data : data.logs || []);
+        const response = await apiClient.get<AuditLog[]>(endpoint);
+        const data = response.data;
+        setLogs(Array.isArray(data) ? data : (data as any).logs || []);
         setError(null);
-      } catch (err) {
+      } catch (err: any) {
         const errorMessage =
-          err instanceof Error ? err.message : "Failed to fetch audit logs";
+          err?.response?.data?.detail ||
+          err?.message ||
+          "Failed to fetch audit logs";
         console.error("Audit logs fetch error:", err);
         setError(errorMessage);
       } finally {
@@ -109,7 +78,7 @@ export function AuditLogViewer() {
     };
 
     fetchLogs();
-  }, [token, user, isAdmin]);
+  }, [isAdmin]);
 
   // Filter logs based on search and filters
   useEffect(() => {
@@ -249,68 +218,72 @@ export function AuditLogViewer() {
         </div>
 
         {/* Logs Table */}
-        {error ? (
-          <div className="flex items-start gap-2 text-red-600 text-sm">
-            <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-        ) : isLoading ? (
-          <LoadingSpinner />
-        ) : (
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Timestamp</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Resource</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredLogs.length === 0 ? (
+        <ScrollArea className="border rounded-lg">
+          {error ? (
+            <div className="flex items-start gap-2 text-red-600 text-sm p-4">
+              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          ) : isLoading ? (
+            <div className="p-4">
+              <LoadingSpinner />
+            </div>
+          ) : (
+            <div className="overflow-hidden">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-4 text-muted-foreground"
-                    >
-                      No audit logs found
-                    </TableCell>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Resource</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
-                ) : (
-                  filteredLogs.map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="text-sm">
-                        {new Date(log.timestamp).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {log.user_email}
-                      </TableCell>
-                      <TableCell className="text-sm capitalize">
-                        {log.action}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {log.resource_type}
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={`inline-block px-2 py-1 rounded text-xs font-medium ${
-                            log.status === "success"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
-                        >
-                          {log.status}
-                        </span>
+                </TableHeader>
+                <TableBody>
+                  {filteredLogs.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="text-center py-4 text-muted-foreground"
+                      >
+                        No audit logs found
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                  ) : (
+                    filteredLogs.map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-sm">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {log.user_email}
+                        </TableCell>
+                        <TableCell className="text-sm capitalize">
+                          {log.action}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {log.resource_type}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                              log.status === "success"
+                                ? "bg-green-100 text-green-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {log.status}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </ScrollArea>
       </CardContent>
     </Card>
   );
@@ -318,7 +291,7 @@ export function AuditLogViewer() {
 
 function UserActivityTable({ logs }: { logs: AuditLog[] }) {
   return (
-    <div className="border rounded-lg overflow-hidden">
+    <div className="overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow>

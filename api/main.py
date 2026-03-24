@@ -131,8 +131,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add password authentication middleware first
-# Exclude /api/auth/status and /api/config from authentication
+# Middleware execution order: last-added = outermost = runs first.
+# Desired request flow: AuditLogging → CORS → JWT → RBAC → PasswordAuth → App
+#
+# Add innermost first, outermost last:
 app.add_middleware(
     PasswordAuthMiddleware,
     excluded_paths=[
@@ -145,8 +147,8 @@ app.add_middleware(
         "/api/config",
     ],
 )
-
-# Add CORS middleware last (so it processes first)
+app.add_middleware(RBACMiddleware)
+app.add_middleware(JWTAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, replace with specific origins
@@ -154,8 +156,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(JWTAuthMiddleware)
-app.add_middleware(RBACMiddleware)
 app.add_middleware(AuditLoggingMiddleware)
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])

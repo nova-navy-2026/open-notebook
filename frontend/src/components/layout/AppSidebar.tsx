@@ -83,10 +83,14 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
     baseNav.push({
       title: "Admin",
       items: [
-        { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
-        { name: "Users & Roles", href: "/admin/roles", icon: Settings },
-        { name: "Permissions", href: "/admin/permissions", icon: Shield },
-        { name: "Audit Logs", href: "/admin/audit-logs", icon: FileText },
+        {
+          name: "Dashboard",
+          href: "/admin?tab=overview",
+          icon: LayoutDashboard,
+        },
+        { name: "Users & Roles", href: "/admin?tab=users", icon: Settings },
+        { name: "Permissions", href: "/admin?tab=permissions", icon: Shield },
+        { name: "Audit Logs", href: "/admin?tab=audit", icon: FileText },
       ],
     });
   }

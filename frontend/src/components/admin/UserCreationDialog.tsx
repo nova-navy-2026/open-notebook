@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAuthStore } from "@/lib/stores/auth-store";
-import { getApiUrl } from "@/lib/config";
+import { apiClient } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,7 +28,6 @@ interface UserCreationDialogProps {
 }
 
 export function UserCreationDialog({ onUserCreated }: UserCreationDialogProps) {
-  const { token } = useAuthStore();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,34 +40,15 @@ export function UserCreationDialog({ onUserCreated }: UserCreationDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token) return;
 
     try {
       setIsLoading(true);
-      const apiUrl = await getApiUrl();
-
-      const response = await fetch(`${apiUrl}/api/users`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          name: formData.name || undefined,
-          password: formData.password,
-          roles: [formData.role],
-        }),
+      await apiClient.post("/users", {
+        email: formData.email,
+        name: formData.name || undefined,
+        password: formData.password,
+        roles: [formData.role],
       });
-
-      if (!response.ok) {
-        const statusText = response.statusText || "Unknown error";
-        const error = await response.json().catch(() => ({}));
-        throw new Error(
-          error.detail ||
-            `Failed to create user: ${response.status} ${statusText}`,
-        );
-      }
 
       toast({
         title: "Success",
@@ -79,9 +58,9 @@ export function UserCreationDialog({ onUserCreated }: UserCreationDialogProps) {
       setFormData({ email: "", name: "", password: "", role: "viewer" });
       setOpen(false);
       onUserCreated();
-    } catch (err) {
+    } catch (err: any) {
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to create user";
+        err?.response?.data?.detail || err?.message || "Failed to create user";
       console.error("User creation error:", err);
       toast({
         title: "Error",
