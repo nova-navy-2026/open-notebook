@@ -7,6 +7,7 @@ from .embedding_commands import (
     rebuild_embeddings_command,
 )
 from .example_commands import analyze_data_command, process_text_command
+from .opensearch_commands import reindex_opensearch_command
 from .podcast_commands import generate_podcast_command
 from .source_commands import process_source_command
 
@@ -16,6 +17,8 @@ __all__ = [
     "embed_insight_command",
     "embed_source_command",
     "rebuild_embeddings_command",
+    # OpenSearch commands
+    "reindex_opensearch_command",
     # Other commands
     "generate_podcast_command",
     "process_source_command",

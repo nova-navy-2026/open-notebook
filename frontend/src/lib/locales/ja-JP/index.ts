@@ -465,6 +465,7 @@ export const jaJP = {
     vectorSearchWarning: "ベクトル検索にはEmbeddingモデルが必要です。テキスト検索のみ利用可能です。",
     textSearch: "テキスト検索",
     vectorSearch: "ベクトル検索",
+    hybridSearch: "ハイブリッド検索",
     searchIn: "検索対象",
     searchSources: "ソースを検索",
     searchNotes: "ノートを検索",

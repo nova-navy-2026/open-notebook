@@ -43,6 +43,7 @@ from api.routers import (
     models,
     notebooks,
     notes,
+    opensearch,
     permissions,
     podcasts,
     search,
@@ -297,6 +298,9 @@ app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(permissions.router, prefix="/api", tags=["permissions"])
 app.include_router(audit.router, prefix="/api", tags=["audit"])
+app.include_router(
+    opensearch.router, prefix="/api/opensearch", tags=["opensearch"]
+)
 
 
 @app.get("/")

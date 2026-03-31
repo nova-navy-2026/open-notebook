@@ -465,6 +465,7 @@ export const bnIN = {
     vectorSearchWarning: "ভেক্টর অনুসন্ধানের জন্য একটি এমবেডিং মডেল প্রয়োজন। শুধুমাত্র টেক্সট অনুসন্ধান উপলব্ধ।",
     textSearch: "টেক্সট অনুসন্ধান",
     vectorSearch: "ভেক্টর অনুসন্ধান",
+    hybridSearch: "হাইব্রিড অনুসন্ধান",
     searchIn: "যেখানে অনুসন্ধান করবেন",
     searchSources: "উৎস অনুসন্ধান",
     searchNotes: "নোট অনুসন্ধান",

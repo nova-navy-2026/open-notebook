@@ -7,7 +7,7 @@ from loguru import logger
 
 from api.models import AskRequest, AskResponse, SearchRequest, SearchResponse
 from open_notebook.ai.models import Model, model_manager
-from open_notebook.domain.notebook import text_search, vector_search
+from open_notebook.domain.notebook import hybrid_search, text_search, vector_search
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
 from open_notebook.graphs.ask import graph as ask_graph
 
@@ -16,23 +16,32 @@ router = APIRouter()
 
 @router.post("/search", response_model=SearchResponse)
 async def search_knowledge_base(search_request: SearchRequest):
-    """Search the knowledge base using text or vector search."""
+    """Search the knowledge base using text, vector, or hybrid search."""
     try:
-        if search_request.type == "vector":
-            # Check if embedding model is available for vector search
+        if search_request.type in ("vector", "hybrid"):
+            # Check if embedding model is available for vector/hybrid search
             if not await model_manager.get_embedding_model():
                 raise HTTPException(
                     status_code=400,
-                    detail="Vector search requires an embedding model. Please configure one in the Models section.",
+                    detail="Vector/hybrid search requires an embedding model. Please configure one in the Models section.",
                 )
 
-            results = await vector_search(
-                keyword=search_request.query,
-                results=search_request.limit,
-                source=search_request.search_sources,
-                note=search_request.search_notes,
-                minimum_score=search_request.minimum_score,
-            )
+            if search_request.type == "hybrid":
+                results = await hybrid_search(
+                    keyword=search_request.query,
+                    results=search_request.limit,
+                    source=search_request.search_sources,
+                    note=search_request.search_notes,
+                    minimum_score=search_request.minimum_score,
+                )
+            else:
+                results = await vector_search(
+                    keyword=search_request.query,
+                    results=search_request.limit,
+                    source=search_request.search_sources,
+                    note=search_request.search_notes,
+                    minimum_score=search_request.minimum_score,
+                )
         else:
             # Text search
             results = await text_search(

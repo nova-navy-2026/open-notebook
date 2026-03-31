@@ -701,6 +701,20 @@ async def text_search(
     if not keyword:
         raise InvalidInputError("Search keyword cannot be empty")
     try:
+        # Route to OpenSearch when configured, with SurrealDB fallback
+        from open_notebook.search import is_opensearch_enabled
+
+        if is_opensearch_enabled():
+            try:
+                from open_notebook.search.query import opensearch_text_search
+
+                return await opensearch_text_search(keyword, results, source, note)
+            except Exception as e:
+                logger.warning(
+                    f"OpenSearch text search failed, falling back to SurrealDB: {e}"
+                )
+
+        # SurrealDB path (default or fallback)
         search_results = await repo_query(
             """
             select *
@@ -729,6 +743,23 @@ async def vector_search(
 
         # Use unified embedding function (handles chunking if query is very long)
         embed = await generate_embedding(keyword)
+
+        # Route to OpenSearch when configured, with SurrealDB fallback
+        from open_notebook.search import is_opensearch_enabled
+
+        if is_opensearch_enabled():
+            try:
+                from open_notebook.search.query import opensearch_vector_search
+
+                return await opensearch_vector_search(
+                    embed, results, source, note, minimum_score
+                )
+            except Exception as e:
+                logger.warning(
+                    f"OpenSearch vector search failed, falling back to SurrealDB: {e}"
+                )
+
+        # SurrealDB path (default or fallback)
         search_results = await repo_query(
             """
             SELECT * FROM fn::vector_search($embed, $results, $source, $note, $minimum_score);
@@ -744,5 +775,45 @@ async def vector_search(
         return search_results
     except Exception as e:
         logger.error(f"Error performing vector search: {str(e)}")
+        logger.exception(e)
+        raise DatabaseOperationError(e)
+
+
+async def hybrid_search(
+    keyword: str,
+    results: int,
+    source: bool = True,
+    note: bool = True,
+    minimum_score: float = 0.2,
+):
+    """Hybrid search combining BM25 text matching and vector similarity.
+
+    Requires OpenSearch backend. Falls back to vector search on SurrealDB.
+    """
+    if not keyword:
+        raise InvalidInputError("Search keyword cannot be empty")
+    try:
+        from open_notebook.search import is_opensearch_enabled
+
+        if is_opensearch_enabled():
+            from open_notebook.utils.embedding import generate_embedding
+
+            embed = await generate_embedding(keyword)
+
+            try:
+                from open_notebook.search.query import opensearch_hybrid_search
+
+                return await opensearch_hybrid_search(
+                    keyword, embed, results, source, note, minimum_score
+                )
+            except Exception as e:
+                logger.warning(
+                    f"OpenSearch hybrid search failed, falling back to vector: {e}"
+                )
+
+        # Fallback: hybrid is not available on SurrealDB, use vector search
+        return await vector_search(keyword, results, source, note, minimum_score)
+    except Exception as e:
+        logger.error(f"Error performing hybrid search: {str(e)}")
         logger.exception(e)
         raise DatabaseOperationError(e)

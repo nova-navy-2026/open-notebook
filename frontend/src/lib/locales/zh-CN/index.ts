@@ -465,6 +465,7 @@ export const zhCN = {
     vectorSearchWarning: "向量搜索需要嵌入模型。目前仅文本搜索可用。",
     textSearch: "文本搜索",
     vectorSearch: "向量搜索",
+    hybridSearch: "混合搜索",
     searchIn: "搜索范围",
     searchSources: "搜索来源",
     searchNotes: "搜索笔记",

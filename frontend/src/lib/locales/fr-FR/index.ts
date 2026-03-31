@@ -465,6 +465,7 @@ export const frFR = {
     vectorSearchWarning: "La recherche vectorielle nécessite un modèle d'embedding. Seule la recherche textuelle est disponible.",
     textSearch: "Recherche textuelle",
     vectorSearch: "Recherche vectorielle",
+    hybridSearch: "Recherche hybride",
     searchIn: "Rechercher dans",
     searchSources: "Rechercher dans les Sources",
     searchNotes: "Rechercher dans les Notes",

@@ -4,10 +4,6 @@ const nextConfig: NextConfig = {
   // Enable standalone output for optimized Docker deployment
   output: "standalone",
 
-  // Disable automatic scroll restoration on navigation
-  // This prevents unwanted scrolling to top when navigating between sidebar items
-  scrollRestoration: false,
-
   // Experimental features
   // Type assertion needed: proxyClientMaxBodySize is valid in Next.js 15 but types lag behind
   experimental: {

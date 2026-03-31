@@ -176,6 +176,23 @@ async def embed_note_command(input_data: EmbedNoteInput) -> EmbedNoteOutput:
             },
         )
 
+        # 4. Dual-write: sync to OpenSearch (best-effort)
+        try:
+            from open_notebook.search.indexer import sync_note
+
+            await sync_note(
+                note_id=str(note.id),
+                title=note.title,
+                content=note.content,
+                embedding=embedding,
+                owner=getattr(note, "owner", None),
+            )
+        except Exception as os_err:
+            logger.warning(
+                f"OpenSearch sync failed for note {input_data.note_id} "
+                f"(non-fatal): {os_err}"
+            )
+
         processing_time = time.time() - start_time
         logger.info(
             f"Successfully embedded note {input_data.note_id} in {processing_time:.2f}s"
@@ -270,6 +287,26 @@ async def embed_insight_command(input_data: EmbedInsightInput) -> EmbedInsightOu
             },
         )
 
+        # 4. Dual-write: sync to OpenSearch (best-effort)
+        try:
+            from open_notebook.search.indexer import sync_insight
+
+            source = await insight.get_source()
+            await sync_insight(
+                insight_id=str(insight.id),
+                source_id=str(source.id),
+                source_title=source.title,
+                insight_type=insight.insight_type,
+                content=insight.content,
+                embedding=embedding,
+                owner=getattr(insight, "owner", None),
+            )
+        except Exception as os_err:
+            logger.warning(
+                f"OpenSearch sync failed for insight {input_data.insight_id} "
+                f"(non-fatal): {os_err}"
+            )
+
         processing_time = time.time() - start_time
         logger.info(
             f"Successfully embedded insight {input_data.insight_id} in {processing_time:.2f}s"
@@ -355,6 +392,13 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
             "DELETE source_embedding WHERE source = $source_id",
             {"source_id": ensure_record_id(input_data.source_id)},
         )
+        # Also delete old OpenSearch entries for this source (best-effort)
+        try:
+            from open_notebook.search.indexer import delete_by_parent
+
+            await delete_by_parent(input_data.source_id)
+        except Exception:
+            pass  # Non-fatal; new entries will overwrite anyway
 
         # 3. Detect content type from file path if available
         file_path = source.asset.file_path if source.asset else None
@@ -401,7 +445,37 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
         ]
 
         logger.debug(f"Inserting {len(records)} source_embedding records")
-        await repo_insert("source_embedding", records)
+        inserted = await repo_insert("source_embedding", records)
+
+        # 7. Dual-write: sync to OpenSearch (best-effort)
+        try:
+            from open_notebook.search.indexer import sync_source_embeddings
+
+            os_chunks = [
+                {
+                    "id": str(rec["id"]),
+                    "content": rec["content"],
+                    "embedding": rec["embedding"],
+                    "order": rec.get("order", idx),
+                }
+                for idx, rec in enumerate(inserted)
+                if rec.get("id")
+            ]
+            if os_chunks:
+                indexed = await sync_source_embeddings(
+                    source_id=input_data.source_id,
+                    source_title=source.title,
+                    chunks=os_chunks,
+                    owner=getattr(source, "owner", None),
+                )
+                logger.debug(
+                    f"Synced {indexed}/{len(os_chunks)} chunks to OpenSearch"
+                )
+        except Exception as os_err:
+            logger.warning(
+                f"OpenSearch sync failed for source {input_data.source_id} "
+                f"(non-fatal): {os_err}"
+            )
 
         processing_time = time.time() - start_time
         logger.info(
