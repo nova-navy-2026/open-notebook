@@ -1,0 +1,25 @@
+-- Migration 17 Down: Remove file storage fields and owner fields
+
+-- Remove file storage fields from source
+REMOVE FIELD IF EXISTS file_data ON TABLE source;
+REMOVE FIELD IF EXISTS file_name ON TABLE source;
+REMOVE FIELD IF EXISTS file_mime ON TABLE source;
+REMOVE FIELD IF EXISTS file_size ON TABLE source;
+
+-- Remove owner fields
+REMOVE FIELD IF EXISTS owner ON TABLE source;
+REMOVE FIELD IF EXISTS owner ON TABLE note;
+REMOVE FIELD IF EXISTS owner ON TABLE notebook;
+REMOVE FIELD IF EXISTS owner ON TABLE source_embedding;
+REMOVE FIELD IF EXISTS owner ON TABLE source_insight;
+REMOVE FIELD IF EXISTS owner ON TABLE chat_session;
+REMOVE FIELD IF EXISTS owner ON TABLE credential;
+
+-- Remove owner indexes
+REMOVE INDEX IF EXISTS idx_source_owner ON TABLE source;
+REMOVE INDEX IF EXISTS idx_note_owner ON TABLE note;
+REMOVE INDEX IF EXISTS idx_notebook_owner ON TABLE notebook;
+REMOVE INDEX IF EXISTS idx_source_embedding_owner ON TABLE source_embedding;
+REMOVE INDEX IF EXISTS idx_source_insight_owner ON TABLE source_insight;
+REMOVE INDEX IF EXISTS idx_chat_session_owner ON TABLE chat_session;
+REMOVE INDEX IF EXISTS idx_credential_owner ON TABLE credential;

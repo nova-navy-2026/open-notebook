@@ -18,6 +18,7 @@ class Notebook(ObjectModel):
     name: str
     description: str
     archived: Optional[bool] = False
+    owner: Optional[str] = None
 
     @field_validator("name")
     @classmethod
@@ -238,6 +239,7 @@ class Asset(BaseModel):
 class SourceEmbedding(ObjectModel):
     table_name: ClassVar[str] = "source_embedding"
     content: str
+    owner: Optional[str] = None
 
     async def get_source(self) -> "Source":
         try:
@@ -258,6 +260,7 @@ class SourceInsight(ObjectModel):
     table_name: ClassVar[str] = "source_insight"
     insight_type: str
     content: str
+    owner: Optional[str] = None
 
     async def get_source(self) -> "Source":
         try:
@@ -296,6 +299,26 @@ class Source(ObjectModel):
     command: Optional[Union[str, RecordID]] = Field(
         default=None, description="Link to surreal-commands processing job"
     )
+    # File storage in DB (replaces local filesystem)
+    file_data: Optional[str] = Field(
+        default=None, description="Base64-encoded file content"
+    )
+    file_name: Optional[str] = Field(
+        default=None, description="Original filename (e.g. paper.pdf)"
+    )
+    file_mime: Optional[str] = Field(
+        default=None, description="MIME type (e.g. application/pdf)"
+    )
+    file_size: Optional[int] = Field(
+        default=None, description="Original file size in bytes"
+    )
+    # AI-generated caption for visual content (images, video keyframes)
+    caption: Optional[str] = Field(
+        default=None,
+        description="AI-generated description of visual content",
+    )
+    # Multi-user ownership
+    owner: Optional[str] = None
 
     @field_validator("command", mode="before")
     @classmethod
@@ -504,33 +527,76 @@ class Source(ObjectModel):
             return None
 
     def _prepare_save_data(self) -> dict:
-        """Override to ensure command field is always RecordID format for database"""
+        """Override to ensure command field is always RecordID format for database
+        and exclude file_data from updates unless explicitly set (to avoid sending
+        large blobs on every save)."""
         data = super()._prepare_save_data()
 
         # Ensure command field is RecordID format if not None
         if data.get("command") is not None:
             data["command"] = ensure_record_id(data["command"])
 
+        # Exclude file_data from saves unless it was explicitly set on this instance.
+        # file_data is only written during initial upload via store_file().
+        # This prevents re-sending the entire blob on every source.save() call.
+        if "file_data" in data and not getattr(self, "_file_data_dirty", False):
+            del data["file_data"]
+
         return data
 
+    def store_file(self, file_bytes: bytes, file_name: str, file_mime: str) -> None:
+        """Store file content on this source record (to be persisted on next save).
+
+        Args:
+            file_bytes: Raw file content
+            file_name: Original filename
+            file_mime: MIME type string
+        """
+        import base64
+        from open_notebook.config import MAX_UPLOAD_SIZE_MB
+
+        file_size = len(file_bytes)
+
+        # Validate file size
+        if MAX_UPLOAD_SIZE_MB > 0 and file_size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+            raise InvalidInputError(
+                f"File size ({file_size / 1024 / 1024:.1f} MB) exceeds "
+                f"maximum allowed size ({MAX_UPLOAD_SIZE_MB} MB)"
+            )
+
+        self.file_data = base64.b64encode(file_bytes).decode("utf-8")
+        self.file_name = file_name
+        self.file_mime = file_mime
+        self.file_size = file_size
+        self._file_data_dirty = True  # Mark for inclusion in save
+
+    def get_file_bytes(self) -> Optional[bytes]:
+        """Decode and return the stored file content, or None if no file stored."""
+        if not self.file_data:
+            return None
+        import base64
+        return base64.b64decode(self.file_data)
+
     async def delete(self) -> bool:
-        """Delete source and clean up associated file, embeddings, and insights."""
-        # Clean up uploaded file if it exists
+        """Delete source and clean up associated embeddings and insights.
+
+        File cleanup is no longer needed since files are stored in the DB record
+        itself — deleting the record deletes the file.
+        Legacy local file cleanup is kept for backward compatibility with
+        sources created before the migration to DB storage.
+        """
+        # Legacy: clean up local file if it exists (pre-migration sources)
         if self.asset and self.asset.file_path:
             file_path = Path(self.asset.file_path)
             if file_path.exists():
                 try:
                     os.unlink(file_path)
-                    logger.info(f"Deleted file for source {self.id}: {file_path}")
+                    logger.info(f"Deleted legacy file for source {self.id}: {file_path}")
                 except Exception as e:
                     logger.warning(
-                        f"Failed to delete file {file_path} for source {self.id}: {e}. "
+                        f"Failed to delete legacy file {file_path} for source {self.id}: {e}. "
                         "Continuing with database deletion."
                     )
-            else:
-                logger.debug(
-                    f"File {file_path} not found for source {self.id}, skipping cleanup"
-                )
 
         # Delete associated embeddings and insights to prevent orphaned records
         try:
@@ -559,6 +625,7 @@ class Note(ObjectModel):
     title: Optional[str] = None
     note_type: Optional[Literal["human", "ai"]] = None
     content: Optional[str] = None
+    owner: Optional[str] = None
 
     @field_validator("content")
     @classmethod
@@ -615,6 +682,7 @@ class ChatSession(ObjectModel):
     nullable_fields: ClassVar[set[str]] = {"model_override"}
     title: Optional[str] = None
     model_override: Optional[str] = None
+    owner: Optional[str] = None
 
     async def relate_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:

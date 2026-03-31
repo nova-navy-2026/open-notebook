@@ -1,0 +1,13 @@
+-- Migration 18: Vision captions for image/video sources
+-- Adds a caption field to the source table to store AI-generated
+-- descriptions of visual content (images, video keyframes).
+-- Also adds the default_vision_model setting.
+
+-- =============================================
+-- CAPTION FIELD ON SOURCE
+-- =============================================
+-- caption stores the AI-generated description of visual content.
+-- For images: a single description of the image.
+-- For videos: descriptions of sampled keyframes, concatenated.
+-- Used as searchable text alongside (or instead of) full_text.
+DEFINE FIELD IF NOT EXISTS caption ON TABLE source TYPE option<string>;

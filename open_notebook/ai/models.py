@@ -66,7 +66,7 @@ class DefaultModels(RecordModel):
     large_context_model: Optional[str] = None
     default_text_to_speech_model: Optional[str] = None
     default_speech_to_text_model: Optional[str] = None
-    # default_vision_model: Optional[str]
+    default_vision_model: Optional[str] = None
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
 
@@ -245,6 +245,8 @@ class ModelManager:
             model_id = defaults.default_speech_to_text_model
         elif model_type == "large_context":
             model_id = defaults.large_context_model
+        elif model_type == "vision":
+            model_id = defaults.default_vision_model or defaults.default_chat_model
 
         if not model_id:
             logger.warning(

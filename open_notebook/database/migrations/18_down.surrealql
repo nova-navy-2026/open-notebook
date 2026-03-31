@@ -1,0 +1,2 @@
+-- Migration 18 Down: Remove vision caption field
+REMOVE FIELD IF EXISTS caption ON TABLE source;

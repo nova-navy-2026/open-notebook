@@ -1,8 +1,9 @@
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from api.auth import get_current_user_id
 from api.models import NoteCreate, NoteResponse, NoteUpdate
 from open_notebook.domain.notebook import Note
 from open_notebook.exceptions import InvalidInputError
@@ -13,6 +14,7 @@ router = APIRouter()
 @router.get("/notes", response_model=List[NoteResponse])
 async def get_notes(
     notebook_id: Optional[str] = Query(None, description="Filter by notebook ID"),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Get all notes with optional notebook filtering."""
     try:
@@ -26,7 +28,7 @@ async def get_notes(
             notes = await notebook.get_notes()
         else:
             # Get all notes
-            notes = await Note.get_all(order_by="updated desc")
+            notes = await Note.get_all(order_by="updated desc", owner=user_id)
 
         return [
             NoteResponse(
@@ -47,7 +49,10 @@ async def get_notes(
 
 
 @router.post("/notes", response_model=NoteResponse)
-async def create_note(note_data: NoteCreate):
+async def create_note(
+    note_data: NoteCreate,
+    user_id: str = Depends(get_current_user_id),
+):
     """Create a new note."""
     try:
         # Auto-generate title if not provided and it's an AI note
@@ -77,6 +82,7 @@ async def create_note(note_data: NoteCreate):
             title=title,
             content=note_data.content,
             note_type=note_type,
+            owner=user_id,
         )
         command_id = await new_note.save()
 

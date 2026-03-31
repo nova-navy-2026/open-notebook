@@ -9,6 +9,18 @@ from starlette.responses import JSONResponse
 from open_notebook.utils.encryption import get_secret_from_env
 
 
+def get_current_user_id(request: Request) -> str:
+    """FastAPI dependency that extracts the authenticated user_id from request state.
+
+    The JWT middleware (or password-auth fallback) sets request.state.user_id
+    on every authenticated request. This dependency makes it easy to inject
+    the current user into route handlers.
+
+    Returns 'anonymous' when no auth middleware has run (e.g. tests).
+    """
+    return getattr(request.state, "user_id", "anonymous")
+
+
 class PasswordAuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware to check password authentication for all API requests.

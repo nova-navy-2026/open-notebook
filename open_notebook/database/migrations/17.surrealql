@@ -1,0 +1,41 @@
+-- Migration 17: File storage in DB + multi-user ownership
+-- Stores uploaded files as base64 blobs in SurrealDB instead of local filesystem.
+-- Adds owner field to all user-facing tables for multi-tenant isolation.
+
+-- =============================================
+-- FILE STORAGE FIELDS ON SOURCE
+-- =============================================
+-- file_data stores the raw file bytes as a base64-encoded string
+DEFINE FIELD IF NOT EXISTS file_data ON TABLE source TYPE option<string>;
+-- file_name stores the original filename (e.g. "paper.pdf")
+DEFINE FIELD IF NOT EXISTS file_name ON TABLE source TYPE option<string>;
+-- file_mime stores the MIME type (e.g. "application/pdf", "image/jpeg")
+DEFINE FIELD IF NOT EXISTS file_mime ON TABLE source TYPE option<string>;
+-- file_size stores the original file size in bytes (before base64 encoding)
+DEFINE FIELD IF NOT EXISTS file_size ON TABLE source TYPE option<int>;
+
+-- =============================================
+-- OWNER FIELD ON ALL USER-FACING TABLES
+-- =============================================
+-- owner stores the user identifier string for multi-tenant isolation.
+-- Using option<string> (not record<user>) so it accepts any auth-provided
+-- user_id (JWT sub, "password-auth", "anonymous", etc.) without requiring
+-- a matching record in the user table.
+DEFINE FIELD IF NOT EXISTS owner ON TABLE source TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS owner ON TABLE note TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS owner ON TABLE notebook TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS owner ON TABLE source_embedding TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS owner ON TABLE source_insight TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS owner ON TABLE chat_session TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS owner ON TABLE credential TYPE option<string>;
+
+-- =============================================
+-- INDEXES FOR OWNER-BASED QUERIES
+-- =============================================
+DEFINE INDEX IF NOT EXISTS idx_source_owner ON source FIELDS owner CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_note_owner ON note FIELDS owner CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_notebook_owner ON notebook FIELDS owner CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_source_embedding_owner ON source_embedding FIELDS owner CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_source_insight_owner ON source_insight FIELDS owner CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_chat_session_owner ON chat_session FIELDS owner CONCURRENTLY;
+DEFINE INDEX IF NOT EXISTS idx_credential_owner ON credential FIELDS owner CONCURRENTLY;

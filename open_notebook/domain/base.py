@@ -36,7 +36,7 @@ class ObjectModel(BaseModel):
     updated: Optional[datetime] = None
 
     @classmethod
-    async def get_all(cls: Type[T], order_by=None) -> List[T]:
+    async def get_all(cls: Type[T], order_by=None, owner: Optional[str] = None) -> List[T]:
         try:
             # If called from a specific subclass, use its table_name
             if cls.table_name:
@@ -47,12 +47,20 @@ class ObjectModel(BaseModel):
                 raise InvalidInputError(
                     "get_all() must be called from a specific model class"
                 )
-            if order_by:
-                query = f"SELECT * FROM {table_name} ORDER BY {order_by}"
-            else:
-                query = f"SELECT * FROM {table_name}"
 
-            result = await repo_query(query)
+            # Build query with optional owner filtering
+            params: Dict[str, Any] = {}
+            where_clause = ""
+            if owner:
+                where_clause = " WHERE owner = $owner"
+                params["owner"] = owner
+
+            if order_by:
+                query = f"SELECT * FROM {table_name}{where_clause} ORDER BY {order_by}"
+            else:
+                query = f"SELECT * FROM {table_name}{where_clause}"
+
+            result = await repo_query(query, params if params else None)
             objects = []
             for obj in result:
                 try:

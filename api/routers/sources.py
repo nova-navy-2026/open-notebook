@@ -1,7 +1,8 @@
 import asyncio
+import mimetypes
 import os
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import (
     APIRouter,
@@ -29,7 +30,8 @@ from api.models import (
     SourceUpdate,
 )
 from commands.source_commands import SourceProcessingInput
-from open_notebook.config import UPLOADS_FOLDER
+from api.auth import get_current_user_id
+from open_notebook.config import MAX_UPLOAD_SIZE_MB, UPLOADS_FOLDER
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Notebook, Source
 from open_notebook.domain.transformation import Transformation
@@ -39,7 +41,8 @@ router = APIRouter()
 
 
 def generate_unique_filename(original_filename: str, upload_folder: str) -> str:
-    """Generate unique filename like Streamlit app (append counter if file exists)."""
+    """Generate unique filename like Streamlit app (append counter if file exists).
+    Legacy function — kept for backward compatibility with local file storage."""
     file_path = Path(upload_folder)
     file_path.mkdir(parents=True, exist_ok=True)
 
@@ -61,8 +64,44 @@ def generate_unique_filename(original_filename: str, upload_folder: str) -> str:
         counter += 1
 
 
+async def read_upload_file(upload_file: UploadFile) -> Tuple[bytes, str, str]:
+    """Read uploaded file and return (bytes, filename, mime_type).
+
+    Validates file size against MAX_UPLOAD_SIZE_MB.
+    Files are stored in SurrealDB, not on local disk.
+    """
+    if not upload_file.filename:
+        raise ValueError("No filename provided")
+
+    file_bytes = await upload_file.read()
+    file_size = len(file_bytes)
+
+    # Validate file size
+    if MAX_UPLOAD_SIZE_MB > 0 and file_size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise ValueError(
+            f"File size ({file_size / 1024 / 1024:.1f} MB) exceeds "
+            f"maximum allowed size ({MAX_UPLOAD_SIZE_MB} MB)"
+        )
+
+    # Determine MIME type
+    mime_type = upload_file.content_type or "application/octet-stream"
+    if mime_type == "application/octet-stream":
+        # Try to guess from filename
+        guessed, _ = mimetypes.guess_type(upload_file.filename)
+        if guessed:
+            mime_type = guessed
+
+    logger.info(
+        f"Read uploaded file: {upload_file.filename} "
+        f"({file_size / 1024:.1f} KB, {mime_type})"
+    )
+    return file_bytes, upload_file.filename, mime_type
+
+
 async def save_uploaded_file(upload_file: UploadFile) -> str:
-    """Save uploaded file to uploads folder and return file path."""
+    """Legacy: Save uploaded file to uploads folder and return file path.
+    Kept for backward compatibility during migration. New uploads use
+    read_upload_file() + source.store_file() to store in SurrealDB."""
     if not upload_file.filename:
         raise ValueError("No filename provided")
 
@@ -160,6 +199,7 @@ async def get_sources(
         "updated", description="Field to sort by (created or updated)"
     ),
     sort_order: str = Query("desc", description="Sort order (asc or desc)"),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Get sources with pagination and sorting support."""
     try:
@@ -189,6 +229,7 @@ async def get_sources(
                 (SELECT VALUE count() FROM source_insight WHERE source = $parent.id GROUP ALL)[0].count OR 0 AS insights_count,
                 (SELECT VALUE id FROM source_embedding WHERE source = $parent.id LIMIT 1) != [] AS embedded
                 FROM (select value in from reference where out=$notebook_id)
+                WHERE owner = $owner OR owner IS NONE
                 {order_clause}
                 LIMIT $limit START $offset
                 FETCH command
@@ -199,6 +240,7 @@ async def get_sources(
                     "notebook_id": ensure_record_id(notebook_id),
                     "limit": limit,
                     "offset": offset,
+                    "owner": user_id,
                 },
             )
         else:
@@ -208,11 +250,14 @@ async def get_sources(
                 (SELECT VALUE count() FROM source_insight WHERE source = $parent.id GROUP ALL)[0].count OR 0 AS insights_count,
                 (SELECT VALUE id FROM source_embedding WHERE source = $parent.id LIMIT 1) != [] AS embedded
                 FROM source
+                WHERE owner = $owner OR owner IS NONE
                 {order_clause}
                 LIMIT $limit START $offset
                 FETCH command
             """
-            result = await repo_query(query, {"limit": limit, "offset": offset})
+            result = await repo_query(
+                query, {"limit": limit, "offset": offset, "owner": user_id}
+            )
 
         # Convert result to response model
         # Command data is already fetched via FETCH command clause
@@ -282,12 +327,17 @@ async def create_source(
     form_data: tuple[SourceCreate, Optional[UploadFile]] = Depends(
         parse_source_form_data
     ),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Create a new source with support for both JSON and multipart form data."""
     source_data, upload_file = form_data
 
-    # Initialize file_path before try block so exception handlers can reference it
-    file_path = None
+    # File data for DB storage (replaces local disk)
+    upload_bytes: Optional[bytes] = None
+    upload_filename: Optional[str] = None
+    upload_mime: Optional[str] = None
+    # Legacy file_path kept for content_core processing (needs a temp file on disk)
+    temp_file_path: Optional[str] = None
 
     try:
         # Verify all specified notebooks exist (backward compatibility support)
@@ -301,7 +351,17 @@ async def create_source(
         # Handle file upload if provided
         if upload_file and source_data.type == "upload":
             try:
-                file_path = await save_uploaded_file(upload_file)
+                upload_bytes, upload_filename, upload_mime = await read_upload_file(
+                    upload_file
+                )
+                # content_core still needs a file on disk to process, so write a temp copy
+                temp_file_path = generate_unique_filename(
+                    upload_filename, UPLOADS_FOLDER
+                )
+                with open(temp_file_path, "wb") as f:
+                    f.write(upload_bytes)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
             except Exception as e:
                 logger.error(f"File upload failed: {e}")
                 raise HTTPException(
@@ -318,15 +378,16 @@ async def create_source(
                 )
             content_state["url"] = source_data.url
         elif source_data.type == "upload":
-            # Use uploaded file path or provided file_path (backward compatibility)
-            final_file_path = file_path or source_data.file_path
+            # Use temp file path for content_core processing
+            final_file_path = temp_file_path or source_data.file_path
             if not final_file_path:
                 raise HTTPException(
                     status_code=400,
                     detail="File upload or file_path is required for upload type",
                 )
             content_state["file_path"] = final_file_path
-            content_state["delete_source"] = source_data.delete_source
+            # Always delete temp file after processing since the real file is in the DB
+            content_state["delete_source"] = True
         elif source_data.type == "text":
             if not source_data.content:
                 raise HTTPException(
@@ -357,7 +418,13 @@ async def create_source(
             source = Source(
                 title=source_data.title or "Processing...",
                 topics=[],
+                owner=user_id,
             )
+
+            # Store file in DB if uploaded
+            if upload_bytes and upload_filename and upload_mime:
+                source.store_file(upload_bytes, upload_filename, upload_mime)
+
             await source.save()
 
             # Add source to notebooks immediately so it appears in the UI
@@ -398,6 +465,7 @@ async def create_source(
                     topics=source.topics or [],
                     asset=None,  # Will be populated after processing
                     full_text=None,  # Will be populated after processing
+                    caption=source.caption,
                     embedded=False,  # Will be updated after processing
                     embedded_chunks=0,
                     created=str(source.created),
@@ -414,12 +482,6 @@ async def create_source(
                     await source.delete()
                 except Exception:
                     pass
-                # Clean up uploaded file if we created it
-                if file_path and upload_file:
-                    try:
-                        os.unlink(file_path)
-                    except Exception:
-                        pass
                 raise HTTPException(
                     status_code=500, detail=f"Failed to queue processing: {str(e)}"
                 )
@@ -436,7 +498,13 @@ async def create_source(
                 source = Source(
                     title=source_data.title or "Processing...",
                     topics=[],
+                    owner=user_id,
                 )
+
+                # Store file in DB if uploaded
+                if upload_bytes and upload_filename and upload_mime:
+                    source.store_file(upload_bytes, upload_filename, upload_mime)
+
                 await source.save()
 
                 # Add source to notebooks immediately so it appears in the UI
@@ -471,12 +539,6 @@ async def create_source(
                         await source.delete()
                     except Exception:
                         pass
-                    # Clean up uploaded file if we created it
-                    if file_path and upload_file:
-                        try:
-                            os.unlink(file_path)
-                        except Exception:
-                            pass
                     raise HTTPException(
                         status_code=500,
                         detail=f"Processing failed: {result.error_message}",
@@ -507,6 +569,7 @@ async def create_source(
                     if processed_source.asset
                     else None,
                     full_text=processed_source.full_text,
+                    caption=processed_source.caption,
                     embedded=embedded_chunks > 0,
                     embedded_chunks=embedded_chunks,
                     created=str(processed_source.created),
@@ -516,54 +579,55 @@ async def create_source(
 
             except Exception as e:
                 logger.error(f"Sync processing failed: {e}")
-                # Clean up uploaded file if we created it
-                if file_path and upload_file:
-                    try:
-                        os.unlink(file_path)
-                    except Exception:
-                        pass
                 raise
 
     except HTTPException:
-        # Clean up uploaded file on HTTP exceptions if we created it
-        if file_path and upload_file:
-            try:
-                os.unlink(file_path)
-            except Exception:
-                pass
         raise
     except InvalidInputError as e:
-        # Clean up uploaded file on validation errors if we created it
-        if file_path and upload_file:
-            try:
-                os.unlink(file_path)
-            except Exception:
-                pass
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error creating source: {str(e)}")
-        # Clean up uploaded file on unexpected errors if we created it
-        if file_path and upload_file:
+        raise HTTPException(status_code=500, detail=f"Error creating source: {str(e)}")
+    finally:
+        # Always clean up temp file (the real file is in SurrealDB)
+        if temp_file_path and os.path.exists(temp_file_path):
             try:
-                os.unlink(file_path)
+                os.unlink(temp_file_path)
+                logger.debug(f"Cleaned up temp file: {temp_file_path}")
             except Exception:
                 pass
-        raise HTTPException(status_code=500, detail=f"Error creating source: {str(e)}")
 
 
 @router.post("/sources/json", response_model=SourceResponse)
-async def create_source_json(source_data: SourceCreate):
+async def create_source_json(
+    source_data: SourceCreate,
+    user_id: str = Depends(get_current_user_id),
+):
     """Create a new source using JSON payload (legacy endpoint for backward compatibility)."""
     # Convert to form data format and call main endpoint
     form_data = (source_data, None)
-    return await create_source(form_data)
+    return await create_source(form_data, user_id)
 
 
-async def _resolve_source_file(source_id: str) -> tuple[str, str]:
+async def _resolve_source_file(
+    source_id: str,
+) -> tuple[Source, Optional[str], Optional[str]]:
+    """Resolve a source's downloadable file.
+
+    Returns (source, resolved_path_or_None, filename).
+    For DB-stored files, resolved_path is None — the caller should use source.get_file_bytes().
+    For legacy local files, resolved_path points to the validated local path.
+    """
     source = await Source.get(source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    # Prefer DB-stored file
+    if source.file_data:
+        filename = source.file_name or "download"
+        return source, None, filename
+
+    # Fallback: legacy local file
     file_path = source.asset.file_path if source.asset else None
     if not file_path:
         raise HTTPException(status_code=404, detail="Source has no file to download")
@@ -581,11 +645,20 @@ async def _resolve_source_file(source_id: str) -> tuple[str, str]:
         raise HTTPException(status_code=404, detail="File not found on server")
 
     filename = os.path.basename(resolved_path)
-    return resolved_path, filename
+    return source, resolved_path, filename
 
 
 def _is_source_file_available(source: Source) -> Optional[bool]:
-    if not source or not source.asset or not source.asset.file_path:
+    """Check whether a source has a downloadable file."""
+    if not source:
+        return None
+
+    # DB-stored file is always available
+    if source.file_data:
+        return True
+
+    # Legacy local file check
+    if not source.asset or not source.asset.file_path:
         return None
 
     file_path = source.asset.file_path
@@ -639,6 +712,7 @@ async def get_source(source_id: str):
             if source.asset
             else None,
             full_text=source.full_text,
+            caption=source.caption,
             embedded=embedded_chunks > 0,
             embedded_chunks=embedded_chunks,
             file_available=_is_source_file_available(source),
@@ -662,7 +736,7 @@ async def get_source(source_id: str):
 async def check_source_file(source_id: str):
     """Check if a source has a downloadable file."""
     try:
-        await _resolve_source_file(source_id)
+        _source, _path, _filename = await _resolve_source_file(source_id)
         return Response(status_code=200)
     except HTTPException:
         raise
@@ -675,11 +749,29 @@ async def check_source_file(source_id: str):
 async def download_source_file(source_id: str):
     """Download the original file associated with an uploaded source."""
     try:
-        resolved_path, filename = await _resolve_source_file(source_id)
-        return FileResponse(
-            path=resolved_path,
-            filename=filename,
-            media_type="application/octet-stream",
+        source, resolved_path, filename = await _resolve_source_file(source_id)
+
+        if resolved_path:
+            # Legacy: serve from local filesystem
+            return FileResponse(
+                path=resolved_path,
+                filename=filename,
+                media_type="application/octet-stream",
+            )
+
+        # New: serve from SurrealDB
+        file_bytes = source.get_file_bytes()
+        if file_bytes is None:
+            raise HTTPException(status_code=404, detail="File data not found")
+
+        media_type = source.file_mime or "application/octet-stream"
+        return Response(
+            content=file_bytes,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(file_bytes)),
+            },
         )
     except HTTPException:
         raise
@@ -778,6 +870,7 @@ async def update_source(source_id: str, source_update: SourceUpdate):
             if source.asset
             else None,
             full_text=source.full_text,
+            caption=source.caption,
             embedded=embedded_chunks > 0,
             embedded_chunks=embedded_chunks,
             created=str(source.created),
@@ -891,6 +984,7 @@ async def retry_source_processing(source_id: str):
                 if source.asset
                 else None,
                 full_text=source.full_text,
+                caption=source.caption,
                 embedded=embedded_chunks > 0,
                 embedded_chunks=embedded_chunks,
                 created=str(source.created),

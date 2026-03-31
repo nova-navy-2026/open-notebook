@@ -91,6 +91,7 @@ class DefaultModelsResponse(BaseModel):
     default_speech_to_text_model: Optional[str] = None
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
+    default_vision_model: Optional[str] = None
 
 
 class ProviderAvailabilityResponse(BaseModel):
@@ -336,6 +337,7 @@ class SourceResponse(BaseModel):
     topics: Optional[List[str]]
     asset: Optional[AssetModel]
     full_text: Optional[str]
+    caption: Optional[str] = None
     embedded: bool
     embedded_chunks: int
     file_available: Optional[bool] = None

@@ -759,6 +759,15 @@ export function SourceDetailContent({
                       </div>
                     </div>
                   )}
+
+                  {source.caption && (
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold">{t.sources.caption}</h3>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                        {source.caption}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Metadata */}

@@ -1,8 +1,9 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from api.auth import get_current_user_id
 from api.models import (
     NotebookCreate,
     NotebookDeletePreview,
@@ -21,6 +22,7 @@ router = APIRouter()
 async def get_notebooks(
     archived: Optional[bool] = Query(None, description="Filter by archived status"),
     order_by: str = Query("updated desc", description="Order by field and direction"),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
@@ -30,10 +32,11 @@ async def get_notebooks(
             count(<-reference.in) as source_count,
             count(<-artifact.in) as note_count
             FROM notebook
+            WHERE owner = $owner OR owner IS NONE
             ORDER BY {order_by}
         """
 
-        result = await repo_query(query)
+        result = await repo_query(query, {"owner": user_id})
 
         # Filter by archived status if specified
         if archived is not None:
@@ -60,12 +63,16 @@ async def get_notebooks(
 
 
 @router.post("/notebooks", response_model=NotebookResponse)
-async def create_notebook(notebook: NotebookCreate):
+async def create_notebook(
+    notebook: NotebookCreate,
+    user_id: str = Depends(get_current_user_id),
+):
     """Create a new notebook."""
     try:
         new_notebook = Notebook(
             name=notebook.name,
             description=notebook.description,
+            owner=user_id,
         )
         await new_notebook.save()
 

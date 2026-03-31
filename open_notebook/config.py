@@ -8,9 +8,13 @@ sqlite_folder = f"{DATA_FOLDER}/sqlite-db"
 os.makedirs(sqlite_folder, exist_ok=True)
 LANGGRAPH_CHECKPOINT_FILE = f"{sqlite_folder}/checkpoints.sqlite"
 
-# UPLOADS FOLDER
+# UPLOADS FOLDER (legacy — kept for backward compatibility during migration)
 UPLOADS_FOLDER = f"{DATA_FOLDER}/uploads"
 os.makedirs(UPLOADS_FOLDER, exist_ok=True)
+
+# MAX UPLOAD FILE SIZE (in MB) — files larger than this are rejected
+# Set to 0 to disable the limit
+MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
 
 # TIKTOKEN CACHE FOLDER
 # Reads TIKTOKEN_CACHE_DIR from the environment so Docker can redirect the cache
