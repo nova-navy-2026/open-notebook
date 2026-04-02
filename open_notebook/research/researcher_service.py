@@ -165,6 +165,12 @@ def _setup_amalia_env_llm_only():
         "STRATEGIC_LLM": os.environ.get(
             "AMALIA_STRATEGIC_LLM", "openai:carminho/AMALIA-9B-50-DPO"
         ),
+        # Amália's VLM endpoint does not serve an embeddings API.
+        # Use a local HuggingFace model so compression/similarity steps work.
+        "EMBEDDING": os.environ.get(
+            "AMALIA_EMBEDDING",
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2",
+        ),
     }
     for key, value in amalia_vars.items():
         os.environ[key] = value
@@ -189,6 +195,12 @@ def _setup_amalia_env():
         ),
         "RETRIEVER": os.environ.get("AMALIA_RETRIEVER", "custom"),
         "OPENSEARCH_INDEX": NAVY_OPENSEARCH_INDEX,
+        # Amália's VLM endpoint does not serve an embeddings API.
+        # Use a local HuggingFace model so compression/similarity steps work.
+        "EMBEDDING": os.environ.get(
+            "AMALIA_EMBEDDING",
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2",
+        ),
     }
     for key, value in amalia_vars.items():
         os.environ[key] = value
@@ -223,9 +235,14 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str) -> ResearchResult:
 
     saved_env: Dict[str, Optional[str]] = {}
     if request.use_amalia:
-        for key in ["OPENAI_API_KEY", "OPENAI_BASE_URL", "SMART_LLM", "FAST_LLM", "STRATEGIC_LLM"]:
+        for key in [
+            "OPENAI_API_KEY", "OPENAI_BASE_URL", "SMART_LLM", "FAST_LLM",
+            "STRATEGIC_LLM", "RETRIEVER", "OPENSEARCH_INDEX", "EMBEDDING",
+        ]:
             saved_env[key] = os.environ.get(key)
-        _setup_amalia_env_llm_only()
+        # Full env setup: LLM + RETRIEVER=custom + OPENSEARCH_INDEX so the
+        # custom (OpenSearch) retriever drives sub-query planning in plan_research().
+        _setup_amalia_env()
 
     try:
         logger.info(
@@ -233,12 +250,37 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str) -> ResearchResult:
             f"query='{request.query[:80]}...', amalia={request.use_amalia}"
         )
 
+        # ── Amália path: inject OpenSearch docs so nested researchers have content ──
+        lc_docs = []
+        if request.use_amalia:
+            lc_docs = await _prefetch_opensearch_docs(
+                query=request.query,
+                index=NAVY_OPENSEARCH_INDEX,
+                max_results=int(os.environ.get("AMALIA_PREFETCH_DOCS", "30")),
+            )
+            if lc_docs:
+                logger.info(
+                    f"Job {job_id}: Pre-fetched {len(lc_docs)} OpenSearch docs "
+                    f"for TTD-DR via langchain_documents source."
+                )
+            else:
+                logger.warning(
+                    f"Job {job_id}: OpenSearch returned no docs for TTD-DR; "
+                    f"nested researchers will fall back to web."
+                )
+
+        # report_source drives the nested GPTResearcher instances inside TTDDeepResearchFlow
+        ttd_report_source = (
+            "langchain_documents" if lc_docs else request.report_source.value
+        )
+
         flow = TTDDeepResearchFlow(
             query=request.query,
             report_type="ttd_dr",
-            report_source=request.report_source.value,
+            report_source=ttd_report_source,
             source_urls=request.source_urls if request.source_urls else None,
             tone=None,
+            documents=lc_docs if lc_docs else None,
         )
 
         report = await flow.run()
@@ -343,7 +385,7 @@ async def run_research(request: ResearchRequest) -> ResearchResult:
     if request.use_amalia:
         for key in [
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "SMART_LLM",
-            "FAST_LLM", "STRATEGIC_LLM", "OPENSEARCH_INDEX",
+            "FAST_LLM", "STRATEGIC_LLM", "OPENSEARCH_INDEX", "EMBEDDING",
         ]:
             saved_env[key] = os.environ.get(key)
         # Set only LLM env vars — retrieval is handled via pre-fetched docs below
