@@ -134,16 +134,9 @@ async def get_config(request: Request):
     # Get current version
     current_version = get_version()
 
-    # Check for updates (with caching and error handling)
-    # This MUST NOT break the endpoint - wrapped in try-except as extra safety
+    # Version check disabled — not associated with the original repository
     latest_version = None
     has_update = False
-
-    try:
-        latest_version, has_update = await get_latest_version_cached(current_version)
-    except Exception as e:
-        # Extra safety: ensure version check never breaks the config endpoint
-        logger.error(f"Unexpected error during version check: {e}")
 
     # Check database health
     db_health = await check_database_health()
