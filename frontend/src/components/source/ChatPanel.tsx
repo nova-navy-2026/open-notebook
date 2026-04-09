@@ -127,22 +127,22 @@ export function ChatPanel({
     <>
     <Card className="flex flex-col h-full flex-1 overflow-hidden">
       <CardHeader className="pb-3 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Bot className="h-5 w-5" />
-            {title || (contextType === 'source' ? t.chat.chatWith.replace('{name}', t.navigation.sources) : t.chat.chatWith.replace('{name}', t.common.notebook))}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <CardTitle className="flex items-center gap-2 truncate min-w-0">
+            <Bot className="h-5 w-5 flex-shrink-0" />
+            <span className="truncate">{title || (contextType === 'source' ? t.chat.chatWith.replace('{name}', t.navigation.sources) : t.chat.chatWith.replace('{name}', t.common.notebook))}</span>
           </CardTitle>
           {onSelectSession && onCreateSession && onDeleteSession && (
             <Dialog open={sessionManagerOpen} onOpenChange={setSessionManagerOpen}>
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-2"
+                className="gap-1 flex-shrink-0"
                 onClick={() => setSessionManagerOpen(true)}
                 disabled={loadingSessions}
               >
                 <Clock className="h-4 w-4" />
-                <span className="text-xs">{t.chat.sessions}</span>
+                <span className="hidden xl:inline text-xs">{t.chat.sessions}</span>
               </Button>
               <DialogContent className="sm:max-w-[420px] p-0 overflow-hidden">
                 <DialogTitle className="sr-only">{t.chat.sessionsTitle}</DialogTitle>

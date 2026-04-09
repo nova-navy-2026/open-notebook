@@ -17,7 +17,7 @@ export function AppShell({ children }: AppShellProps) {
   }, [])
 
   return (
-    <div className="flex h-screen overflow-hidden w-full">
+    <div className="flex h-dvh overflow-hidden w-full">
       <AppSidebar />
       <main className="flex-1 flex flex-col min-h-0 overflow-auto w-full scroll-smooth">
         <SetupBanner />

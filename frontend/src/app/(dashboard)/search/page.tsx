@@ -183,7 +183,7 @@ export default function SearchPage() {
   }, [searchParams]);
 
   return (
-    <div className="p-4 md:p-6">
+    <div className="flex flex-col h-full overflow-y-auto p-4 md:p-6">
       <h1 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">
         {t.searchPage.askAndSearch}
       </h1>

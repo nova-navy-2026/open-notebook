@@ -160,7 +160,7 @@ export default function NotebookPage() {
           <NotebookHeader notebook={notebook} />
         </div>
 
-        <div className="flex-1 p-6 pt-6 overflow-x-auto flex flex-col">
+        <div className="flex-1 p-6 pt-6 overflow-hidden flex flex-col">
           {/* Mobile: Tabbed interface - only render on mobile to avoid double-mounting */}
           {!isDesktop && (
             <>
@@ -226,13 +226,19 @@ export default function NotebookPage() {
 
           {/* Desktop: Collapsible columns layout */}
           <div className={cn(
-            'hidden lg:flex h-full min-h-0 gap-6 transition-all duration-150',
-            'flex-row'
+            'hidden lg:grid h-full min-h-0 gap-4 transition-all duration-150',
+            sourcesCollapsed && notesCollapsed
+              ? 'grid-cols-[auto_auto_1fr]'
+              : sourcesCollapsed
+                ? 'grid-cols-[auto_1fr_1fr]'
+                : notesCollapsed
+                  ? 'grid-cols-[1fr_auto_1fr]'
+                  : 'grid-cols-3'
           )}>
             {/* Sources Column */}
             <div className={cn(
-              'transition-all duration-150',
-              sourcesCollapsed ? 'w-12 flex-shrink-0' : 'flex-none basis-1/3'
+              'transition-all duration-150 min-w-0 overflow-hidden',
+              sourcesCollapsed && 'w-12'
             )}>
               <SourcesColumn
                 sources={sources}
@@ -253,8 +259,8 @@ export default function NotebookPage() {
 
             {/* Notes Column */}
             <div className={cn(
-              'transition-all duration-150',
-              notesCollapsed ? 'w-12 flex-shrink-0' : 'flex-none basis-1/3'
+              'transition-all duration-150 min-w-0 overflow-hidden',
+              notesCollapsed && 'w-12'
             )}>
               <NotesColumn
                 notes={notes}
@@ -266,7 +272,7 @@ export default function NotebookPage() {
             </div>
 
             {/* Chat Column - always expanded, takes remaining space */}
-            <div className="transition-all duration-150 flex-1 min-w-0 lg:pr-6 lg:-mr-6">
+            <div className="transition-all duration-150 min-w-0 overflow-hidden">
               <ChatColumn
                 notebookId={notebookId}
                 contextSelections={contextSelections}

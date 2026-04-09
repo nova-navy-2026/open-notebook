@@ -37,7 +37,7 @@ export default function DashboardLayout({
   // Show loading spinner during initial auth check or while loading
   if (isLoading || !hasCheckedAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <LoadingSpinner />
       </div>
     )

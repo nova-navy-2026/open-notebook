@@ -155,11 +155,11 @@
   }
 
   html {
-    @apply antialiased;
+    @apply antialiased h-full;
   }
 
   body {
-    @apply bg-background text-foreground transition-colors;
+    @apply bg-background text-foreground transition-colors h-full;
   }
 
   /* Ensure proper theme inheritance for popovers and dropdowns */

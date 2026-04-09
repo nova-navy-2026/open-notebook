@@ -10,7 +10,7 @@ export default function AdvancedPage() {
       <div className="w-full h-full flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-6 lg:p-8">
-            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="max-w-6xl mx-auto space-y-6">
               <div>
                 <h1 className="text-3xl sm:text-4xl font-bold">{t.advanced.title}</h1>
                 <p className="text-muted-foreground mt-2">

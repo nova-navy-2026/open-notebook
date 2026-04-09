@@ -1161,19 +1161,19 @@ function DefaultModelSelectors({
             const isValid = currentValue && available.some(m => m.id === currentValue)
 
             return (
-              <div key={config.key} className="space-y-1">
+              <div key={config.key} className="space-y-1 min-w-0">
                 <Label htmlFor={config.id} className="text-xs">
                   {config.label}
                   {config.required && <span className="text-destructive ml-0.5">*</span>}
                 </Label>
-                <div className="flex gap-1">
+                <div className="flex gap-1 min-w-0">
                   <Select
                     value={currentValue || ""}
                     onValueChange={(v) => handleChange(config.key, v)}
                   >
                     <SelectTrigger
                       id={config.id}
-                      className={`h-8 text-xs ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
+                      className={`h-8 text-xs w-full min-w-0 ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
                     >
                       <SelectValue placeholder={
                         config.required && !isValid && available.length > 0
@@ -1213,19 +1213,19 @@ function DefaultModelSelectors({
                 const isValid = currentValue && available.some(m => m.id === currentValue)
 
                 return (
-                  <div key={config.key} className="space-y-1">
+                  <div key={config.key} className="space-y-1 min-w-0">
                     <Label htmlFor={config.id} className="text-xs">
                       {config.label}
                       {config.required && <span className="text-destructive ml-0.5">*</span>}
                     </Label>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 min-w-0">
                       <Select
                         value={currentValue || ""}
                         onValueChange={(v) => handleChange(config.key, v)}
                       >
                         <SelectTrigger
                           id={config.id}
-                          className={`h-8 text-xs ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
+                          className={`h-8 text-xs w-full min-w-0 ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
                         >
                           <SelectValue placeholder={
                             config.required && !isValid && available.length > 0

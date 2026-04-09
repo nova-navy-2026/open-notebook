@@ -163,15 +163,15 @@ export function SourcesColumn({
       >
         <Card className="h-full flex flex-col flex-1 overflow-hidden">
           <CardHeader className="pb-3 flex-shrink-0">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-lg">{t.navigation.sources}</CardTitle>
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <CardTitle className="text-lg truncate">{t.navigation.sources}</CardTitle>
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
                   <DropdownMenuTrigger asChild>
                     <Button size="sm">
-                      <Plus className="h-4 w-4 mr-2" />
-                      {t.sources.addSource}
-                      <ChevronDown className="h-4 w-4 ml-2" />
+                      <Plus className="h-4 w-4" />
+                      <span className="hidden xl:inline ml-1">{t.sources.addSource}</span>
+                      <ChevronDown className="h-4 w-4 ml-1" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">

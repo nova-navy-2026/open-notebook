@@ -84,9 +84,9 @@ export function NotesColumn({
       >
         <Card className="h-full flex flex-col flex-1 overflow-hidden">
           <CardHeader className="pb-3 flex-shrink-0">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-lg">{t.common.notes}</CardTitle>
-              <div className="flex items-center gap-1">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <CardTitle className="text-lg truncate">{t.common.notes}</CardTitle>
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <Button
                   size="sm"
                   variant="outline"
