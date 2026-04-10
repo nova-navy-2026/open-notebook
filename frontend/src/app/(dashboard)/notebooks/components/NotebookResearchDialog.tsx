@@ -331,10 +331,9 @@ export function NotebookResearchDialog({
                 </Select>
                 {reportTypes && (
                   <p className="text-xs text-muted-foreground">
-                    {
-                      reportTypes.find((rt) => rt.value === reportType)
-                        ?.description
-                    }
+                    {reportTypes.find((rt) => rt.value === reportType)?.description}
+                    {" - "}
+                    {reportTypes.find((rt) => rt.value === reportType)?.speed ?? ""}
                   </p>
                 )}
               </div>

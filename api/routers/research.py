@@ -82,6 +82,7 @@ class ReportTypeInfo(BaseModel):
     value: str
     label: str
     description: str
+    speed: str = ""
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────

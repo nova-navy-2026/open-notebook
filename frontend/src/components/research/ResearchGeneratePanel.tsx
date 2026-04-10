@@ -134,9 +134,8 @@ export function ResearchGeneratePanel({
             <p className="text-xs text-muted-foreground">
               {reportTypes?.find((rt) => rt.value === reportType)
                 ?.description ?? ""}
-              {reportTypes?.find((rt) => rt.value === reportType)?.speed
-                ? ` - ${reportTypes.find((rt) => rt.value === reportType)!.speed}`
-                : ""}
+              {" - "}
+              {reportTypes?.find((rt) => rt.value === reportType)?.speed ?? ""}
             </p>
           </CardContent>
         </Card>
