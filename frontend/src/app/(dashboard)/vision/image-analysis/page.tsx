@@ -4,12 +4,9 @@ import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { getApiUrl } from "@/lib/config";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Image as ImageIcon, Upload, Loader2, X } from "lucide-react";
 
@@ -65,27 +62,28 @@ export default function ImageAnalysisPage() {
     setResultImage(null);
 
     try {
-      // TODO: Replace with actual API call
       const formData = new FormData();
       formData.append("image", image);
       formData.append("query", query);
 
-      // const response = await fetch("/api/vision/image-analysis", {
-      //   method: "POST",
-      //   body: formData,
-      // });
-      // const data = await response.json();
-      // setResultText(data.text);
-      // setResultImage(data.image_url);
+      const apiUrl = await getApiUrl();
+      const token = useAuthStore.getState().token;
+      const response = await fetch(`${apiUrl}/api/vision/image-analysis`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
 
-      // Simulated response for frontend demo
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      setResultText(
-        'This is a placeholder response. Connect your backend API to get real analysis results for the query: "' +
-          query +
-          '"'
-      );
-      setResultImage(imagePreview);
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.detail || `Server error (${response.status})`);
+      }
+
+      const data = await response.json();
+      setResultText(data.text || null);
+      setResultImage(data.image_base64 || imagePreview);
     } catch {
       setError("Failed to analyze image. Please try again.");
     } finally {
@@ -186,10 +184,7 @@ export default function ImageAnalysisPage() {
 
         {/* Actions */}
         <div className="flex gap-3">
-          <Button
-            type="submit"
-            disabled={isLoading || !image || !query.trim()}
-          >
+          <Button type="submit" disabled={isLoading || !image || !query.trim()}>
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

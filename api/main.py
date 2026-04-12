@@ -49,6 +49,7 @@ from api.routers import (
     permissions,
     podcasts,
     research,
+    vision,
     search,
     settings,
     source_chat,
@@ -357,6 +358,7 @@ app.include_router(
 )
 app.include_router(navy_docs.router, prefix="/api", tags=["navy-docs"])
 app.include_router(global_chat.router, prefix="/api", tags=["global-chat"])
+app.include_router(vision.router, prefix="/api", tags=["vision"])
 
 
 @app.get("/")
