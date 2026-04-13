@@ -86,7 +86,7 @@ async def run_vision_analysis(
     Returns:
         {"text": "...", "image_base64": "data:image/png;base64,..." | null}
     """
-    from mcp_researcher import get_vision_config, run_mcp_research
+    from mcp_researcher import get_vision_config, run_mcp_vision
 
     vision_config = get_vision_config()
 
@@ -101,7 +101,7 @@ async def run_vision_analysis(
     try:
         logger.info(f"Starting vision research via mcp_researcher: '{research_query[:100]}'")
 
-        report = await run_mcp_research(
+        report = await run_mcp_vision(
             query=research_query,
             mcp_configs=[vision_config],
         )

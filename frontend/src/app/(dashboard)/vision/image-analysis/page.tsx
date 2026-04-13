@@ -8,7 +8,9 @@ import { getApiUrl } from "@/lib/config";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Image as ImageIcon, Upload, Loader2, X } from "lucide-react";
+import { Image as ImageIcon, Upload, Loader2, X, Download } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function ImageAnalysisPage() {
   const [image, setImage] = useState<File | null>(null);
@@ -211,10 +213,23 @@ export default function ImageAnalysisPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {resultImage && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Output Image
                   </CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const link = document.createElement("a");
+                      link.href = resultImage;
+                      link.download = `analysis_${Date.now()}.png`;
+                      link.click();
+                    }}
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download
+                  </Button>
                 </CardHeader>
                 <CardContent>
                   <img
@@ -232,10 +247,10 @@ export default function ImageAnalysisPage() {
                     Analysis
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-foreground leading-relaxed whitespace-pre-wrap">
+                <CardContent className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {resultText}
-                  </p>
+                  </ReactMarkdown>
                 </CardContent>
               </Card>
             )}
