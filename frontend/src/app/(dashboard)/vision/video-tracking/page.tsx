@@ -4,9 +4,13 @@ import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Video, Upload, Loader2, X, Download } from "lucide-react";
+import { getApiUrl } from "@/lib/config";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function VideoTrackingPage() {
   const [video, setVideo] = useState<File | null>(null);
@@ -14,6 +18,7 @@ export default function VideoTrackingPage() {
   const [target, setTarget] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [resultVideo, setResultVideo] = useState<string | null>(null);
+  const [resultText, setResultText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -55,24 +60,31 @@ export default function VideoTrackingPage() {
     setIsLoading(true);
     setError(null);
     setResultVideo(null);
+    setResultText(null);
 
     try {
-      // TODO: Replace with actual API call
       const formData = new FormData();
       formData.append("video", video);
       formData.append("target", target);
 
-      // const response = await fetch("/api/vision/video-tracking", {
-      //   method: "POST",
-      //   body: formData,
-      // });
-      // const blob = await response.blob();
-      // const url = URL.createObjectURL(blob);
-      // setResultVideo(url);
+      const apiUrl = await getApiUrl();
+      const token = useAuthStore.getState().token;
+      const response = await fetch(`${apiUrl}/api/vision/video-tracking`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
 
-      // Simulated response for frontend demo
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      setResultVideo(videoPreview);
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.detail || `Server error (${response.status})`);
+      }
+
+      const data = await response.json();
+      setResultText(data.text || null);
+      setResultVideo(data.video_base64 || null);
     } catch {
       setError("Failed to process video. Please try again.");
     } finally {
@@ -88,6 +100,7 @@ export default function VideoTrackingPage() {
     setVideoPreview(null);
     setTarget("");
     setResultVideo(null);
+    setResultText(null);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -224,26 +237,49 @@ export default function VideoTrackingPage() {
       )}
 
       {/* Result */}
-      {resultVideo && !isLoading && (
+      {(resultVideo || resultText) && !isLoading && (
         <div className="space-y-4 max-w-4xl">
           <h2 className="text-xl font-semibold tracking-tight">Result</h2>
-          <Card>
-            <CardContent className="pt-6">
-              <video
-                src={resultVideo}
-                controls
-                className="w-full rounded-lg"
-                autoPlay
-                muted
-              />
-            </CardContent>
-          </Card>
-          <Button variant="outline" asChild>
-            <a href={resultVideo} download="tracked_video.mp4">
-              <Download className="h-4 w-4 mr-2" />
-              Download Video
-            </a>
-          </Button>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {resultVideo && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Tracked Video
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href={resultVideo} download="tracked_video.mp4">
+                      <Download className="h-4 w-4 mr-1" />
+                      Download
+                    </a>
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  <video
+                    src={resultVideo}
+                    controls
+                    className="w-full rounded-lg"
+                    autoPlay
+                    muted
+                  />
+                </CardContent>
+              </Card>
+            )}
+            {resultText && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Tracking Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {resultText}
+                  </ReactMarkdown>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       )}
     </div>
