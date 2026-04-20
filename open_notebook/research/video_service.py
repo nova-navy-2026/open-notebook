@@ -5,6 +5,7 @@ Extracts frames, sends sampled frames to SAM3 /segment endpoint,
 interpolates bounding boxes for skipped frames, and reassembles an annotated video.
 """
 
+import asyncio
 import io
 import os
 import random
@@ -23,6 +24,7 @@ _OUTPUT_DIR = os.path.join("data", "vision_uploads", "video_output")
 os.makedirs(_OUTPUT_DIR, exist_ok=True)
 
 FRAME_SAMPLE_RATE = int(os.environ.get("VIDEO_FRAME_SAMPLE_RATE", "5"))
+FRAME_CONCURRENCY = int(os.environ.get("VIDEO_FRAME_CONCURRENCY", "4"))
 
 
 def _get_sam3_url() -> str:
@@ -119,9 +121,16 @@ async def run_video_tracking(
     detections_total = 0
     color = (random.randint(50, 255), random.randint(50, 255), random.randint(50, 255))
 
+    sem = asyncio.Semaphore(FRAME_CONCURRENCY)
+
+    async def _process_frame(client, idx):
+        async with sem:
+            return idx, await _segment_frame(client, frames[idx], target)
+
     async with httpx.AsyncClient(timeout=120.0) as client:
-        for idx in sampled_indices:
-            n_masks, boxes = await _segment_frame(client, frames[idx], target)
+        tasks = [_process_frame(client, idx) for idx in sampled_indices]
+        results = await asyncio.gather(*tasks)
+        for idx, (n_masks, boxes) in results:
             sampled_results[idx] = boxes
             detections_total += n_masks
             if idx % 20 == 0:
