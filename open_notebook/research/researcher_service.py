@@ -286,6 +286,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
             "report_source": "langchain_documents" if os_docs else request.report_source.value,
             "source_urls": request.source_urls,
             "documents": os_docs,
+            "opensearch_index": NAVY_OPENSEARCH_INDEX,
         }
         resp = await _http_client.post(
             f"{NOVA_RESEARCHER_URL}/research/ttd-dr",
