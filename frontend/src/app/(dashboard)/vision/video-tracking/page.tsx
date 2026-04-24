@@ -180,13 +180,20 @@ export default function VideoTrackingPage() {
 
         {/* Target Input */}
         <div className="space-y-2">
-          <Label htmlFor="target">Element to Track</Label>
+          <Label htmlFor="target">
+            Element to Track {engine === "sam3" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground text-xs">(optional)</span>}
+          </Label>
           <Input
             id="target"
             type="text"
             value={target}
             onChange={(e) => setTarget(e.target.value)}
-            placeholder="e.g. red car, person in blue shirt, tennis ball..."
+            placeholder={
+              engine === "sam3"
+                ? "e.g. red car, person in blue shirt, tennis ball..."
+                : "Leave empty to track everything, or type a COCO class (person, car, boat...) to filter"
+            }
+            required={engine === "sam3"}
           />
         </div>
 

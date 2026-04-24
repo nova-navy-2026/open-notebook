@@ -169,13 +169,20 @@ export default function ImageAnalysisPage() {
 
         {/* Query Input */}
         <div className="space-y-2">
-          <Label htmlFor="query">Query</Label>
+          <Label htmlFor="query">
+            Query {engine === "sam3" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground text-xs">(optional)</span>}
+          </Label>
           <Input
             id="query"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g. What objects are in this image? Describe the scene..."
+            placeholder={
+              engine === "sam3"
+                ? "e.g. red boat, person wearing a helmet, license plate..."
+                : "Leave empty to detect everything, or type a COCO class (person, car, boat...) to filter"
+            }
+            required={engine === "sam3"}
           />
         </div>
 
