@@ -136,13 +136,30 @@ def _save_jobs() -> None:
 
 
 def _load_jobs() -> None:
-    """Load persisted research jobs from disk on startup."""
+    """Load persisted research jobs from disk on startup.
+
+    Any job left in ``pending`` or ``running`` state is considered orphaned
+    (the API process died mid-execution) and is marked as ``failed`` so the
+    UI does not show a forever-spinning progress bar.
+    """
     if not os.path.exists(_jobs_file):
         return
     try:
         with open(_jobs_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         _jobs.update({jid: ResearchJob.model_validate(job) for jid, job in data.items()})
+
+        orphaned = 0
+        for job in _jobs.values():
+            if job.status in ("pending", "running"):
+                job.status = "failed"
+                job.error = "Interrupted: server restarted while job was running"
+                job.progress = "Falhou (servidor reiniciado)"
+                orphaned += 1
+        if orphaned:
+            _save_jobs()
+            logger.warning(f"Marked {orphaned} orphaned research job(s) as failed on startup")
+
         logger.info(f"Loaded {len(_jobs)} research jobs from disk")
     except Exception as exc:
         logger.warning(f"Could not load research jobs from disk: {exc}")
@@ -263,53 +280,81 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
         )
 
         if progress_callback:
-            await progress_callback(5, "A obter documentos do OpenSearch...")
+            await progress_callback(5, "A iniciar TTD-DR...")
 
-        # Pre-fetch OpenSearch docs
-        os_docs = await _prefetch_opensearch_docs(
-            query=request.query,
-            index=NAVY_OPENSEARCH_INDEX,
-            max_results=int(os.environ.get("AMALIA_PREFETCH_DOCS", "30")),
-        )
-
-        if os_docs:
-            logger.info(f"Job {job_id}: Pre-fetched {len(os_docs)} OpenSearch docs for TTD-DR.")
-        else:
-            logger.warning(f"Job {job_id}: OpenSearch returned no docs for TTD-DR.")
+        # NOTE: We deliberately do NOT pre-fetch from OpenSearch here.
+        # The TTD-DR flow (NOVA-Researcher) runs its own per-sub-query
+        # retrieval against the same index via CustomRetriever, so a
+        # client-side prefetch would be a wasted round-trip whose results
+        # are never consumed by the LLM. The full source set is returned
+        # in `source_urls` on the `done` event.
 
         if progress_callback:
             await progress_callback(15, "A executar TTD-DR...")
 
-        # Call NOVA-Researcher TTD-DR endpoint
+        # Call NOVA-Researcher TTD-DR endpoint via SSE so we can forward
+        # real-time progress events (pct + message) to the UI.
         payload = {
             "query": request.query,
-            "report_source": "langchain_documents" if os_docs else request.report_source.value,
             "source_urls": request.source_urls,
-            "documents": os_docs,
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
         }
-        resp = await _http_client.post(
+        params: Dict[str, Any] = {"stream": "true"}
+        if provider:
+            params["provider"] = provider
+
+        report = ""
+        source_urls: List[str] = []
+        stream_error: Optional[str] = None
+
+        async with _http_client.stream(
+            "POST",
             f"{NOVA_RESEARCHER_URL}/research/ttd-dr",
             json=payload,
-            params={"provider": provider} if provider else {},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+            params=params,
+            headers={"Accept": "text/event-stream"},
+        ) as resp:
+            resp.raise_for_status()
+            async for raw_line in resp.aiter_lines():
+                if not raw_line or not raw_line.startswith("data:"):
+                    continue  # skip heartbeats / blank separators
+                try:
+                    event = json.loads(raw_line[5:].strip())
+                except json.JSONDecodeError:
+                    continue
 
-        report = _strip_references(data.get("report", ""))
-        source_urls = data.get("source_urls", [])
+                etype = event.get("type")
+                if etype == "progress":
+                    if progress_callback:
+                        # Server pct is 0-100 over the TTD-DR phase. Map it
+                        # into the 15-95 band so the prefetch (5) and
+                        # finalize (95) bookends stay monotonic.
+                        server_pct = int(event.get("pct", 0))
+                        mapped = 15 + int(server_pct * 0.80)
+                        await progress_callback(
+                            min(mapped, 95),
+                            str(event.get("message", "")),
+                        )
+                elif etype == "done":
+                    report = _strip_references(event.get("report", ""))
+                    source_urls = event.get("source_urls", []) or []
+                elif etype == "error":
+                    stream_error = str(event.get("detail", "Unknown TTD-DR error"))
+
+        if stream_error:
+            raise RuntimeError(stream_error)
 
         if progress_callback:
             await progress_callback(95, "A finalizar...")
 
-        # Build retrieved documents list for the UI
+        # Build retrieved documents list for the UI from the page-level
+        # sources that TTD-DR collected during its iterative retrieval.
+        # Snippets are not available here — the UI shows source filename
+        # + page reference, which is what users care about.
         retrieved_docs = [
-            RetrievedDocument(
-                title=d.get("metadata", {}).get("title", ""),
-                source=d.get("metadata", {}).get("source", ""),
-                snippet=(d.get("page_content", ""))[:300],
-            )
-            for d in os_docs
+            RetrievedDocument(title=s, source=s, snippet="")
+            for s in source_urls
+            if s
         ]
 
         result = ResearchResult(
@@ -427,7 +472,9 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
                 if d.get("metadata", {}).get("source")
             ]
 
-        # Build retrieved documents list for the UI
+        # Build retrieved documents list for the UI.
+        # Merge in any extra source urls the server returned that aren't
+        # already represented by the prefetched OpenSearch docs.
         retrieved_docs = [
             RetrievedDocument(
                 title=d.get("metadata", {}).get("title", ""),
@@ -436,6 +483,13 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
             )
             for d in os_docs
         ]
+        existing_sources = {rd.source for rd in retrieved_docs if rd.source}
+        for s in source_urls:
+            if s and s not in existing_sources:
+                retrieved_docs.append(
+                    RetrievedDocument(title=s, source=s, snippet="")
+                )
+                existing_sources.add(s)
 
         result = ResearchResult(
             id=job_id,
