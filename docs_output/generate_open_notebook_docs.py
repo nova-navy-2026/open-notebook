@@ -202,6 +202,7 @@ table(
         ["auth.py", "POST /auth/password", "Password-based authentication."],
         ["languages.py", "GET /languages", "Available podcast languages."],
         ["commands.py", "GET /commands/{command_id}", "Status of async jobs."],
+        ["vision.py", "POST /vision/image-analysis, /vision/video-tracking", "Image analysis and video object tracking. Form field 'engine' selects 'sam3' (open-vocabulary; query/target required) or 'rfdetr' (closed-vocabulary COCO; query/target optional). Forwards uploads to NOVA-Researcher."],
     ],
 )
 
@@ -348,7 +349,7 @@ bullet("/research - research tooling (can integrate with an external researcher,
 bullet("/search - semantic search.")
 bullet("/podcasts - podcast profiles and generation.")
 bullet("/transformations - create and run transformations.")
-bullet("/vision - image analysis.")
+bullet("/vision - image analysis and video tracking, with two engines: SAM 3 (open-vocabulary, requires a text prompt) and RF-DETR (closed-vocabulary COCO, prompt-free; an optional class name is used as a filter).")
 bullet("/settings, /advanced, /admin - configuration and administration.")
 
 h("8.2 State and data", 2)
