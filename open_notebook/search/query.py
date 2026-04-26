@@ -104,14 +104,19 @@ async def opensearch_text_search(
     results: int = 100,
     source: bool = True,
     note: bool = True,
+    parent_ids: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """BM25 full-text search on *content* and *title* fields.
 
-    Returns results in the SurrealDB ``fn::text_search`` format.
+    Returns results in the SurrealDB ``fn::text_search`` format. When
+    ``parent_ids`` is provided, only chunks whose ``parent_id`` is in the
+    given list are considered (used for RAG over a fixed set of sources).
     """
     try:
         client = await get_client()
         filters = _build_type_filter(source, note)
+        if parent_ids:
+            filters = list(filters) + [{"terms": {"parent_id": parent_ids}}]
 
         body: Dict[str, Any] = {
             "size": results * 3,  # over-fetch for deduplication
@@ -167,14 +172,19 @@ async def opensearch_vector_search(
     source: bool = True,
     note: bool = True,
     min_score: float = 0.2,
+    parent_ids: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Approximate nearest-neighbour search using the k-NN plugin.
 
-    Returns results in the SurrealDB ``fn::vector_search`` format.
+    Returns results in the SurrealDB ``fn::vector_search`` format. When
+    ``parent_ids`` is provided, restricts matches to chunks whose
+    ``parent_id`` is in the given list.
     """
     try:
         client = await get_client()
         filters = _build_type_filter(source, note)
+        if parent_ids:
+            filters = list(filters) + [{"terms": {"parent_id": parent_ids}}]
 
         # k-NN 'k' must be <= 10000 and >= 1
         k_value = min(max(results * 3, 1), 10000)
@@ -237,6 +247,7 @@ async def opensearch_hybrid_search(
     min_score: float = 0.2,
     bm25_weight: float = 0.3,
     vector_weight: float = 0.7,
+    parent_ids: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Run BM25 and k-NN in parallel, merge via Reciprocal Rank Fusion.
 
@@ -247,9 +258,11 @@ async def opensearch_hybrid_search(
     """
     try:
         # Run both searches concurrently
-        text_task = opensearch_text_search(keyword, results, source, note)
+        text_task = opensearch_text_search(
+            keyword, results, source, note, parent_ids=parent_ids
+        )
         vector_task = opensearch_vector_search(
-            embedding, results, source, note, min_score
+            embedding, results, source, note, min_score, parent_ids=parent_ids
         )
         text_results, vector_results = await asyncio.gather(
             text_task, vector_task, return_exceptions=True

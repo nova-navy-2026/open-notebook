@@ -95,25 +95,48 @@ class SuccessResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _build_global_context(query: str, k: int = 15) -> Dict[str, Any]:
-    """Search all OpenSearch indexes for the query and return context.
+async def _build_global_context(query: str, k: int = 5) -> Dict[str, Any]:
+    """Retrieve the top-``k`` most relevant chunks from OpenSearch (RAG).
 
-    Only sources and navy corpus are used — notes are excluded so they
-    do not influence the generated responses.
+    Uses semantic retrieval rather than dumping every indexed document:
+      * User-indexed sources → hybrid search (BM25 + k-NN, RRF-merged).
+      * Navy corpus → k-NN search on BGE-M3 embeddings, with a BM25
+        fallback inside ``vector_search_navy_documents`` if embedding
+        generation fails.
+
+    Notes are excluded so they do not influence the generated responses.
     """
     context_data: Dict[str, Any] = {"sources": [], "navy_corpus": []}
     total_content = ""
 
-    # 1. Search user-indexed sources via OpenSearch text search (notes excluded)
+    # 1. Search user-indexed sources via OpenSearch hybrid (semantic) search
     try:
         from open_notebook.search import is_opensearch_enabled
 
         if is_opensearch_enabled():
-            from open_notebook.search.query import opensearch_text_search
+            from open_notebook.utils.embedding import generate_embedding
 
-            results = await opensearch_text_search(
-                query, k, source=True, note=False
-            )
+            try:
+                embedding = await generate_embedding(query)
+            except Exception as e:
+                logger.warning(
+                    f"Global chat: failed to embed query, falling back to BM25: {e}"
+                )
+                embedding = None
+
+            if embedding:
+                from open_notebook.search.query import opensearch_hybrid_search
+
+                results = await opensearch_hybrid_search(
+                    query, embedding, results=k, source=True, note=False
+                )
+            else:
+                from open_notebook.search.query import opensearch_text_search
+
+                results = await opensearch_text_search(
+                    query, k, source=True, note=False
+                )
+
             logger.info(
                 f"Global chat context: OpenSearch returned {len(results) if results else 0} source chunks for query='{query[:80]}'"
             )
@@ -138,11 +161,13 @@ async def _build_global_context(query: str, k: int = 15) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Global chat: OpenSearch user search failed: {e}")
 
-    # 2. Search navy corpus
+    # 2. Search navy corpus with semantic kNN (BM25 fallback inside the helper)
     try:
-        from open_notebook.search.navy_docs import search_navy_documents
+        from open_notebook.search.navy_docs import vector_search_navy_documents
 
-        navy_results = await search_navy_documents(query=query, doc_ids=None, k=k)
+        navy_results = await vector_search_navy_documents(
+            query=query, doc_ids=None, k=k
+        )
         logger.info(
             f"Global chat context: navy corpus returned {len(navy_results)} chunks for query='{query[:80]}'"
         )

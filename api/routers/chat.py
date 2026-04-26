@@ -421,8 +421,97 @@ async def build_context(request: BuildContextRequest):
         context_data: dict[str, list[dict[str, str]]] = {"sources": [], "notes": []}
         total_content = ""
 
-        # Process context configuration if provided
+        # Collect the IDs of every source the user has granted the chat
+        # access to (any inclusion level except "not in"). When a query is
+        # provided we use these as a parent_id filter for a single semantic
+        # RAG pass, so even if the user enables 15 sources only the top-k
+        # most relevant chunks are sent to the model.
+        rag_source_ids: list[str] = []
         if request.context_config:
+            for source_id, status in request.context_config.get("sources", {}).items():
+                if "not in" in status:
+                    continue
+                rag_source_ids.append(
+                    source_id
+                    if source_id.startswith("source:")
+                    else f"source:{source_id}"
+                )
+
+        # ── RAG over selected sources ──────────────────────────────────
+        # When the chat sends a query, retrieve only the top-5 most
+        # relevant chunks across the selected sources via OpenSearch
+        # hybrid (BM25 + k-NN) search instead of dumping each source's
+        # full content. Falls through to the legacy full-content path
+        # when there is no query, no opensearch, or no selected sources.
+        rag_top_k = 5
+        rag_used = False
+        if request.query and rag_source_ids:
+            try:
+                from open_notebook.search import is_opensearch_enabled
+
+                if is_opensearch_enabled():
+                    from open_notebook.utils.embedding import generate_embedding
+
+                    try:
+                        embedding = await generate_embedding(request.query)
+                    except Exception as e:
+                        logger.warning(
+                            f"Notebook chat RAG: embedding failed, using BM25: {e}"
+                        )
+                        embedding = None
+
+                    if embedding:
+                        from open_notebook.search.query import (
+                            opensearch_hybrid_search,
+                        )
+
+                        rag_results = await opensearch_hybrid_search(
+                            request.query,
+                            embedding,
+                            results=rag_top_k,
+                            source=True,
+                            note=False,
+                            parent_ids=rag_source_ids,
+                        )
+                    else:
+                        from open_notebook.search.query import (
+                            opensearch_text_search,
+                        )
+
+                        rag_results = await opensearch_text_search(
+                            request.query,
+                            results=rag_top_k,
+                            source=True,
+                            note=False,
+                            parent_ids=rag_source_ids,
+                        )
+
+                    for r in rag_results or []:
+                        content = r.get("content", "") or ""
+                        if not content and r.get("matches"):
+                            content = r["matches"][0] if r["matches"] else ""
+                        item = {
+                            "id": r.get("id", ""),
+                            "parent_id": r.get("parent_id", ""),
+                            "title": r.get("title", ""),
+                            "content": content,
+                        }
+                        context_data["sources"].append(item)  # type: ignore[arg-type]
+                        total_content += content
+                    rag_used = True
+                    logger.info(
+                        f"Notebook chat RAG: returned {len(rag_results or [])} "
+                        f"chunks for {len(rag_source_ids)} allowed sources "
+                        f"(query='{request.query[:80]}')"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Notebook chat RAG over sources failed, "
+                    f"falling back to full-content path: {e}"
+                )
+
+        # Process context configuration if provided
+        if request.context_config and not rag_used:
             # Process sources
             for source_id, status in request.context_config.get("sources", {}).items():
                 if "not in" in status:
@@ -496,17 +585,46 @@ async def build_context(request: BuildContextRequest):
                     logger.warning(f"Error processing note {note.id}: {str(e)}")
                     continue
 
+        # When RAG replaced the source loop above, we still need to process
+        # the notes from the context_config (notes are not part of the RAG
+        # pass — they are short, user-authored text and are always included
+        # in full when selected).
+        if request.context_config and rag_used:
+            for note_id, status in request.context_config.get("notes", {}).items():
+                if "not in" in status:
+                    continue
+                try:
+                    full_note_id = (
+                        note_id if note_id.startswith("note:") else f"note:{note_id}"
+                    )
+                    note = await Note.get(full_note_id)
+                    if not note:
+                        continue
+                    if "full content" in status:
+                        note_context = note.get_context(context_size="long")
+                        context_data["notes"].append(note_context)
+                        total_content += str(note_context)
+                except Exception as e:
+                    logger.warning(f"Error processing note {note_id}: {str(e)}")
+                    continue
+
         # Process navy corpus documents (if any selected)
         navy_config = request.context_config.get("navy_docs", {}) if request.context_config else {}
         navy_doc_ids = navy_config.get("doc_ids", [])
         if navy_doc_ids and request.query:
             try:
-                from open_notebook.search.navy_docs import search_navy_documents
+                # Semantic RAG: even when many doc_ids are allowed, only the
+                # top-k most relevant chunks (per BGE-M3 k-NN similarity) are
+                # passed to the model. Falls back to BM25 internally if the
+                # query embedding cannot be generated.
+                from open_notebook.search.navy_docs import (
+                    vector_search_navy_documents,
+                )
 
-                navy_results = await search_navy_documents(
+                navy_results = await vector_search_navy_documents(
                     query=request.query,
                     doc_ids=navy_doc_ids,
-                    k=15,
+                    k=5,
                 )
                 navy_context_items = []
                 for r in navy_results:

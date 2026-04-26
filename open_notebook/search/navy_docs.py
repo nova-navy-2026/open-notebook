@@ -155,6 +155,82 @@ async def search_navy_documents(
         raise
 
 
+async def vector_search_navy_documents(
+    query: str,
+    doc_ids: Optional[List[str]] = None,
+    k: int = 5,
+    min_score: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """Semantic kNN search on the navy corpus using BGE-M3 embeddings.
+
+    The navy index stores BAAI/bge-m3 embeddings in the ``embedding`` field.
+    The query is embedded with the configured embedding model (which must
+    also be BGE-M3 for the vectors to be comparable) and matched against
+    those vectors via the OpenSearch k-NN plugin.
+
+    Returns the same fields as :func:`search_navy_documents`.
+    """
+    try:
+        # Lazy import to keep this module importable when the embedding
+        # stack (and its model dependencies) is not yet initialised.
+        from open_notebook.utils.embedding import generate_embedding
+
+        embedding = await generate_embedding(query)
+        if not embedding:
+            logger.warning(
+                "Navy vector search: empty embedding for query, "
+                "falling back to BM25"
+            )
+            return await search_navy_documents(query, doc_ids=doc_ids, k=k)
+
+        client = await get_client()
+
+        knn_clause: Dict[str, Any] = {
+            "vector": embedding,
+            "k": max(k, 1),
+        }
+        if doc_ids:
+            knn_clause["filter"] = {"terms": {"doc_id": doc_ids}}
+
+        body: Dict[str, Any] = {
+            "size": k,
+            "query": {"knn": {"embedding": knn_clause}},
+            "_source": [
+                "doc_id",
+                "content",
+                "source",
+                "section_title",
+                "page_start",
+                "page_end",
+            ],
+        }
+        if min_score > 0:
+            body["min_score"] = min_score
+
+        response = await asyncio.to_thread(
+            client.search, index=NAVY_OPENSEARCH_INDEX, body=body
+        )
+
+        hits = response.get("hits", {}).get("hits", [])
+        results = []
+        for hit in hits:
+            src = hit.get("_source", {})
+            results.append({
+                "doc_id": src.get("doc_id", ""),
+                "content": src.get("content", ""),
+                "source": src.get("source", ""),
+                "section_title": src.get("section_title", ""),
+                "page_start": src.get("page_start"),
+                "page_end": src.get("page_end"),
+                "score": hit.get("_score", 0),
+            })
+        return results
+
+    except Exception as e:
+        logger.error(f"Navy vector search failed, falling back to BM25: {e}")
+        return await search_navy_documents(query, doc_ids=doc_ids, k=k)
+
+
 # ---------------------------------------------------------------------------
 # Indexing helpers — write uploaded documents into the navy corpus index
 # ---------------------------------------------------------------------------
