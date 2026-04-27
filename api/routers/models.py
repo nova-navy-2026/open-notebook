@@ -401,6 +401,11 @@ async def get_provider_availability():
         # Transformers (HuggingFace local models) are always available — no API key needed
         provider_status["transformers"] = True
 
+        # Local OpenAI-compatible embedding servers (Nomic, CLIP) — always
+        # available; configured exclusively via env vars.
+        provider_status["nomic"] = True
+        provider_status["clip"] = True
+
         # Google also supports GEMINI_API_KEY
         if not provider_status.get("google"):
             provider_status["google"] = os.environ.get("GEMINI_API_KEY") is not None

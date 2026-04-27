@@ -75,6 +75,8 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   vertex: 'Google Vertex AI',
   openai_compatible: 'OpenAI Compatible',
   amalia: 'Amália (NOVASearch)',
+  nomic: 'Nomic (Local)',
+  clip: 'CLIP (Local)',
 }
 
 // All providers in display order

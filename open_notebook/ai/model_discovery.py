@@ -691,6 +691,90 @@ async def discover_amalia_models() -> List[DiscoveredModel]:
     return models
 
 
+async def _discover_local_openai_compatible(
+    provider: str,
+    default_base_url: str,
+    env_var: str,
+    fallback_models: List[Tuple[str, str]],
+) -> List[DiscoveredModel]:
+    """
+    Generic helper to discover models from a local OpenAI-compatible /v1 server.
+
+    Tries GET {base_url}/models first; on failure, returns the fallback list.
+    fallback_models is a list of (model_id, description) tuples.
+    """
+    base_url = os.environ.get(env_var, default_base_url).rstrip("/")
+    # If the configured URL doesn't already include a /v1 segment, append it
+    if not base_url.endswith("/v1"):
+        base_url = base_url + "/v1"
+
+    models: List[DiscoveredModel] = []
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{base_url}/models", timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                if model_id:
+                    models.append(
+                        DiscoveredModel(
+                            name=model_id,
+                            provider=provider,
+                            model_type="embedding",
+                        )
+                    )
+    except Exception as e:
+        logger.warning(f"Failed to discover {provider} models from {base_url}: {e}")
+
+    # Always merge the fallback list so the model is selectable even if the
+    # local server is offline at sync time.
+    for name, description in fallback_models:
+        if not any(m.name == name for m in models):
+            models.append(
+                DiscoveredModel(
+                    name=name,
+                    provider=provider,
+                    model_type="embedding",
+                    description=description,
+                )
+            )
+
+    return models
+
+
+async def discover_nomic_models() -> List[DiscoveredModel]:
+    """Discover embedding models from the local Nomic server (default :4801)."""
+    return await _discover_local_openai_compatible(
+        provider="nomic",
+        default_base_url="http://localhost:4801",
+        env_var="NOMIC_SERVER_URL",
+        fallback_models=[
+            (
+                "nomic-embed-text-v1.5",
+                "Nomic Embed Text v1.5 — local Nomic embedding server",
+            ),
+        ],
+    )
+
+
+async def discover_clip_models() -> List[DiscoveredModel]:
+    """Discover embedding models from the local CLIP server (default :4804)."""
+    return await _discover_local_openai_compatible(
+        provider="clip",
+        default_base_url="http://localhost:4804",
+        env_var="CLIP_SERVER_URL",
+        fallback_models=[
+            (
+                "clip-vit-large-patch14",
+                "CLIP ViT-L/14 — local CLIP text/image embedding server",
+            ),
+        ],
+    )
+
+
 # =============================================================================
 # Main Discovery Functions
 # =============================================================================
@@ -710,6 +794,8 @@ PROVIDER_DISCOVERY_FUNCTIONS = {
     "elevenlabs": discover_elevenlabs_models,
     "openai_compatible": discover_openai_compatible_models,
     "amalia": discover_amalia_models,
+    "nomic": discover_nomic_models,
+    "clip": discover_clip_models,
     "transformers": discover_transformers_models,
     "azure": None,  # Azure requires credential-based discovery (different auth)
     "vertex": None,  # Vertex requires credential-based discovery (service account)

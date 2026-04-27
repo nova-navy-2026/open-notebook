@@ -172,6 +172,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Transformers model seeding encountered an error: {e}")
 
+    # Seed local OpenAI-compatible embedding servers (Nomic, CLIP) — no API key
+    # required. Models are auto-registered so they show up in the embedding
+    # dropdown without any user configuration.
+    for _local_provider in ("nomic", "clip"):
+        try:
+            from open_notebook.ai.model_discovery import sync_provider_models as _sync
+
+            discovered, new, existing = await _sync(_local_provider, auto_register=True)
+            if new > 0:
+                logger.info(f"Registered {new} new {_local_provider} embedding model(s)")
+            else:
+                logger.info(
+                    f"{_local_provider} models already present ({existing} existing)"
+                )
+        except Exception as e:
+            logger.warning(f"{_local_provider} model seeding encountered an error: {e}")
+
     logger.success("API initialization completed successfully")
 
     # Yield control to the application

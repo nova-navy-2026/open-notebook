@@ -168,6 +168,25 @@ class ModelManager:
                     os.environ.get("AMALIA_API_KEY", "dummy"),
                 )
 
+        # Local embedding servers (Nomic on :4801, CLIP on :4804) speak the
+        # OpenAI-compatible API; reuse the openai-compatible Esperanto provider
+        # but inject each server's base_url so they can coexist independently
+        # of any user-configured "openai_compatible" credential.
+        elif provider in ("nomic", "clip"):
+            import os
+
+            env_var = "NOMIC_SERVER_URL" if provider == "nomic" else "CLIP_SERVER_URL"
+            default_url = (
+                "http://localhost:4801" if provider == "nomic" else "http://localhost:4804"
+            )
+            base_url = os.environ.get(env_var, default_url).rstrip("/")
+            if not base_url.endswith("/v1"):
+                base_url = base_url + "/v1"
+
+            provider = "openai-compatible"
+            config.setdefault("base_url", base_url)
+            config.setdefault("api_key", "dummy")
+
         # Create model based on type (Esperanto will cache the instance)
         if model.type == "language":
             return AIFactory.create_language(
