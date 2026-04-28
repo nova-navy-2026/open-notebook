@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { MapPin, Loader2, ArrowRight, Route } from "lucide-react";
 import { getApiUrl } from "@/lib/config";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { useTranslation } from "@/lib/hooks/use-translation";
 
 interface NavPoint {
   query: string;
@@ -27,6 +28,8 @@ interface NavResult {
 }
 
 export default function NavigationPage() {
+  const { t } = useTranslation();
+  const tp = t.routePlannerPage;
   const [locationA, setLocationA] = useState("");
   const [locationB, setLocationB] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -81,33 +84,32 @@ export default function NavigationPage() {
   return (
     <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Route Planner</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
         <p className="text-muted-foreground">
-          Compute driving distance and estimated travel time between two
-          locations in Portugal. Powered by OSRM and Nominatim (OpenStreetMap).
+          {tp.subtitle}
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
         <div className="space-y-2">
-          <Label htmlFor="locA">Origin</Label>
+          <Label htmlFor="locA">{tp.origin}</Label>
           <Input
             id="locA"
             type="text"
             value={locationA}
             onChange={(e) => setLocationA(e.target.value)}
-            placeholder="e.g. Lisboa, Almada, Base Naval do Alfeite..."
+            placeholder={tp.originPlaceholder}
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="locB">Destination</Label>
+          <Label htmlFor="locB">{tp.destination}</Label>
           <Input
             id="locB"
             type="text"
             value={locationB}
             onChange={(e) => setLocationB(e.target.value)}
-            placeholder="e.g. Porto, Setúbal, Sines..."
+            placeholder={tp.destinationPlaceholder}
           />
         </div>
 
@@ -124,12 +126,12 @@ export default function NavigationPage() {
           {isLoading ? (
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Computing route...
+              {tp.computing}
             </>
           ) : (
             <>
               <Route className="h-4 w-4 mr-2" />
-              Compute Route
+              {tp.compute}
             </>
           )}
         </Button>
@@ -189,7 +191,7 @@ export default function NavigationPage() {
                     rel="noopener noreferrer"
                     className="text-primary text-sm hover:underline"
                   >
-                    Open route in OpenStreetMap →
+                    {tp.openInMaps} →
                   </a>
                 </div>
               )}

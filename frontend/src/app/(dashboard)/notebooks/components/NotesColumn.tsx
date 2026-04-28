@@ -16,6 +16,10 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { NoteEditorDialog } from './NoteEditorDialog'
 import { NotebookResearchDialog } from './NotebookResearchDialog'
+import {
+  MediaNoteViewerDialog,
+  detectMediaNote,
+} from '@/components/vision/MediaNoteViewerDialog'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import { formatDistanceToNow } from 'date-fns'
 import { ContextToggle } from '@/components/common/ContextToggle'
@@ -45,6 +49,7 @@ export function NotesColumn({
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showResearchDialog, setShowResearchDialog] = useState(false)
   const [editingNote, setEditingNote] = useState<NoteResponse | null>(null)
+  const [viewingMediaNote, setViewingMediaNote] = useState<NoteResponse | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [noteToDelete, setNoteToDelete] = useState<string | null>(null)
 
@@ -124,11 +129,19 @@ export function NotesColumn({
               />
             ) : (
               <div className="space-y-3">
-                {notes.map((note) => (
+                {notes.map((note) => {
+                  const media = detectMediaNote(note.content)
+                  return (
                   <div
                     key={note.id}
                     className="p-3 border rounded-lg card-hover group relative cursor-pointer"
-                    onClick={() => setEditingNote(note)}
+                    onClick={() => {
+                      if (media) {
+                        setViewingMediaNote(note)
+                      } else {
+                        setEditingNote(note)
+                      }
+                    }}
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
@@ -193,13 +206,22 @@ export function NotesColumn({
                       <h4 className="text-sm font-medium mb-2 break-all">{note.title}</h4>
                     )}
 
-                    {note.content && (
-                      <p className="text-sm text-muted-foreground line-clamp-3 break-all">
-                        {note.content}
-                      </p>
+                    {media ? (
+                      media.analysisText && (
+                        <p className="text-sm text-muted-foreground line-clamp-3 break-all">
+                          {media.analysisText}
+                        </p>
+                      )
+                    ) : (
+                      note.content && (
+                        <p className="text-sm text-muted-foreground line-clamp-3 break-all">
+                          {note.content}
+                        </p>
+                      )
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </CardContent>
@@ -219,6 +241,23 @@ export function NotesColumn({
         notebookId={notebookId}
         note={editingNote ?? undefined}
       />
+
+      {viewingMediaNote && (() => {
+        const media = detectMediaNote(viewingMediaNote.content)
+        if (!media) return null
+        return (
+          <MediaNoteViewerDialog
+            open={Boolean(viewingMediaNote)}
+            onOpenChange={(open) => {
+              if (!open) setViewingMediaNote(null)
+            }}
+            title={viewingMediaNote.title}
+            kind={media.kind}
+            mediaUrl={media.mediaUrl}
+            analysisText={media.analysisText}
+          />
+        )
+      })()}
 
       <ConfirmDialog
         open={deleteDialogOpen}

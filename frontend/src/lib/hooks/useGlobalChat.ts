@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
@@ -21,6 +21,10 @@ export function useGlobalChat() {
   const [isSending, setIsSending] = useState(false)
   const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
   const [contextStats, setContextStats] = useState<GlobalChatContextStats | null>(null)
+  // Whether auto-select-most-recent has already run. After the user
+  // explicitly deletes the active session we keep the conversation cleared
+  // and do NOT pick another session for them.
+  const autoSelectedRef = useRef(false)
 
   // Fetch all global chat sessions
   const {
@@ -49,9 +53,10 @@ export function useGlobalChat() {
     }
   }, [currentSession])
 
-  // Auto-select most recent session
+  // Auto-select most recent session — only on the very first load.
   useEffect(() => {
-    if (sessions.length > 0 && !currentSessionId) {
+    if (!autoSelectedRef.current && sessions.length > 0 && !currentSessionId) {
+      autoSelectedRef.current = true
       setCurrentSessionId(sessions[0].id)
     }
   }, [sessions, currentSessionId])
@@ -104,7 +109,15 @@ export function useGlobalChat() {
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.globalChatSessions
       })
+      // Drop the cached session so the messages effect can't repopulate
+      // from stale data after we clear it below.
+      queryClient.removeQueries({
+        queryKey: QUERY_KEYS.globalChatSession(deletedId)
+      })
       if (currentSessionId === deletedId) {
+        // Mark auto-select as already done so we don't immediately
+        // jump into another session — the user wants the panel cleared.
+        autoSelectedRef.current = true
         setCurrentSessionId(null)
         setMessages([])
       }

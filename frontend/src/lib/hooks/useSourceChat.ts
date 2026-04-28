@@ -22,6 +22,9 @@ export function useSourceChat(sourceId: string) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [contextIndicators, setContextIndicators] = useState<SourceChatContextIndicator | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  // Whether auto-select-most-recent has already run. After the user
+  // explicitly deletes the active session we keep the conversation cleared.
+  const autoSelectedRef = useRef(false)
 
   // Fetch sessions
   const { data: sessions = [], isLoading: loadingSessions, refetch: refetchSessions } = useQuery<SourceChatSession[]>({
@@ -44,9 +47,12 @@ export function useSourceChat(sourceId: string) {
     }
   }, [currentSession])
 
-  // Auto-select most recent session when sessions are loaded
+  // Auto-select most recent session when sessions are loaded — only on
+  // the very first load. Once the user has explicitly closed/deleted the
+  // active session we keep the panel cleared rather than jumping to another.
   useEffect(() => {
-    if (sessions.length > 0 && !currentSessionId) {
+    if (!autoSelectedRef.current && sessions.length > 0 && !currentSessionId) {
+      autoSelectedRef.current = true
       // Find most recent session (sessions are sorted by created date desc from API)
       const mostRecentSession = sessions[0]
       setCurrentSessionId(mostRecentSession.id)
@@ -89,7 +95,11 @@ export function useSourceChat(sourceId: string) {
       sourceChatApi.deleteSession(sourceId, sessionId),
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+      // Drop the cached session so its stale messages cannot repopulate
+      // the panel after we clear it below.
+      queryClient.removeQueries({ queryKey: ['sourceChatSession', sourceId, deletedId] })
       if (currentSessionId === deletedId) {
+        autoSelectedRef.current = true
         setCurrentSessionId(null)
         setMessages([])
       }

@@ -37,6 +37,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         "/auth/login",
         "/auth/oauth",
         "/auth/auth/token/refresh",
+        # Vision note assets are served as static media; <img>/<video> tags
+        # cannot send Authorization headers, so allow unauthenticated GETs.
+        "/api/vision/note-asset/",
     ]
     
     def __init__(self, app, excluded_paths: Optional[list] = None):

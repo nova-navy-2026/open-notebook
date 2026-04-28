@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,6 +8,11 @@ from loguru import logger
 from surrealdb import AsyncSurreal, RecordID  # type: ignore
 
 T = TypeVar("T", Dict[str, Any], List[Dict[str, Any]])
+
+# Number of attempts to (re)open a SurrealDB websocket connection when the
+# handshake fails transiently (e.g. server momentarily busy). 1 = no retry.
+_DB_CONNECT_ATTEMPTS = int(os.getenv("SURREAL_CONNECT_ATTEMPTS", "3"))
+_DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("SURREAL_CONNECT_BACKOFF", "0.5"))
 
 
 def get_database_url():
@@ -46,20 +52,60 @@ def ensure_record_id(value: Union[str, RecordID]) -> RecordID:
 
 @asynccontextmanager
 async def db_connection():
-    db = AsyncSurreal(get_database_url())
-    await db.signin(
-        {
-            "username": os.environ.get("SURREAL_USER"),
-            "password": get_database_password(),
-        }
-    )
-    await db.use(
-        os.environ.get("SURREAL_NAMESPACE"), os.environ.get("SURREAL_DATABASE")
-    )
+    """
+    Open a SurrealDB websocket session, signin, select namespace/database,
+    and yield the connection. Closes the connection on exit.
+
+    The websocket handshake + signin can occasionally time out under load.
+    We retry transient connection failures (TimeoutError / ConnectionError /
+    OSError) a few times before propagating, so a brief blip in the DB does
+    not surface as a 500 to API callers.
+    """
+    last_exc: Optional[BaseException] = None
+    db: Optional[AsyncSurreal] = None
+    for attempt in range(1, _DB_CONNECT_ATTEMPTS + 1):
+        db = AsyncSurreal(get_database_url())
+        try:
+            await db.signin(
+                {
+                    "username": os.environ.get("SURREAL_USER"),
+                    "password": get_database_password(),
+                }
+            )
+            await db.use(
+                os.environ.get("SURREAL_NAMESPACE"),
+                os.environ.get("SURREAL_DATABASE"),
+            )
+            break
+        except (TimeoutError, ConnectionError, OSError) as e:
+            last_exc = e
+            try:
+                await db.close()
+            except Exception:
+                pass
+            db = None
+            if attempt >= _DB_CONNECT_ATTEMPTS:
+                logger.error(
+                    f"SurrealDB connect failed after {attempt} attempts: {e}"
+                )
+                raise
+            logger.warning(
+                f"SurrealDB connect attempt {attempt}/{_DB_CONNECT_ATTEMPTS} "
+                f"failed ({e!r}); retrying..."
+            )
+            await asyncio.sleep(_DB_CONNECT_BACKOFF_SECONDS * attempt)
+    else:
+        # Should not be reachable due to the explicit `raise` above.
+        raise last_exc if last_exc else RuntimeError("SurrealDB connect failed")
+
+    assert db is not None  # for type checkers
     try:
         yield db
     finally:
-        await db.close()
+        try:
+            await db.close()
+        except Exception:
+            pass
 
 
 async def repo_query(

@@ -1,46 +1,61 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useRef, useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Video, Upload, Loader2, X, Download } from "lucide-react";
-import { getApiUrl } from "@/lib/config";
-import { useAuthStore } from "@/lib/stores/auth-store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { useVideoTrackingStore } from "@/lib/stores/vision-store";
+import { useTranslation } from "@/lib/hooks/use-translation";
+import { AddToNotebookDropdown } from "@/components/vision/AddToNotebookDropdown";
+
 export default function VideoTrackingPage() {
-  const [video, setVideo] = useState<File | null>(null);
-  const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const [target, setTarget] = useState("");
-  const [engine, setEngine] = useState<"sam3" | "rfdetr">("sam3");
-  const [isLoading, setIsLoading] = useState(false);
-  const [resultVideo, setResultVideo] = useState<string | null>(null);
-  const [resultText, setResultText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { t } = useTranslation();
+  const tp = t.videoTrackingPage;
+  // Persist state across tab switches: state lives in the zustand store
+  // so that an in-flight tracking job keeps running in the background and
+  // the inputs / results survive unmounting this page.
+  const video = useVideoTrackingStore((s) => s.video);
+  const videoPreview = useVideoTrackingStore((s) => s.videoPreview);
+  const target = useVideoTrackingStore((s) => s.target);
+  const engine = useVideoTrackingStore((s) => s.engine);
+  const isLoading = useVideoTrackingStore((s) => s.isLoading);
+  const resultVideo = useVideoTrackingStore((s) => s.resultVideo);
+  const resultText = useVideoTrackingStore((s) => s.resultText);
+  const error = useVideoTrackingStore((s) => s.error);
+  const setVideo = useVideoTrackingStore((s) => s.setVideo);
+  const setTarget = useVideoTrackingStore((s) => s.setTarget);
+  const setEngine = useVideoTrackingStore((s) => s.setEngine);
+  const setError = useVideoTrackingStore((s) => s.setError);
+  const submit = useVideoTrackingStore((s) => s.submit);
+  const clear = useVideoTrackingStore((s) => s.clear);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const handleVideoSelect = (file: File) => {
     if (!file.type.startsWith("video/")) {
-      setError("Please select a valid video file.");
+      setError(tp.invalidFile);
       return;
     }
     setVideo(file);
-    setError(null);
-    const url = URL.createObjectURL(file);
-    setVideoPreview(url);
   };
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleVideoSelect(file);
-  }, []);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const file = e.dataTransfer.files[0];
+      if (file) handleVideoSelect(file);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -51,80 +66,29 @@ export default function VideoTrackingPage() {
     setIsDragging(false);
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!video) {
-      setError("Please provide a video.");
-      return;
-    }
-    if (engine === "sam3" && !target.trim()) {
-      setError("SAM3 requires a target element. Describe what to track, or switch to RF-DETR for prompt-free tracking.");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-    setResultVideo(null);
-    setResultText(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("video", video);
-      formData.append("target", target);
-      formData.append("engine", engine);
-
-      const apiUrl = await getApiUrl();
-      const token = useAuthStore.getState().token;
-      const response = await fetch(`${apiUrl}/api/vision/video-tracking`, {
-        method: "POST",
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => null);
-        throw new Error(err?.detail || `Server error (${response.status})`);
-      }
-
-      const data = await response.json();
-      setResultText(data.text || null);
-      setResultVideo(data.video_base64 || null);
-    } catch {
-      setError("Failed to process video. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
+    submit();
   };
 
   const clearAll = () => {
-    if (videoPreview) URL.revokeObjectURL(videoPreview);
-    if (resultVideo && resultVideo !== videoPreview)
-      URL.revokeObjectURL(resultVideo);
-    setVideo(null);
-    setVideoPreview(null);
-    setTarget("");
-    setResultVideo(null);
-    setResultText(null);
-    setError(null);
+    clear();
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Video Tracking</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
         <p className="text-muted-foreground">
-          Upload a video and specify which element to track. The model will
-          process the video and return it with the tracked element highlighted.
+          {tp.subtitle}
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl">
         {/* Video Upload */}
         <div className="space-y-2">
-          <Label>Upload Video</Label>
+          <Label>{tp.uploadLabel}</Label>
           <div
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -155,17 +119,17 @@ export default function VideoTrackingPage() {
                   }}
                 />
                 <p className="text-sm text-muted-foreground mt-2">
-                  Hover to preview &middot; Click or drag to replace
+                  {tp.replaceHint}
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <Upload className="h-12 w-12 text-muted-foreground mx-auto" />
                 <p className="text-foreground font-medium">
-                  Drop a video here or click to browse
+                  {tp.dropHint}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  MP4, WEBM, MOV, AVI
+                  {tp.formats}
                 </p>
               </div>
             )}
@@ -185,7 +149,12 @@ export default function VideoTrackingPage() {
         {/* Target Input */}
         <div className="space-y-2">
           <Label htmlFor="target">
-            Element to Track {engine === "sam3" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground text-xs">(optional)</span>}
+            {tp.targetLabel}{" "}
+            {engine === "sam3" ? (
+              <span className="text-destructive">*</span>
+            ) : (
+              <span className="text-muted-foreground text-xs">{t.imageAnalysisPage.optional}</span>
+            )}
           </Label>
           <Input
             id="target"
@@ -194,8 +163,8 @@ export default function VideoTrackingPage() {
             onChange={(e) => setTarget(e.target.value)}
             placeholder={
               engine === "sam3"
-                ? "e.g. red car, person in blue shirt, tennis ball..."
-                : "Leave empty to track everything, or type a COCO class (person, car, boat...) to filter"
+                ? tp.targetPlaceholder
+                : t.imageAnalysisPage.queryPlaceholderRfdetr
             }
             required={engine === "sam3"}
           />
@@ -203,20 +172,20 @@ export default function VideoTrackingPage() {
 
         {/* Engine Selector */}
         <div className="space-y-2">
-          <Label htmlFor="engine">Detection Engine</Label>
+          <Label htmlFor="engine">{tp.engineLabel}</Label>
           <select
             id="engine"
             value={engine}
             onChange={(e) => setEngine(e.target.value as "sam3" | "rfdetr")}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <option value="sam3">SAM3 (open-vocabulary, segmentation)</option>
-            <option value="rfdetr">RF-DETR (COCO classes, real-time)</option>
+            <option value="sam3">{t.imageAnalysisPage.engineSam3}</option>
+            <option value="rfdetr">{t.imageAnalysisPage.engineRfdetr}</option>
           </select>
           <p className="text-xs text-muted-foreground">
             {engine === "sam3"
-              ? "Track anything described in natural language. Slower per frame."
-              : "Tracks COCO-80 classes (person, car, boat...). Type a class name to filter; leave blank to track every detection."}
+              ? t.imageAnalysisPage.engineHintSam3
+              : t.imageAnalysisPage.engineHintRfdetr}
           </p>
         </div>
 
@@ -236,18 +205,18 @@ export default function VideoTrackingPage() {
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Processing...
+                {tp.processing}
               </>
             ) : (
               <>
                 <Video className="h-4 w-4 mr-2" />
-                Track Element
+                {tp.process}
               </>
             )}
           </Button>
           <Button type="button" variant="outline" onClick={clearAll}>
             <X className="h-4 w-4 mr-2" />
-            Clear
+            {tp.clear}
           </Button>
         </div>
       </form>
@@ -258,10 +227,9 @@ export default function VideoTrackingPage() {
           <CardContent className="flex items-center gap-4 py-6">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <div>
-              <p className="font-medium">Processing video...</p>
+              <p className="font-medium">{tp.processingTitle}</p>
               <p className="text-sm text-muted-foreground">
-                Tracking &quot;{target}&quot; &mdash; this may take a moment
-                depending on video length.
+                {tp.processingDesc.replace("{target}", target)}
               </p>
             </div>
           </CardContent>
@@ -271,20 +239,32 @@ export default function VideoTrackingPage() {
       {/* Result */}
       {(resultVideo || resultText) && !isLoading && (
         <div className="space-y-4 max-w-4xl">
-          <h2 className="text-xl font-semibold tracking-tight">Result</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{tp.result}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {resultVideo && (
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
+                <CardHeader className="flex flex-row items-center justify-between gap-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Tracked Video
+                    {tp.trackedVideo}
                   </CardTitle>
-                  <Button variant="ghost" size="sm" asChild>
-                    <a href={resultVideo} download="tracked_video.mp4">
-                      <Download className="h-4 w-4 mr-1" />
-                      Download
-                    </a>
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <AddToNotebookDropdown
+                      mediaKind="video"
+                      mediaDataUrl={resultVideo}
+                      analysisText={resultText}
+                      title={
+                        target?.trim()
+                          ? `Video tracking: ${target.trim()}`
+                          : "Video tracking"
+                      }
+                    />
+                    <Button variant="ghost" size="sm" asChild>
+                      <a href={resultVideo} download="tracked_video.mp4">
+                        <Download className="h-4 w-4 mr-1" />
+                        {tp.download}
+                      </a>
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <video
@@ -301,7 +281,7 @@ export default function VideoTrackingPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Tracking Summary
+                    {tp.summary}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="prose prose-sm dark:prose-invert max-w-none">
@@ -314,6 +294,7 @@ export default function VideoTrackingPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

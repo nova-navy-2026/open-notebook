@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
@@ -34,6 +34,9 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   const [charCount, setCharCount] = useState<number>(0)
   // Pending model override for when user changes model before a session exists
   const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
+  // Whether auto-select-most-recent has already run. After the user
+  // explicitly deletes the active session we keep the conversation cleared.
+  const autoSelectedRef = useRef(false)
 
   // Fetch sessions for this notebook
   const {
@@ -63,9 +66,12 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     }
   }, [currentSession])
 
-  // Auto-select most recent session when sessions are loaded
+  // Auto-select most recent session when sessions are loaded — only on
+  // the very first load. Once the user has explicitly closed/deleted the
+  // active session we keep the panel cleared rather than jumping to another.
   useEffect(() => {
-    if (sessions.length > 0 && !currentSessionId) {
+    if (!autoSelectedRef.current && sessions.length > 0 && !currentSessionId) {
+      autoSelectedRef.current = true
       // Sessions are sorted by created date desc from API
       const mostRecentSession = sessions[0]
       setCurrentSessionId(mostRecentSession.id)
@@ -118,7 +124,13 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
       })
+      // Drop the cached session so its stale messages cannot repopulate
+      // the panel after we clear it below.
+      queryClient.removeQueries({
+        queryKey: QUERY_KEYS.notebookChatSession(deletedId)
+      })
       if (currentSessionId === deletedId) {
+        autoSelectedRef.current = true
         setCurrentSessionId(null)
         setMessages([])
       }

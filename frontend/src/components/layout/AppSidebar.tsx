@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -87,25 +87,25 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
       ],
     },
     {
-      title: "Vision",
+      title: t.navigation.vision ?? "Vision",
       items: [
         {
-          name: "Image Analysis",
+          name: t.navigation.imageAnalysis ?? "Image Analysis",
           href: "/vision/image-analysis",
           icon: ImageIcon,
         },
         {
-          name: "Video Analysis",
+          name: t.navigation.videoAnalysis ?? "Video Analysis",
           href: "/vision/video-tracking",
           icon: Video,
         },
       ],
     },
     {
-      title: "Navigation",
+      title: t.navigation.navigationSection ?? "Navigation",
       items: [
         {
-          name: "Route Planner",
+          name: t.navigation.routePlanner ?? "Route Planner",
           href: "/navigation",
           icon: MapPin,
         },
@@ -148,7 +148,12 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
   return baseNav as const;
 };
 
-type CreateTarget = "source" | "notebook" | "podcast";
+type CreateTarget =
+  | "chat"
+  | "notebook"
+  | "research"
+  | "image-analysis"
+  | "video-analysis";
 
 export function AppSidebar() {
   const { t } = useTranslation();
@@ -158,10 +163,15 @@ export function AppSidebar() {
   const logoSrc = resolvedTheme === "dark" ? "/logo_dark.png" : "/logo_light.png";
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { logout } = useAuth();
   const { isCollapsed, toggleCollapse } = useSidebarStore();
   const { openSourceDialog, openNotebookDialog, openPodcastDialog } =
     useCreateDialogs();
+  // Keep these around to silence unused warnings while still exposing them
+  // through the sidebar context (other surfaces still call them).
+  void openSourceDialog;
+  void openPodcastDialog;
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [isMac, setIsMac] = useState(true); // Default to Mac for SSR
@@ -174,12 +184,22 @@ export function AppSidebar() {
   const handleCreateSelection = (target: CreateTarget) => {
     setCreateMenuOpen(false);
 
-    if (target === "source") {
-      openSourceDialog();
-    } else if (target === "notebook") {
-      openNotebookDialog();
-    } else if (target === "podcast") {
-      openPodcastDialog();
+    switch (target) {
+      case "chat":
+        router.push("/chat");
+        break;
+      case "notebook":
+        openNotebookDialog();
+        break;
+      case "research":
+        router.push("/research");
+        break;
+      case "image-analysis":
+        router.push("/vision/image-analysis");
+        break;
+      case "video-analysis":
+        router.push("/vision/video-tracking");
+        break;
     }
   };
 
@@ -295,12 +315,12 @@ export function AppSidebar() {
                 <DropdownMenuItem
                   onSelect={(event) => {
                     event.preventDefault();
-                    handleCreateSelection("source");
+                    handleCreateSelection("chat");
                   }}
                   className="gap-2"
                 >
-                  <FileText className="h-4 w-4" />
-                  {t.common.source}
+                  <MessageCircle className="h-4 w-4" />
+                  {t.navigation.chat ?? t.common.chat ?? "Chat"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={(event) => {
@@ -315,12 +335,32 @@ export function AppSidebar() {
                 <DropdownMenuItem
                   onSelect={(event) => {
                     event.preventDefault();
-                    handleCreateSelection("podcast");
+                    handleCreateSelection("research");
                   }}
                   className="gap-2"
                 >
-                  <Mic className="h-4 w-4" />
-                  {t.common.podcast}
+                  <FlaskConical className="h-4 w-4" />
+                  {t.navigation.research ?? "Deep Research"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleCreateSelection("image-analysis");
+                  }}
+                  className="gap-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  {t.navigation.imageAnalysis ?? "Image Analysis"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleCreateSelection("video-analysis");
+                  }}
+                  className="gap-2"
+                >
+                  <Video className="h-4 w-4" />
+                  {t.navigation.videoAnalysis ?? "Video Analysis"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
