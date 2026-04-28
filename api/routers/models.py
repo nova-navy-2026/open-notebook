@@ -398,6 +398,9 @@ async def get_provider_availability():
         # Amália is always available (uses a dummy API key by default)
         provider_status["amalia"] = True
 
+        # Gemma (vLLM) is always available — uses a default bearer token
+        provider_status["gemma"] = True
+
         # Transformers (HuggingFace local models) are always available — no API key needed
         provider_status["transformers"] = True
 

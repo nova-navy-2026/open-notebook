@@ -34,6 +34,7 @@ async def analyze_image(
     image: UploadFile = File(...),
     query: Optional[str] = Form(None),
     engine: str = Form("sam3"),
+    provider: Optional[str] = Form(None),
 ):
     """
     Analyze an uploaded image using the MCP vision researcher.
@@ -95,6 +96,7 @@ async def analyze_image(
             image_path=saved_path,
             query=normalised_query,
             engine=engine_norm,
+            provider=provider,
         )
         return result
 

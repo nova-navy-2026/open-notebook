@@ -691,6 +691,75 @@ async def discover_amalia_models() -> List[DiscoveredModel]:
     return models
 
 
+async def discover_gemma_models() -> List[DiscoveredModel]:
+    """
+    Discover models from the Gemma (vLLM) OpenAI-compatible endpoint.
+
+    Falls back to a static known model list when the API is unreachable.
+    """
+    api_key = None
+    base_url = None
+
+    try:
+        credentials = await Credential.get_by_provider("gemma")
+        if credentials:
+            cred = credentials[0]
+            config = cred.to_esperanto_config()
+            api_key = config.get("api_key")
+            base_url = (config.get("base_url") or "").rstrip("/")
+    except Exception as e:
+        logger.warning(f"Failed to read gemma config from Credential: {e}")
+
+    if not api_key:
+        api_key = os.environ.get("GEMMA_API_KEY", "nova-vl")
+    if not base_url:
+        base_url = os.environ.get(
+            "GEMMA_BASE_URL", "http://10.10.255.206:46888/v1"
+        ).rstrip("/")
+
+    models: List[DiscoveredModel] = []
+
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            response = await client.get(
+                f"{base_url}/models",
+                headers=headers,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                if model_id:
+                    models.append(
+                        DiscoveredModel(
+                            name=model_id,
+                            provider="gemma",
+                            model_type="language",
+                        )
+                    )
+    except Exception as e:
+        logger.warning(f"Failed to dynamically discover Gemma models: {e}")
+
+    known_model = "google/gemma-4-31B-it"
+    if not any(m.name == known_model for m in models):
+        models.append(
+            DiscoveredModel(
+                name=known_model,
+                provider="gemma",
+                model_type="language",
+                description="Gemma 4 31B IT — served via vLLM",
+            )
+        )
+
+    return models
+
+
 async def _discover_local_openai_compatible(
     provider: str,
     default_base_url: str,
@@ -794,6 +863,7 @@ PROVIDER_DISCOVERY_FUNCTIONS = {
     "elevenlabs": discover_elevenlabs_models,
     "openai_compatible": discover_openai_compatible_models,
     "amalia": discover_amalia_models,
+    "gemma": discover_gemma_models,
     "nomic": discover_nomic_models,
     "clip": discover_clip_models,
     "transformers": discover_transformers_models,

@@ -75,13 +75,14 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   vertex: 'Google Vertex AI',
   openai_compatible: 'OpenAI Compatible',
   amalia: 'Amália (NOVASearch)',
+  gemma: 'Gemma (vLLM)',
   nomic: 'Nomic (Local)',
   clip: 'CLIP (Local)',
 }
 
 // All providers in display order
 const ALL_PROVIDERS = [
-  'amalia', 'openai', 'anthropic', 'google', 'groq', 'mistral', 'deepseek',
+  'amalia', 'gemma', 'openai', 'anthropic', 'google', 'groq', 'mistral', 'deepseek',
   'xai', 'openrouter', 'voyage', 'elevenlabs', 'ollama',
   'azure', 'vertex', 'openai_compatible',
 ]
@@ -103,6 +104,7 @@ const PROVIDER_MODALITIES: Record<string, ModelType[]> = {
   vertex: ['language', 'embedding', 'text_to_speech'],
   openai_compatible: ['language', 'embedding', 'text_to_speech', 'speech_to_text'],
   amalia: ['language'],
+  gemma: ['language'],
 }
 
 // Documentation links
@@ -121,6 +123,7 @@ const PROVIDER_DOCS: Record<string, string> = {
   vertex: 'https://cloud.google.com/vertex-ai/docs/start/cloud-environment',
   openai_compatible: 'https://github.com/lfnovo/open-notebook/blob/main/docs/5-CONFIGURATION/openai-compatible.md',
   amalia: 'https://amalia.novasearch.org/',
+  gemma: 'https://ai.google.dev/gemma',
 }
 
 const TYPE_ICONS: Record<ModelType, React.ReactNode> = {

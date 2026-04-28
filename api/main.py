@@ -160,6 +160,44 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Amália auto-provisioning encountered an error: {e}")
 
+    # Ensure Gemma (always-available provider) has a credential and models
+    try:
+        from open_notebook.domain.credential import Credential as CredentialModel
+        from api.credentials_service import create_credential_from_env
+        from open_notebook.ai.key_provider import provision_provider_keys
+        from open_notebook.ai.model_discovery import sync_provider_models
+
+        existing_gemma = await CredentialModel.get_by_provider("gemma")
+        if not existing_gemma:
+            logger.info("Auto-creating Gemma credential (always-available provider)")
+            cred = create_credential_from_env("gemma")
+            await cred.save()
+            logger.info(f"Gemma credential created (id={cred.id})")
+
+        await provision_provider_keys("gemma")
+        discovered, new, existing = await sync_provider_models("gemma", auto_register=True)
+        if new > 0:
+            logger.info(f"Registered {new} new Gemma model(s)")
+
+        # Link any unlinked Gemma models to the credential
+        from open_notebook.database.repository import repo_query as _rq
+        from open_notebook.ai.models import Model as ModelRecord
+        gemma_creds = await CredentialModel.get_by_provider("gemma")
+        if gemma_creds:
+            cred_id = gemma_creds[0].id
+            unlinked = await _rq(
+                "SELECT * FROM model WHERE string::lowercase(provider) = 'gemma' AND credential IS NONE",
+                {},
+            )
+            for m in unlinked:
+                model = ModelRecord(**m)
+                model.credential = cred_id
+                await model.save()
+            if unlinked:
+                logger.info(f"Linked {len(unlinked)} Gemma model(s) to credential {cred_id}")
+    except Exception as e:
+        logger.warning(f"Gemma auto-provisioning encountered an error: {e}")
+
     # Seed transformers (HuggingFace local) models — no API key required
     try:
         from open_notebook.ai.model_discovery import sync_provider_models as _sync

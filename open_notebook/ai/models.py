@@ -168,6 +168,22 @@ class ModelManager:
                     os.environ.get("AMALIA_API_KEY", "dummy"),
                 )
 
+        # Gemma is served via vLLM (OpenAI-compatible). Map to that Esperanto
+        # provider and inject base_url + api_key from env defaults when no
+        # Credential is linked.
+        elif provider == "gemma":
+            import os
+
+            provider = "openai-compatible"
+            config.setdefault(
+                "base_url",
+                os.environ.get("GEMMA_BASE_URL", "http://10.10.255.206:46888/v1"),
+            )
+            config.setdefault(
+                "api_key",
+                os.environ.get("GEMMA_API_KEY", "nova-vl"),
+            )
+
         # Local embedding servers (Nomic on :4801, CLIP on :4804) speak the
         # OpenAI-compatible API; reuse the openai-compatible Esperanto provider
         # but inject each server's base_url so they can coexist independently

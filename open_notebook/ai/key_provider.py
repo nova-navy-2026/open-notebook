@@ -66,6 +66,10 @@ PROVIDER_CONFIG = {
     "amalia": {
         "env_var": "AMALIA_API_KEY",
     },
+    # Gemma (vLLM) – OpenAI-compatible endpoint
+    "gemma": {
+        "env_var": "GEMMA_API_KEY",
+    },
 }
 
 
@@ -282,6 +286,34 @@ async def _provision_amalia() -> bool:
     return any_set
 
 
+async def _provision_gemma() -> bool:
+    """
+    Set environment variables for the Gemma (vLLM) provider.
+
+    Gemma is served by a vLLM OpenAI-compatible endpoint. Falls back to
+    a default base_url and bearer token when no Credential is stored.
+    """
+    DEFAULT_BASE_URL = "http://10.10.255.206:46888/v1"
+    DEFAULT_API_KEY = "nova-vl"
+
+    cred = await _get_default_credential("gemma")
+
+    api_key = DEFAULT_API_KEY
+    base_url = DEFAULT_BASE_URL
+
+    if cred:
+        if cred.api_key:
+            api_key = cred.api_key.get_secret_value()
+        if cred.base_url:
+            base_url = cred.base_url
+
+    os.environ["GEMMA_API_KEY"] = api_key
+    os.environ["GEMMA_BASE_URL"] = base_url
+    logger.debug("Set GEMMA_API_KEY and GEMMA_BASE_URL")
+
+    return True
+
+
 async def provision_provider_keys(provider: str) -> bool:
     """
     Provision environment variables from database for a specific provider.
@@ -316,6 +348,8 @@ async def provision_provider_keys(provider: str) -> bool:
         return await _provision_openai_compatible()
     elif provider_lower == "amalia":
         return await _provision_amalia()
+    elif provider_lower == "gemma":
+        return await _provision_gemma()
 
     # Handle simple providers
     return await _provision_simple_provider(provider_lower)

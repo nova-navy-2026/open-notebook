@@ -64,14 +64,14 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
       title: t.navigation.process,
       items: [
         {
-          name: t.navigation.chat ?? "Chat",
-          href: "/chat",
-          icon: MessageCircle,
-        },
-        {
           name: t.navigation.search ?? "Search",
           href: "/search",
           icon: Search,
+        },
+        {
+          name: t.navigation.chat ?? "Chat",
+          href: "/chat",
+          icon: MessageCircle,
         },
         { name: t.navigation.notebooks, href: "/notebooks", icon: Book },
       ],
@@ -84,7 +84,6 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
           href: "/research",
           icon: FlaskConical,
         },
-        { name: t.navigation.podcasts, href: "/podcasts", icon: Mic },
       ],
     },
     {
@@ -96,7 +95,7 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
           icon: ImageIcon,
         },
         {
-          name: "Video Tracking",
+          name: "Video Analysis",
           href: "/vision/video-tracking",
           icon: Video,
         },
@@ -138,6 +137,7 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
           icon: LayoutDashboard,
         },
         { name: "Ask", href: "/admin?tab=ask", icon: MessageCircleQuestion },
+        { name: t.navigation.podcasts, href: "/podcasts", icon: Mic },
         { name: "Users & Roles", href: "/admin?tab=users", icon: Settings },
         { name: "Permissions", href: "/admin?tab=permissions", icon: Shield },
         { name: "Audit Logs", href: "/admin?tab=audit", icon: FileText },

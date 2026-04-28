@@ -60,6 +60,9 @@ PROVIDER_ENV_CONFIG: Dict[str, dict] = {
     "amalia": {
         "required": [],  # Amália uses a dummy key by default; always available
     },
+    "gemma": {
+        "required": [],  # Gemma (vLLM) ships with default base_url + api_key; always available
+    },
 }
 
 PROVIDER_MODALITIES: Dict[str, List[str]] = {
@@ -78,6 +81,7 @@ PROVIDER_MODALITIES: Dict[str, List[str]] = {
     "azure": ["language", "embedding", "speech_to_text", "text_to_speech"],
     "openai_compatible": ["language", "embedding", "speech_to_text", "text_to_speech"],
     "amalia": ["language"],
+    "gemma": ["language"],
 }
 
 
@@ -303,6 +307,18 @@ def create_credential_from_env(provider: str) -> Credential:
         )
         return Credential(
             name="Amália (NOVASearch)",
+            provider=provider,
+            modalities=modalities,
+            api_key=SecretStr(api_key),
+            base_url=base_url,
+        )
+    elif provider == "gemma":
+        api_key = os.environ.get("GEMMA_API_KEY", "nova-vl")
+        base_url = os.environ.get(
+            "GEMMA_BASE_URL", "http://10.10.255.206:46888/v1"
+        )
+        return Credential(
+            name="Gemma (vLLM)",
             provider=provider,
             modalities=modalities,
             api_key=SecretStr(api_key),
