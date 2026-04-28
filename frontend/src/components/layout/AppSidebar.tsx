@@ -48,7 +48,6 @@ import {
   FlaskConical,
   MessageCircle,
   MessageCircleQuestion,
-  Eye,
   Image as ImageIcon,
   Video,
   MapPin,
@@ -84,11 +83,6 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
           href: "/research",
           icon: FlaskConical,
         },
-      ],
-    },
-    {
-      title: t.navigation.vision ?? "Vision",
-      items: [
         {
           name: t.navigation.imageAnalysis ?? "Image Analysis",
           href: "/vision/image-analysis",
