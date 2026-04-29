@@ -74,7 +74,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   azure: 'Azure OpenAI',
   vertex: 'Google Vertex AI',
   openai_compatible: 'OpenAI Compatible',
-  amalia: 'Amália (NOVASearch)',
+  amalia: 'AMALIA (NOVASearch)',
   gemma: 'Gemma (vLLM)',
   nomic: 'Nomic (Local)',
   clip: 'CLIP (Local)',

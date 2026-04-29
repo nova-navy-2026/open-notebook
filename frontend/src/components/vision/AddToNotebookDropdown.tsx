@@ -139,7 +139,7 @@ export function AddToNotebookDropdown({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="!max-w-md sm:!max-w-md w-[min(480px,calc(100vw-2rem))]">
           <DialogHeader>
             <DialogTitle>{dt.title}</DialogTitle>
             <DialogDescription>{dt.description}</DialogDescription>

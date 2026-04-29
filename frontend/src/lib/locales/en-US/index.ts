@@ -1054,7 +1054,7 @@ export const enUS = {
   research: {
     title: "Research",
     subtitle:
-      "Generate in-depth research reports powered by NOVA-Researcher and Amália AI.",
+      "Generate in-depth research reports powered by NOVA-Researcher and AMALIA AI.",
     newResearch: "New Research",
     history: "History",
     queryTitle: "Research Query",
@@ -1066,7 +1066,7 @@ export const enUS = {
     reportSourceLabel: "Data Source",
     toneLabel: "Writing Tone",
     modelLabel: "AI Model",
-    useAmalia: "Use Amália",
+    useAmalia: "Use AMALIA",
     amaliaDescription: "AMALIA-9B — Portuguese-optimized model by NOVASearch",
     defaultModelNote: "Will use the default GPTResearcher model (GPT-4o-mini)",
     sourceUrls: "Source URLs (Optional)",

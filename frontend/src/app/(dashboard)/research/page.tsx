@@ -18,7 +18,7 @@ export default function ResearchPage() {
         </h1>
         <p className="text-muted-foreground">
           {t.research?.subtitle ??
-            "Generate in-depth research reports powered by NOVA-Researcher and Amália AI."}
+            "Generate in-depth research reports powered by NOVA-Researcher and AMALIA AI."}
         </p>
       </div>
 

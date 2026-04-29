@@ -1061,9 +1061,9 @@ export const ptBR = {
     apiKeyEditHint: "Deixe em branco para manter a chave de API existente",
   },
   research: {
-    title: "Pesquisa",
+    title: "Relatórios Profundos",
     subtitle:
-      "Gere relatórios de pesquisa aprofundados com o NOVA-Researcher e Amália IA.",
+      "Gere relatórios de pesquisa aprofundados com o NOVA-Researcher e AMALIA IA.",
     newResearch: "Nova Pesquisa",
     history: "Histórico",
     queryTitle: "Tópicos de Relatório Profundo",
@@ -1075,7 +1075,7 @@ export const ptBR = {
     reportSourceLabel: "Fonte de Dados",
     toneLabel: "Tom de Escrita",
     modelLabel: "Modelo de IA",
-    useAmalia: "Usar Amália",
+    useAmalia: "Usar AMALIA",
     amaliaDescription:
       "AMALIA-9B — Modelo otimizado para português pela NOVASearch",
     defaultModelNote: "Irá usar o modelo padrão do GPTResearcher (GPT-4o-mini)",
