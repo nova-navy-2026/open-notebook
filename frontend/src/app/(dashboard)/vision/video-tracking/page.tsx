@@ -254,8 +254,8 @@ export default function VideoTrackingPage() {
                       analysisText={resultText}
                       title={
                         target?.trim()
-                          ? `Video tracking: ${target.trim()}`
-                          : "Video tracking"
+                          ? `Análise de Vídeo: ${target.trim()}`
+                          : "Análise de Vídeo"
                       }
                     />
                     <Button variant="ghost" size="sm" asChild>

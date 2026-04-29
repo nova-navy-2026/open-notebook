@@ -229,8 +229,8 @@ export default function ImageAnalysisPage() {
                       analysisText={resultText}
                       title={
                         query?.trim()
-                          ? `Image analysis: ${query.trim()}`
-                          : "Image analysis"
+                          ? `Análise de Imagem: ${query.trim()}`
+                          : "Análise de Imagem"
                       }
                     />
                     <Button

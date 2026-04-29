@@ -1063,7 +1063,7 @@ export const ptBR = {
   research: {
     title: "Relatórios Profundos",
     subtitle:
-      "Gere relatórios de pesquisa aprofundados com o NOVA-Researcher e AMALIA IA.",
+      "Gere relatórios de pesquisa aprofundados com o NOVA-Researcher e AMALIA.",
     newResearch: "Nova Pesquisa",
     history: "Histórico",
     queryTitle: "Tópicos de Relatório Profundo",
