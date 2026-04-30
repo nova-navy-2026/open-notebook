@@ -43,14 +43,17 @@ export function NotebookCard({ notebook }: NotebookCardProps) {
   return (
     <>
       <Card 
-        className="group card-hover"
+        className="group card-hover h-full flex flex-col w-full max-w-full overflow-hidden"
         onClick={handleCardClick}
         style={{ cursor: 'pointer' }}
       >
-          <CardHeader className="pb-3">
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <CardTitle className="text-base truncate group-hover:text-primary transition-colors">
+          <CardHeader className="pb-3 min-w-0 w-full">
+            <div className="flex items-start justify-between gap-2 min-w-0 w-full">
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <CardTitle
+                  className="text-base font-semibold group-hover:text-primary transition-colors block w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap"
+                  title={notebook.name}
+                >
                   {notebook.name}
                 </CardTitle>
                 {notebook.archived && (
@@ -100,7 +103,7 @@ export function NotebookCard({ notebook }: NotebookCardProps) {
             </div>
           </CardHeader>
           
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col">
             <CardDescription className="line-clamp-2 text-sm">
               {notebook.description || t.chat.noDescription}
             </CardDescription>
@@ -113,7 +116,7 @@ export function NotebookCard({ notebook }: NotebookCardProps) {
             </div>
 
             {/* Item counts footer */}
-            <div className="mt-3 flex items-center gap-1.5 border-t pt-3">
+            <div className="mt-auto pt-3 flex items-center gap-1.5 border-t">
               <Badge variant="outline" className="text-xs flex items-center gap-1 px-1.5 py-0.5 text-primary border-primary/50">
                 <FileText className="h-3 w-3" />
                 <span>{notebook.source_count}</span>

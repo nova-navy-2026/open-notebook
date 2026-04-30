@@ -49,15 +49,15 @@ export default function NotebooksPage() {
   return (
     <>
       <div className="flex-1 overflow-y-auto h-full">
-        <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">{t.notebooks.title}</h1>
+        <div className="p-4 sm:p-6 space-y-6 w-full">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <h1 className="text-xl sm:text-2xl font-bold">{t.notebooks.title}</h1>
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4" />
             </Button>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 w-full sm:w-auto">
             <Input
               id="notebook-search"
               name="notebook-search"
@@ -68,7 +68,7 @@ export default function NotebooksPage() {
               aria-label={t.common.accessibility?.searchNotebooks || "Search notebooks"}
               className="w-full sm:w-64"
             />
-            <Button onClick={() => setCreateDialogOpen(true)}>
+            <Button onClick={() => setCreateDialogOpen(true)} className="w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />
               {t.notebooks.newNotebook}
             </Button>

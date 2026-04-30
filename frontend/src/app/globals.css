@@ -228,4 +228,53 @@
   .clickable-card * {
     cursor: pointer !important;
   }
+
+  /* ──────────────────────────────────────────────────────────────
+     Responsive helpers used across the whole app.
+     Goal: every screen and card resizes to the user's monitor
+     and content NEVER overflows its container.
+     ────────────────────────────────────────────────────────────── */
+
+  /* Fluid card grid: tiles auto-fit between 16rem and 22rem.
+     Use:  <div class="responsive-card-grid"> ... </div>          */
+  .responsive-card-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, 16rem), 22rem)
+    );
+  }
+
+  /* Wider variant for content-heavy cards (settings, dashboards).  */
+  .responsive-card-grid-lg {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, 20rem), 28rem)
+    );
+  }
+
+  /* Standard responsive page wrapper.
+     Use:  <div class="responsive-page"> ... </div>                */
+  .responsive-page {
+    width: 100%;
+    max-width: 1800px;
+    margin-inline: auto;
+    padding: 1rem;
+  }
+  @media (min-width: 640px) {
+    .responsive-page { padding: 1.5rem; }
+  }
+
+  /* Truncate long single-line text safely (works inside flex/grid). */
+  .truncate-safe {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
 }
