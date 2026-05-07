@@ -11,6 +11,7 @@ import { Mic, LayoutTemplate } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useEpisodeProfiles, useSpeakerProfiles } from '@/lib/hooks/use-podcasts'
 import { needsModelSetup } from '@/lib/types/podcasts'
+import { ProtectedRouteGuard } from '@/lib/hooks/use-authorization'
 
 export default function PodcastsPage() {
   const { t } = useTranslation()
@@ -24,6 +25,7 @@ export default function PodcastsPage() {
   }, [episodeProfiles, speakerProfiles])
 
   return (
+    <ProtectedRouteGuard requiredRole="admin">
     <div className="flex-1 overflow-y-auto">
         <div className="px-6 py-6 space-y-6">
           <header className="space-y-1">
@@ -72,5 +74,6 @@ export default function PodcastsPage() {
           </Tabs>
         </div>
       </div>
+    </ProtectedRouteGuard>
   )
 }

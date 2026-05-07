@@ -5,12 +5,14 @@ import { useSettings } from '@/lib/hooks/use-settings'
 import { Button } from '@/components/ui/button'
 import { RefreshCw } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { ProtectedRouteGuard } from '@/lib/hooks/use-authorization'
 
 export default function SettingsPage() {
   const { t } = useTranslation()
   const { refetch } = useSettings()
 
   return (
+    <ProtectedRouteGuard requiredRole="admin">
       <div className="w-full h-full flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-6 lg:p-8">
@@ -27,5 +29,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+    </ProtectedRouteGuard>
   )
 }

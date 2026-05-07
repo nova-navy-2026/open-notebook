@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect, useId } from 'react'
 import { useForm } from 'react-hook-form'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { ProtectedRouteGuard } from '@/lib/hooks/use-authorization'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1330,13 +1331,16 @@ export default function ApiKeysPage() {
 
   if (isLoading) {
     return (
+      <ProtectedRouteGuard requiredRole="admin">
         <div className="flex items-center justify-center min-h-[60vh]">
           <LoadingSpinner size="lg" />
         </div>
+      </ProtectedRouteGuard>
     )
   }
 
   return (
+    <ProtectedRouteGuard requiredRole="admin">
       <div className="flex-1 overflow-y-auto">
         <div className="p-6 space-y-6">
           {/* Header */}
@@ -1397,5 +1401,6 @@ export default function ApiKeysPage() {
           </div>
         </div>
       </div>
+    </ProtectedRouteGuard>
   )
 }

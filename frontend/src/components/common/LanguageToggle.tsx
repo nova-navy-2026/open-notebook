@@ -49,9 +49,9 @@ export function LanguageToggle({ iconOnly = false }: LanguageToggleProps) {
           <span>{t.common.english}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => setLanguage("pt-BR")}
+          onClick={() => setLanguage("pt-PT")}
           className={
-            currentLang === "pt-BR" || currentLang.startsWith("pt")
+            currentLang === "pt-PT" || currentLang.startsWith("pt")
               ? "bg-accent"
               : ""
           }

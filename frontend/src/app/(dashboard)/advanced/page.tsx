@@ -3,10 +3,12 @@
 import { RebuildEmbeddings } from './components/RebuildEmbeddings'
 import { SystemInfo } from './components/SystemInfo'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { ProtectedRouteGuard } from '@/lib/hooks/use-authorization'
 
 export default function AdvancedPage() {
   const { t } = useTranslation()
   return (
+    <ProtectedRouteGuard requiredRole="admin">
       <div className="w-full h-full flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 sm:p-6 lg:p-8">
@@ -24,5 +26,6 @@ export default function AdvancedPage() {
           </div>
         </div>
       </div>
+    </ProtectedRouteGuard>
   )
 }

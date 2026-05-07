@@ -10,6 +10,7 @@ import { useTransformations } from '@/lib/hooks/use-transformations'
 import { Transformation } from '@/lib/types/transformations'
 import { Wand2, Play, RefreshCw } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { ProtectedRouteGuard } from '@/lib/hooks/use-authorization'
 
 export default function TransformationsPage() {
   const { t } = useTranslation()
@@ -23,6 +24,7 @@ export default function TransformationsPage() {
   }
 
   return (
+    <ProtectedRouteGuard requiredRole="admin">
     <div className="flex-1 overflow-y-auto">
         <div className="p-6 space-y-6">
           <div className="flex items-center justify-between">
@@ -73,5 +75,6 @@ export default function TransformationsPage() {
         </Tabs>
         </div>
       </div>
+    </ProtectedRouteGuard>
   )
 }

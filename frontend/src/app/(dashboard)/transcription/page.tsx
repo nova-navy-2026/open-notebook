@@ -1,0 +1,447 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  AudioLines,
+  Captions,
+  Copy,
+  Download,
+  Loader2,
+  Upload,
+  Users,
+  X,
+} from "lucide-react";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useTranscriptionStore } from "@/lib/stores/transcription-store";
+import { useTranslation } from "@/lib/hooks/use-translation";
+
+// Stable colour palette for speaker badges (Tailwind classes).
+const SPEAKER_PALETTE = [
+  "bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100",
+  "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100",
+  "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
+  "bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-100",
+  "bg-violet-100 text-violet-900 dark:bg-violet-900/40 dark:text-violet-100",
+  "bg-cyan-100 text-cyan-900 dark:bg-cyan-900/40 dark:text-cyan-100",
+];
+
+function speakerColour(
+  speaker: string | null | undefined,
+  speakers: string[],
+): string {
+  if (!speaker) return "bg-muted text-foreground";
+  const idx = Math.max(0, speakers.indexOf(speaker));
+  return SPEAKER_PALETTE[idx % SPEAKER_PALETTE.length];
+}
+
+function formatTime(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "00:00";
+  const total = Math.round(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+export default function TranscriptionPage() {
+  const { t } = useTranslation();
+  const tp = t.transcriptionPage;
+
+  const audio = useTranscriptionStore((s) => s.audio);
+  const audioPreview = useTranscriptionStore((s) => s.audioPreview);
+  const language = useTranscriptionStore((s) => s.language);
+  const diarize = useTranscriptionStore((s) => s.diarize);
+  const numSpeakers = useTranscriptionStore((s) => s.numSpeakers);
+  const isLoading = useTranscriptionStore((s) => s.isLoading);
+  const result = useTranscriptionStore((s) => s.result);
+  const error = useTranscriptionStore((s) => s.error);
+  const capabilities = useTranscriptionStore((s) => s.capabilities);
+  const setAudio = useTranscriptionStore((s) => s.setAudio);
+  const setLanguage = useTranscriptionStore((s) => s.setLanguage);
+  const setDiarize = useTranscriptionStore((s) => s.setDiarize);
+  const setNumSpeakers = useTranscriptionStore((s) => s.setNumSpeakers);
+  const setError = useTranscriptionStore((s) => s.setError);
+  const submit = useTranscriptionStore((s) => s.submit);
+  const clear = useTranscriptionStore((s) => s.clear);
+  const fetchCapabilities = useTranscriptionStore((s) => s.fetchCapabilities);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    fetchCapabilities();
+  }, [fetchCapabilities]);
+
+  const acceptAttr = useMemo(() => {
+    if (capabilities?.allowed_extensions?.length) {
+      return capabilities.allowed_extensions.join(",");
+    }
+    return "audio/*,video/mp4,video/webm";
+  }, [capabilities]);
+
+  const diarizationDisabled =
+    capabilities?.diarization_available === false;
+
+  const handleFileSelect = useCallback(
+    (file: File) => {
+      const lower = file.name.toLowerCase();
+      const okByMime = file.type.startsWith("audio/") || file.type.startsWith("video/");
+      const okByExt = capabilities?.allowed_extensions?.some((ext) =>
+        lower.endsWith(ext),
+      );
+      if (!okByMime && !okByExt) {
+        setError(tp.invalidFile);
+        return;
+      }
+      setAudio(file);
+    },
+    [capabilities, setAudio, setError, tp.invalidFile],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const file = e.dataTransfer.files[0];
+      if (file) handleFileSelect(file);
+    },
+    [handleFileSelect],
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submit();
+  };
+
+  const clearAll = () => {
+    clear();
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const copyText = async (text: string | null | undefined) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      /* noop */
+    }
+  };
+
+  const downloadText = (text: string | null | undefined, suffix: string) => {
+    if (!text) return;
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `transcript_${Date.now()}${suffix}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
+        <p className="text-muted-foreground">{tp.subtitle}</p>
+      </div>
+
+      {diarizationDisabled && (
+        <Alert>
+          <AlertDescription>
+            {tp.diarizationUnavailable}
+            {capabilities?.diarization_unavailable_reason
+              ? ` (${capabilities.diarization_unavailable_reason})`
+              : null}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl">
+        {/* Audio Upload */}
+        <div className="space-y-2">
+          <Label>{tp.uploadLabel}</Label>
+          <div
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onClick={() => fileInputRef.current?.click()}
+            className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+              isDragging
+                ? "border-primary bg-primary/5"
+                : audioPreview
+                  ? "border-border bg-muted/50"
+                  : "border-border hover:border-primary hover:bg-muted/50"
+            }`}
+          >
+            {audioPreview ? (
+              <div className="space-y-3">
+                <AudioLines className="h-10 w-10 text-muted-foreground mx-auto" />
+                <p className="text-foreground font-medium truncate max-w-md mx-auto">
+                  {audio?.name ?? "audio"}
+                </p>
+                <audio
+                  src={audioPreview}
+                  controls
+                  className="w-full max-w-md mx-auto"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <p className="text-sm text-muted-foreground">
+                  {tp.replaceHint}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Upload className="h-12 w-12 text-muted-foreground mx-auto" />
+                <p className="text-foreground font-medium">{tp.dropHint}</p>
+                <p className="text-sm text-muted-foreground">{tp.formats}</p>
+              </div>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={acceptAttr}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFileSelect(file);
+              }}
+              className="hidden"
+            />
+          </div>
+        </div>
+
+        {/* Language */}
+        <div className="space-y-2">
+          <Label htmlFor="language">
+            {tp.languageLabel}{" "}
+            <span className="text-muted-foreground text-xs">
+              {tp.optional}
+            </span>
+          </Label>
+          <Input
+            id="language"
+            type="text"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            placeholder={tp.languagePlaceholder}
+            maxLength={10}
+          />
+          <p className="text-xs text-muted-foreground">{tp.languageHint}</p>
+        </div>
+
+        {/* Diarization */}
+        <div className="space-y-3 rounded-lg border border-border p-4">
+          <div className="flex items-start gap-3">
+            <Checkbox
+              id="diarize"
+              checked={diarize}
+              disabled={diarizationDisabled}
+              onCheckedChange={(v) => setDiarize(Boolean(v))}
+            />
+            <div className="space-y-1 flex-1">
+              <Label
+                htmlFor="diarize"
+                className={`cursor-pointer ${diarizationDisabled ? "text-muted-foreground" : ""}`}
+              >
+                {tp.diarizeLabel}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {tp.diarizeHint}
+              </p>
+            </div>
+          </div>
+
+          {diarize && !diarizationDisabled && (
+            <div className="pl-7 space-y-2">
+              <Label htmlFor="numSpeakers" className="text-xs">
+                {tp.numSpeakersLabel}{" "}
+                <span className="text-muted-foreground">{tp.optional}</span>
+              </Label>
+              <Input
+                id="numSpeakers"
+                type="number"
+                min={1}
+                max={20}
+                value={numSpeakers}
+                onChange={(e) => setNumSpeakers(e.target.value)}
+                placeholder={tp.numSpeakersPlaceholder}
+                className="max-w-[8rem]"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Error */}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <Button type="submit" disabled={isLoading || !audio}>
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                {tp.transcribing}
+              </>
+            ) : (
+              <>
+                <Captions className="h-4 w-4 mr-2" />
+                {tp.transcribe}
+              </>
+            )}
+          </Button>
+          <Button type="button" variant="outline" onClick={clearAll}>
+            <X className="h-4 w-4 mr-2" />
+            {tp.clear}
+          </Button>
+        </div>
+      </form>
+
+      {/* Results */}
+      {result && (
+        <div className="space-y-4 max-w-4xl">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h2 className="text-xl font-semibold tracking-tight">
+              {tp.results}
+            </h2>
+            {result.diarized && result.speakers.length > 0 && (
+              <Badge variant="secondary" className="gap-1">
+                <Users className="h-3 w-3" />
+                {tp.speakersDetected.replace(
+                  "{count}",
+                  String(result.speakers.length),
+                )}
+              </Badge>
+            )}
+            {result.language && (
+              <Badge variant="outline">{result.language}</Badge>
+            )}
+          </div>
+
+          {/* Full text */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                {tp.fullTranscript}
+              </CardTitle>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyText(result.text)}
+                >
+                  <Copy className="h-4 w-4 mr-1" />
+                  {tp.copy}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => downloadText(result.text, "")}
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  {tp.download}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                {result.text || tp.emptyTranscript}
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Diarized dialog */}
+          {result.diarized && result.dialog && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {tp.dialog}
+                </CardTitle>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => copyText(result.dialog ?? "")}
+                  >
+                    <Copy className="h-4 w-4 mr-1" />
+                    {tp.copy}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      downloadText(result.dialog ?? "", "_dialog")
+                    }
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    {tp.download}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">
+                  {result.dialog}
+                </pre>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Timeline */}
+          {result.segments.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {tp.timeline}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {result.segments.map((seg, idx) => (
+                    <div
+                      key={`${seg.start}-${idx}`}
+                      className="flex gap-3 items-start text-sm"
+                    >
+                      <span className="font-mono text-xs text-muted-foreground shrink-0 w-24 pt-0.5">
+                        {formatTime(seg.start)} – {formatTime(seg.end)}
+                      </span>
+                      {seg.speaker && (
+                        <span
+                          className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${speakerColour(seg.speaker, result.speakers)}`}
+                        >
+                          {seg.speaker}
+                        </span>
+                      )}
+                      <span className="leading-relaxed">{seg.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

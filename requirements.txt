@@ -59,3 +59,9 @@ babel>=2.18.0
 # ipykernel>=6.29.5
 # ipywidgets>=8.1.5
 # types-requests>=2.32.4.20250913
+
+# ---- Audio: transcription & diarization ----
+# Whisper + Pyannote run in a dedicated NOVA-Researcher tool server
+# (see NOVA-Researcher/whisper_server.py, port 4805). Open-Notebook only
+# proxies HTTP requests to it; no extra Python deps are required here.
+# Configure WHISPER_API_URL (default http://localhost:4805) if needed.

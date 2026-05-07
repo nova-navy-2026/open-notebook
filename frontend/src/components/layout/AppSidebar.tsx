@@ -51,6 +51,7 @@ import {
   Image as ImageIcon,
   Video,
   MapPin,
+  Captions,
 } from "lucide-react";
 
 const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
@@ -102,6 +103,16 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
           name: t.navigation.routePlanner ?? "Route Planner",
           href: "/navigation",
           icon: MapPin,
+        },
+      ],
+    },
+    {
+      title: t.navigation.audio ?? "Audio",
+      items: [
+        {
+          name: t.navigation.transcription ?? "Transcription",
+          href: "/transcription",
+          icon: Captions,
         },
       ],
     },

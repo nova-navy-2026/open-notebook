@@ -56,6 +56,7 @@ from api.routers import (
     source_chat,
     sources,
     speaker_profiles,
+    transcription,
     transformations,
     users,
 )
@@ -416,6 +417,7 @@ app.include_router(navy_docs.router, prefix="/api", tags=["navy-docs"])
 app.include_router(global_chat.router, prefix="/api", tags=["global-chat"])
 app.include_router(vision.router, prefix="/api", tags=["vision"])
 app.include_router(navigation.router, prefix="/api", tags=["navigation"])
+app.include_router(transcription.router, prefix="/api", tags=["transcription"])
 
 
 @app.get("/")

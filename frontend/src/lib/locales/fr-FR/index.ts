@@ -230,6 +230,8 @@ export const frFR = {
     videoAnalysis: "Analyse vidéo",
     navigationSection: "Navigation",
     routePlanner: "Planificateur d'itinéraire",
+    audio: "Audio",
+    transcription: "Transcription",
   },
   notebooks: {
     title: "Carnets",
@@ -1154,5 +1156,38 @@ export const frFR = {
     adding: "Ajout en cours...",
     success: "Ajouté au(x) carnet(s).",
     error: "Échec de l'ajout au carnet.",
+  },
+  transcriptionPage: {
+    title: "Transcription et diarisation",
+    subtitle:
+      "Chargez un enregistrement audio (ex. communications VHF, réunions) et convertissez-le en texte avec Whisper. Identifiez éventuellement les locuteurs avec la diarisation pyannote.",
+    uploadLabel: "Fichier audio",
+    dropHint: "Déposez un fichier audio ici ou cliquez pour parcourir",
+    formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
+    replaceHint: "Cliquez ou glissez pour remplacer",
+    languageLabel: "Langue",
+    languagePlaceholder: "ex. fr, en, pt",
+    languageHint:
+      "Code ISO-639-1. Laissez vide pour la détection automatique de la langue.",
+    optional: "(optionnel)",
+    diarizeLabel: "Identifier les locuteurs (diarisation)",
+    diarizeHint:
+      "Utilise pyannote.audio pour segmenter l'enregistrement par locuteur. Nécessite le paquet pyannote.audio et un jeton Hugging Face.",
+    diarizationUnavailable:
+      "La diarisation des locuteurs n'est pas disponible dans cet environnement.",
+    numSpeakersLabel: "Nombre de locuteurs",
+    numSpeakersPlaceholder: "auto",
+    transcribe: "Transcrire",
+    transcribing: "Transcription...",
+    clear: "Effacer",
+    results: "Résultats",
+    fullTranscript: "Transcription complète",
+    dialog: "Dialogue par locuteur",
+    timeline: "Chronologie des segments",
+    speakersDetected: "{count} locuteurs détectés",
+    emptyTranscript: "(aucune parole détectée)",
+    copy: "Copier",
+    download: "Télécharger",
+    invalidFile: "Veuillez sélectionner un fichier audio valide.",
   },
 };

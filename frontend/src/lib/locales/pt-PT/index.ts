@@ -1,4 +1,4 @@
-export const ptBR = {
+export const ptPT = {
   common: {
     search: "Pesquisar...",
     create: "Novo",
@@ -227,6 +227,8 @@ export const ptBR = {
     videoAnalysis: "Análise de Vídeo",
     navigationSection: "Navegação",
     routePlanner: "Planeador de Rotas",
+    audio: "Áudio",
+    transcription: "Transcrição",
   },
   notebooks: {
     title: "Notebooks",
@@ -1205,5 +1207,38 @@ export const ptBR = {
     adding: "A adicionar...",
     success: "Adicionado ao(s) notebook(s).",
     error: "Não foi possível adicionar ao notebook.",
+  },
+  transcriptionPage: {
+    title: "Transcrição e Diarização",
+    subtitle:
+      "Carregue uma gravação áudio (ex.: comunicações VHF de navios, reuniões) e converta-a em texto com Whisper. Opcionalmente identifique quem fala através da diarização pyannote.",
+    uploadLabel: "Ficheiro áudio",
+    dropHint: "Arraste um ficheiro áudio aqui ou clique para procurar",
+    formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
+    replaceHint: "Clique ou arraste para substituir",
+    languageLabel: "Idioma",
+    languagePlaceholder: "ex.: pt, en, fr",
+    languageHint:
+      "Código ISO-639-1. Deixe vazio para detecção automática do idioma.",
+    optional: "(opcional)",
+    diarizeLabel: "Identificar interlocutores (diarização)",
+    diarizeHint:
+      "Usa pyannote.audio para segmentar a gravação por interlocutor. Requer o pacote pyannote.audio e um token Hugging Face.",
+    diarizationUnavailable:
+      "A diarização de interlocutores não está disponível neste ambiente.",
+    numSpeakersLabel: "Número de interlocutores",
+    numSpeakersPlaceholder: "auto",
+    transcribe: "Transcrever",
+    transcribing: "A transcrever...",
+    clear: "Limpar",
+    results: "Resultados",
+    fullTranscript: "Transcrição completa",
+    dialog: "Diálogo por interlocutor",
+    timeline: "Linha temporal de segmentos",
+    speakersDetected: "{count} interlocutores detetados",
+    emptyTranscript: "(sem voz detetada)",
+    copy: "Copiar",
+    download: "Transferir",
+    invalidFile: "Por favor selecione um ficheiro áudio válido.",
   },
 };

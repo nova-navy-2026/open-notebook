@@ -226,6 +226,8 @@ export const enUS = {
     videoAnalysis: "Video Analysis",
     navigationSection: "Navigation",
     routePlanner: "Route Planner",
+    audio: "Audio",
+    transcription: "Transcription",
   },
   notebooks: {
     title: "Notebooks",
@@ -1201,5 +1203,38 @@ export const enUS = {
     adding: "Adding...",
     success: "Added to notebook(s).",
     error: "Failed to add to notebook.",
+  },
+  transcriptionPage: {
+    title: "Transcription & Diarization",
+    subtitle:
+      "Upload an audio recording (e.g. VHF radio chatter, a meeting) and convert it to text with Whisper. Optionally label who said what with pyannote speaker diarization.",
+    uploadLabel: "Audio file",
+    dropHint: "Drop an audio file here or click to browse",
+    formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
+    replaceHint: "Click or drag to replace",
+    languageLabel: "Language",
+    languagePlaceholder: "e.g. en, pt, fr",
+    languageHint:
+      "ISO-639-1 code. Leave empty for automatic language detection.",
+    optional: "(optional)",
+    diarizeLabel: "Identify speakers (diarization)",
+    diarizeHint:
+      "Uses pyannote.audio to segment the recording by speaker. Requires the pyannote.audio package and a Hugging Face token.",
+    diarizationUnavailable:
+      "Speaker diarization is not available in this environment.",
+    numSpeakersLabel: "Number of speakers",
+    numSpeakersPlaceholder: "auto",
+    transcribe: "Transcribe",
+    transcribing: "Transcribing...",
+    clear: "Clear",
+    results: "Results",
+    fullTranscript: "Full transcript",
+    dialog: "Speaker dialog",
+    timeline: "Segment timeline",
+    speakersDetected: "{count} speakers detected",
+    emptyTranscript: "(no speech detected)",
+    copy: "Copy",
+    download: "Download",
+    invalidFile: "Please select a valid audio file.",
   },
 };
