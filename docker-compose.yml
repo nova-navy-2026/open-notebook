@@ -8,6 +8,8 @@ services:
       - "8555:8000"
     volumes:
       - surrealdb_data:/data
+    networks:
+      - marinha-net
     restart: always
     pull_policy: always
 
@@ -32,11 +34,27 @@ services:
       - SURREAL_PASSWORD=root
       - SURREAL_NAMESPACE=open_notebook
       - SURREAL_DATABASE=open_notebook
+      # Reach NOVA-Researcher services by their container names on the
+      # shared ``marinha-net`` network.
+      - NOVA_RESEARCHER_URL=http://nova-researcher:3800
+      - GPT_RESEARCHER_URL=http://nova-researcher:3800
+      - WHISPER_API_URL=http://nova-whisper:4805
+      - SAM3_API_URL=http://nova-sam3:4800
+      - NOMIC_SERVER_URL=http://nova-nomic:4801
+      - RFDETR_API_URL=http://nova-rf-detr:4802
+      - BGE_M3_SERVER_URL=http://nova-bge-m3:4803
+      - CLIP_SERVER_URL=http://nova-clip:4804
     volumes:
       - ./notebook_data:/app/data
     depends_on:
       - surrealdb
+    networks:
+      - marinha-net
     restart: always
 
 volumes:
   surrealdb_data:
+
+networks:
+  marinha-net:
+    external: true
