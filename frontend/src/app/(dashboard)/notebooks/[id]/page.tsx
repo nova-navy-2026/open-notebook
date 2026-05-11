@@ -108,18 +108,57 @@ export default function NotebookPage() {
   );
   const [navyDocsInitialized, setNavyDocsInitialized] = useState(false);
 
-  // Initialize: select first 15 navy docs by default
+  // Persist navy doc selections per-notebook in localStorage so the
+  // user's toggled choices survive page reloads / re-navigation.
+  const navySelectionStorageKey = notebookId
+    ? `notebook:${notebookId}:selectedNavyDocIds`
+    : "";
+
+  // Initialize from localStorage (if anything was saved before). We only
+  // restore IDs that still exist in the current navy corpus to avoid
+  // stale references.
   useEffect(() => {
     if (
       navyData?.documents &&
       navyData.documents.length > 0 &&
-      !navyDocsInitialized
+      !navyDocsInitialized &&
+      navySelectionStorageKey
     ) {
-      const ids = navyData.documents.slice(0, 15).map((d) => d.doc_id);
-      setSelectedNavyDocIds(new Set(ids));
+      let restored: Set<string> = new Set();
+      try {
+        const raw = localStorage.getItem(navySelectionStorageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as string[];
+          if (Array.isArray(parsed)) {
+            const valid = new Set(navyData.documents.map((d) => d.doc_id));
+            restored = new Set(parsed.filter((id) => valid.has(id)));
+            // Honour the 15-doc cap even on restore.
+            if (restored.size > 15) {
+              restored = new Set(Array.from(restored).slice(0, 15));
+            }
+          }
+        }
+      } catch {
+        // Ignore malformed payload; start empty.
+      }
+      setSelectedNavyDocIds(restored);
       setNavyDocsInitialized(true);
     }
-  }, [navyData, navyDocsInitialized]);
+  }, [navyData, navyDocsInitialized, navySelectionStorageKey]);
+
+  // Save selection changes back to localStorage once we've initialized
+  // so we don't overwrite stored values with the empty default.
+  useEffect(() => {
+    if (!navyDocsInitialized || !navySelectionStorageKey) return;
+    try {
+      localStorage.setItem(
+        navySelectionStorageKey,
+        JSON.stringify(Array.from(selectedNavyDocIds)),
+      );
+    } catch {
+      // localStorage may be unavailable (private mode); ignore.
+    }
+  }, [selectedNavyDocIds, navyDocsInitialized, navySelectionStorageKey]);
 
   const handleNavyDocSelectionChange = useCallback(
     (docId: string, selected: boolean) => {

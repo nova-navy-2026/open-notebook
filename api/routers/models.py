@@ -458,6 +458,10 @@ async def get_provider_availability():
         provider_status["nomic"] = True
         provider_status["clip"] = True
 
+        # Local Whisper STT server (NOVA-Researcher whisper_server) —
+        # always available; configured via WHISPER_API_URL env var.
+        provider_status["whisper"] = True
+
         # Google also supports GEMINI_API_KEY
         if not provider_status.get("google"):
             provider_status["google"] = os.environ.get("GEMINI_API_KEY") is not None
@@ -537,6 +541,13 @@ async def get_provider_availability():
             if provider == "amalia":
                 if "language" not in supported_types[provider]:
                     supported_types[provider].append("language")
+
+            # Whisper is a local STT server, not an Esperanto provider —
+            # manually declare its supported type so it appears in the
+            # speech-to-text dropdown on the Models screen.
+            if provider == "whisper":
+                if "speech_to_text" not in supported_types[provider]:
+                    supported_types[provider].append("speech_to_text")
 
         return ProviderAvailabilityResponse(
             available=available_providers,

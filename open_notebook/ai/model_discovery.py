@@ -844,6 +844,64 @@ async def discover_clip_models() -> List[DiscoveredModel]:
     )
 
 
+async def discover_whisper_models() -> List[DiscoveredModel]:
+    """Discover the speech-to-text model exposed by the local Whisper
+    server (NOVA-Researcher ``whisper_server.py``, default port 4805).
+
+    The server loads a single faster-whisper model per process (selected
+    via the ``WHISPER_MODEL`` env var on the server). We query the
+    server's ``/health`` endpoint to find out which model name is loaded
+    and register it as a selectable speech-to-text model under the
+    ``whisper`` provider, so it shows up in the Models screen and can be
+    set as the default STT engine.
+    """
+    base_url = os.environ.get("WHISPER_API_URL", "http://localhost:4805").rstrip("/")
+    models: List[DiscoveredModel] = []
+    loaded_model: Optional[str] = None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{base_url}/health")
+            response.raise_for_status()
+            data = response.json()
+            loaded_model = data.get("model")
+            if loaded_model:
+                models.append(
+                    DiscoveredModel(
+                        name=loaded_model,
+                        provider="whisper",
+                        model_type="speech_to_text",
+                        description=(
+                            f"faster-whisper '{loaded_model}' served by "
+                            f"NOVA-Researcher whisper_server at {base_url}"
+                        ),
+                    )
+                )
+    except Exception as e:
+        logger.warning(
+            f"Whisper server not reachable at {base_url}/health: {e}; "
+            "falling back to env/default model name"
+        )
+
+    # Fallback so the model is selectable even when the server is offline
+    # at sync time. Matches the server-side default in whisper_server.py.
+    if not models:
+        fallback_name = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
+        models.append(
+            DiscoveredModel(
+                name=fallback_name,
+                provider="whisper",
+                model_type="speech_to_text",
+                description=(
+                    f"faster-whisper '{fallback_name}' served by the "
+                    "NOVA-Researcher whisper_server (offline at sync time)"
+                ),
+            )
+        )
+
+    return models
+
+
 # =============================================================================
 # Main Discovery Functions
 # =============================================================================
@@ -867,6 +925,7 @@ PROVIDER_DISCOVERY_FUNCTIONS = {
     "nomic": discover_nomic_models,
     "clip": discover_clip_models,
     "transformers": discover_transformers_models,
+    "whisper": discover_whisper_models,
     "azure": None,  # Azure requires credential-based discovery (different auth)
     "vertex": None,  # Vertex requires credential-based discovery (service account)
 }

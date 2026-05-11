@@ -39,24 +39,58 @@ def _build_type_filter(
 def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert raw OpenSearch hits to the SurrealDB result format.
 
-    Handles both Open Notebook documents (parent_id, title) and
-    Navy PDF documents (doc_id, section_title / source).
+    Handles both Open Notebook documents (``parent_id`` + ``title``) and Navy
+    PDF documents (``doc_id`` + ``section_title`` + ``source``). For Navy
+    rows the document-level identity is the *file* (``source`` field) keyed
+    by ``doc_id``; ``section_title`` is chunk-level metadata that goes into
+    ``matches`` instead of the result title.
     """
     results = []
     for hit in hits:
         src = hit.get("_source", {})
         score = hit.get("_score", 0)
-        # Navy docs use doc_id instead of parent_id
-        parent_id = src.get("parent_id") or src.get("doc_id", "")
-        # Navy docs use section_title or source instead of title
-        title = src.get("title") or src.get("section_title") or src.get("source", "")
+
+        parent_id_raw = src.get("parent_id")
+        doc_id = src.get("doc_id")
+        section_title = src.get("section_title")
+        source_name = src.get("source")
+        is_navy = not parent_id_raw and (doc_id or section_title or source_name)
+
+        if is_navy:
+            # Use a stable prefixed key so the frontend's "type:id" split works
+            # and so we never collide with native open-notebook parent IDs.
+            parent_id = f"navy:{doc_id or source_name or hit.get('_id', '')}"
+            # Document-level title = filename / source. Fall back to section
+            # title only when no source is recorded.
+            title = source_name or section_title or "Untitled document"
+            # Chunk-level descriptor for the matches accordion.
+            page_start = src.get("page_start")
+            page_end = src.get("page_end")
+            chunk_label_parts: List[str] = []
+            if section_title:
+                chunk_label_parts.append(str(section_title))
+            if page_start is not None or page_end is not None:
+                if page_start == page_end or page_end is None:
+                    chunk_label_parts.append(f"p. {page_start}")
+                else:
+                    chunk_label_parts.append(f"pp. {page_start}-{page_end}")
+            chunk_prefix = " · ".join(chunk_label_parts)
+            content = src.get("content", "")
+            match_text = (
+                f"[{chunk_prefix}] {content}" if chunk_prefix else content
+            )
+        else:
+            parent_id = parent_id_raw or ""
+            title = src.get("title") or section_title or source_name or ""
+            match_text = src.get("content", "")
+
         item: Dict[str, Any] = {
             "id": hit.get("_id", ""),
             "parent_id": parent_id,
             "title": title,
             "similarity": score,
             "relevance": score,
-            "matches": [src.get("content", "")],
+            "matches": [match_text] if match_text else [],
         }
         file_path = src.get("file_path")
         if file_path:
@@ -145,6 +179,8 @@ async def opensearch_text_search(
                 "doc_id",
                 "section_title",
                 "source",
+                "page_start",
+                "page_end",
                 # Shared file system path
                 "file_path",
             ],
@@ -189,23 +225,21 @@ async def opensearch_vector_search(
         # k-NN 'k' must be <= 10000 and >= 1
         k_value = min(max(results * 3, 1), 10000)
 
+        # Build the knn clause. When filters are present we pass them via the
+        # k-NN plugin's built-in "filter" parameter (efficient filtering) rather
+        # than wrapping knn in a bool/must alongside a sibling bool/filter. The
+        # latter pattern triggers an OpenSearch/Lucene bug:
+        #   "Sub-iterators of ConjunctionDISI are not on the same document!"
+        knn_clause: Dict[str, Any] = {
+            "vector": embedding,
+            "k": k_value,
+        }
+        if filters:
+            knn_clause["filter"] = {"bool": {"filter": filters}}
+
         body: Dict[str, Any] = {
             "size": results * 3,
-            "query": {
-                "bool": {
-                    "must": [
-                        {
-                            "knn": {
-                                "embedding": {
-                                    "vector": embedding,
-                                    "k": k_value,
-                                }
-                            }
-                        }
-                    ],
-                    "filter": filters,
-                }
-            },
+            "query": {"knn": {"embedding": knn_clause}},
             "min_score": min_score,
             "_source": [
                 "doc_type",
@@ -217,6 +251,8 @@ async def opensearch_vector_search(
                 "doc_id",
                 "section_title",
                 "source",
+                "page_start",
+                "page_end",
                 # Shared file system path
                 "file_path",
             ],

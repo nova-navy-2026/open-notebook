@@ -47,6 +47,45 @@ export function ResearchGeneratePanel({
   const [reportType, setReportType] = useState("research_report");
   const [tone, setTone] = useState("Objective");
   const [modelId, setModelId] = useState("");
+  const [fromTranscript, setFromTranscript] = useState(false);
+
+  // Pre-fill the query when arriving from the Transcription page.
+  // The transcript text is stashed in sessionStorage by that page so
+  // we don't have to plumb a global store for a one-shot hand-off.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = sessionStorage.getItem("researchDraftFromTranscript");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { query?: string; source?: string };
+      if (parsed?.query && parsed.query.trim().length > 0) {
+        // Wrap the raw transcript with explicit instructions so the
+        // researcher writes a report ABOUT the meeting itself rather
+        // than treating the transcript as a generic research topic.
+        const transcript = parsed.query.trim();
+        const wrapped =
+          "You are writing a detailed report on the meeting whose " +
+          "transcript is provided below. Base the report strictly on " +
+          "the content of this transcript: summarize the topics that " +
+          "were actually discussed, the decisions made, the action " +
+          "items, the participants and their positions, and any open " +
+          "questions. Do NOT introduce unrelated background material, " +
+          "external references, or speculative information that is " +
+          "not grounded in the transcript. Organize the report with " +
+          "clear sections (e.g. Overview, Key Topics Discussed, " +
+          "Decisions, Action Items, Open Questions).\n\n" +
+          "--- MEETING TRANSCRIPT ---\n" +
+          transcript +
+          "\n--- END OF TRANSCRIPT ---";
+        setQuery(wrapped);
+        setFromTranscript(true);
+      }
+      // Consume the draft so a manual refresh doesn't re-apply it.
+      sessionStorage.removeItem("researchDraftFromTranscript");
+    } catch {
+      // Ignore malformed payloads.
+    }
+  }, []);
 
   // Pre-select the default chat model once loaded
   useEffect(() => {
@@ -69,7 +108,10 @@ export function ResearchGeneratePanel({
       tone,
       source_urls: [],
       model_id: modelId || undefined,
-      use_amalia: true, // Always fetch OpenSearch docs; backend routes LLM by model provider
+      // When the query was seeded from a meeting transcript we want
+      // the report to stay focused on the transcript itself, so skip
+      // pulling unrelated OpenSearch / Amália navy-doc context.
+      use_amalia: !fromTranscript,
       run_in_background: true,
     });
 
@@ -91,6 +133,13 @@ export function ResearchGeneratePanel({
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {fromTranscript && (
+            <div className="mb-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+              Pre-filled from the latest transcription. The report will focus on
+              the meeting content itself (no OpenSearch context will be added).
+              Edit before generating if needed.
+            </div>
+          )}
           <Textarea
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -184,7 +233,9 @@ export function ResearchGeneratePanel({
               modelType="language"
               value={modelId}
               onChange={setModelId}
-              placeholder={t.research?.selectModelPlaceholder ?? "Select a model..."}
+              placeholder={
+                t.research?.selectModelPlaceholder ?? "Select a model..."
+              }
               disabled={isSubmitting}
             />
           </CardContent>

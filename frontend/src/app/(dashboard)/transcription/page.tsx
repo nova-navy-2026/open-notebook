@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   AudioLines,
   Captions,
   Copy,
   Download,
   Loader2,
+  Sparkles,
   Upload,
   Users,
   X,
@@ -15,12 +17,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,6 +75,35 @@ export default function TranscriptionPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const router = useRouter();
+
+  // Send the current transcript to the Research page so the user can
+  // produce a Deep Research report from it (and then save the report
+  // into a notebook just like any other research job).
+  const sendToResearch = useCallback(() => {
+    if (!result) return;
+    // Prefer the diarized dialog if present — it carries speaker labels
+    // and is more useful as research input than the flat transcript.
+    const draft = (
+      result.dialog && result.dialog.trim().length > 0
+        ? result.dialog
+        : result.text || ""
+    ).trim();
+    if (!draft) return;
+    try {
+      sessionStorage.setItem(
+        "researchDraftFromTranscript",
+        JSON.stringify({
+          query: draft,
+          source: "transcription",
+          createdAt: Date.now(),
+        }),
+      );
+    } catch {
+      // sessionStorage may be unavailable (private mode); silently skip.
+    }
+    router.push("/research?fromTranscript=1");
+  }, [result, router]);
 
   useEffect(() => {
     fetchCapabilities();
@@ -90,13 +116,13 @@ export default function TranscriptionPage() {
     return "audio/*,video/mp4,video/webm";
   }, [capabilities]);
 
-  const diarizationDisabled =
-    capabilities?.diarization_available === false;
+  const diarizationDisabled = capabilities?.diarization_available === false;
 
   const handleFileSelect = useCallback(
     (file: File) => {
       const lower = file.name.toLowerCase();
-      const okByMime = file.type.startsWith("audio/") || file.type.startsWith("video/");
+      const okByMime =
+        file.type.startsWith("audio/") || file.type.startsWith("video/");
       const okByExt = capabilities?.allowed_extensions?.some((ext) =>
         lower.endsWith(ext),
       );
@@ -233,9 +259,7 @@ export default function TranscriptionPage() {
         <div className="space-y-2">
           <Label htmlFor="language">
             {tp.languageLabel}{" "}
-            <span className="text-muted-foreground text-xs">
-              {tp.optional}
-            </span>
+            <span className="text-muted-foreground text-xs">{tp.optional}</span>
           </Label>
           <Input
             id="language"
@@ -264,9 +288,7 @@ export default function TranscriptionPage() {
               >
                 {tp.diarizeLabel}
               </Label>
-              <p className="text-xs text-muted-foreground">
-                {tp.diarizeHint}
-              </p>
+              <p className="text-xs text-muted-foreground">{tp.diarizeHint}</p>
             </div>
           </div>
 
@@ -338,6 +360,19 @@ export default function TranscriptionPage() {
             {result.language && (
               <Badge variant="outline">{result.language}</Badge>
             )}
+            <div className="ml-auto">
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={sendToResearch}
+                disabled={!result.text && !result.dialog}
+                title="Generate a Deep Research report using this transcript as the query"
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                Research from transcript
+              </Button>
+            </div>
           </div>
 
           {/* Full text */}
@@ -391,9 +426,7 @@ export default function TranscriptionPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() =>
-                      downloadText(result.dialog ?? "", "_dialog")
-                    }
+                    onClick={() => downloadText(result.dialog ?? "", "_dialog")}
                   >
                     <Download className="h-4 w-4 mr-1" />
                     {tp.download}

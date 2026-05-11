@@ -32,6 +32,15 @@ COPY open_notebook/__init__.py ./open_notebook/__init__.py
 # Install dependencies with optimizations (this layer will be cached unless dependencies change)
 RUN uv sync --frozen --no-dev
 
+# Install the optional "transformers" embedding provider stack (CPU-only torch wheel).
+# Needed so the local HuggingFace transformers embedding provider in esperanto works
+# without bringing in a CUDA-sized torch. ~250 MB total.
+RUN .venv/bin/pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        torch \
+        transformers \
+        sentence-transformers
+
 # Pre-download tiktoken encoding so the app works offline (issue #264).
 # /app/tiktoken-cache is intentionally outside /app/data/ so that volume mounts
 # of /app/data (for user data persistence) do not hide the pre-baked encoding.

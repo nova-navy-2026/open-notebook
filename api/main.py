@@ -228,12 +228,66 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"{_local_provider} model seeding encountered an error: {e}")
 
+    # Seed the local Whisper speech-to-text server (NOVA-Researcher
+    # whisper_server, default port 4805). No API key required — the
+    # server is reachable over the shared Docker network. Registering
+    # makes the Whisper model appear in the Models screen so the user
+    # can pick it as the default speech-to-text engine.
+    try:
+        from open_notebook.ai.model_discovery import sync_provider_models as _sync
+
+        discovered, new, existing = await _sync("whisper", auto_register=True)
+        if new > 0:
+            logger.info(f"Registered {new} new whisper speech-to-text model(s)")
+        else:
+            logger.info(f"whisper models already present ({existing} existing)")
+    except Exception as e:
+        logger.warning(f"whisper model seeding encountered an error: {e}")
+
+    # Background task: keep the navy documents listing warm by refreshing
+    # it from OpenSearch on a fixed interval. This way the /api/navy-docs
+    # endpoint always serves a recent cached result (no user request ever
+    # pays the cold aggregation cost), while still picking up changes to
+    # the corpus without requiring an API restart.
+    import asyncio as _asyncio
+    from open_notebook.search import navy_docs as _navy_docs_mod
+
+    _NAVY_REFRESH_INTERVAL = float(os.environ.get("NAVY_DOCS_REFRESH_SECONDS", "300"))
+
+    async def _refresh_navy_docs_loop():
+        # Prime once on startup so the very first user request is warm.
+        try:
+            docs = await _navy_docs_mod.list_navy_documents()
+            logger.info(f"Navy docs cache primed ({len(docs)} documents)")
+        except Exception as e:
+            logger.warning(f"Initial navy docs cache prime failed: {e}")
+
+        while True:
+            try:
+                await _asyncio.sleep(_NAVY_REFRESH_INTERVAL)
+                _navy_docs_mod.invalidate_navy_documents_cache()
+                docs = await _navy_docs_mod.list_navy_documents()
+                logger.debug(
+                    f"Navy docs cache refreshed in background ({len(docs)} documents)"
+                )
+            except _asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"Background navy docs refresh failed: {e}")
+
+    navy_refresh_task = _asyncio.create_task(_refresh_navy_docs_loop())
+
     logger.success("API initialization completed successfully")
 
     # Yield control to the application
     yield
 
     # Shutdown: cleanup if needed
+    navy_refresh_task.cancel()
+    try:
+        await navy_refresh_task
+    except (Exception, BaseException):
+        pass
     logger.info("API shutdown complete")
 
 

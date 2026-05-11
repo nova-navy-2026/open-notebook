@@ -117,7 +117,86 @@ async def transcribe(
         f"diarize={diarize}, speakers={(num_speakers, min_speakers, max_speakers)}"
     )
 
+    # Resolve which speech-to-text engine the user picked on the
+    # Settings → Models screen. The dispatch rules are:
+    #   - provider == "whisper"  → use the local NOVA-Researcher whisper
+    #                              server (this router's existing path)
+    #   - any other provider     → route through Esperanto's AIFactory
+    #                              (e.g. openai whisper-1, groq whisper-large)
+    #   - no default configured  → fall back to the local whisper server
+    stt_provider: Optional[str] = None
+    stt_model_name: Optional[str] = None
     try:
+        from open_notebook.ai.models import model_manager
+        from open_notebook.ai.models import Model as ModelRecord
+
+        defaults = await model_manager.get_defaults()
+        default_stt_id = getattr(defaults, "default_speech_to_text_model", None)
+        if default_stt_id:
+            stt_record = await ModelRecord.get(default_stt_id)
+            if stt_record is not None:
+                stt_provider = stt_record.provider
+                stt_model_name = stt_record.name
+                logger.info(
+                    f"Using configured default STT model: "
+                    f"provider={stt_provider!r} model={stt_model_name!r}"
+                )
+    except Exception as e:
+        logger.warning(
+            f"Could not resolve default STT model, falling back to local "
+            f"whisper server: {e}"
+        )
+
+    try:
+        if stt_provider and stt_provider != "whisper":
+            # Use Esperanto's STT factory for non-local providers
+            # (e.g. openai whisper-1, groq whisper-large-v3).
+            from open_notebook.ai.models import model_manager as _mm
+
+            stt_model = await _mm.get_speech_to_text()
+            if stt_model is None:
+                raise RuntimeError(
+                    f"Default STT model is set to provider '{stt_provider}' "
+                    f"but the model could not be instantiated."
+                )
+            # Esperanto STT models expose .transcribe(file_path) or similar.
+            transcribe_fn = getattr(stt_model, "atranscribe", None) or getattr(
+                stt_model, "transcribe", None
+            )
+            if transcribe_fn is None:
+                raise RuntimeError(
+                    f"STT provider '{stt_provider}' does not expose a "
+                    "transcribe() method."
+                )
+            import inspect
+
+            call_kwargs = {}
+            if norm_lang is not None:
+                call_kwargs["language"] = norm_lang
+            raw = transcribe_fn(saved_path, **call_kwargs)
+            if inspect.isawaitable(raw):
+                raw = await raw
+            # Normalise to the shape the frontend expects.
+            if isinstance(raw, str):
+                result = {"text": raw, "segments": [], "speakers": [], "dialog": "",
+                          "diarized": False, "language": norm_lang}
+            elif isinstance(raw, dict):
+                result = raw
+            else:
+                # Try to coerce a pydantic / dataclass-ish response
+                result = {
+                    "text": getattr(raw, "text", str(raw)),
+                    "segments": getattr(raw, "segments", []) or [],
+                    "speakers": getattr(raw, "speakers", []) or [],
+                    "dialog": getattr(raw, "dialog", "") or "",
+                    "diarized": False,
+                    "language": getattr(raw, "language", norm_lang),
+                }
+            result.setdefault("provider", stt_provider)
+            result.setdefault("model", stt_model_name)
+            return result
+
+        # Default path: local NOVA-Researcher whisper server
         result = await run_transcription(
             audio_path=saved_path,
             filename=audio.filename,
@@ -128,6 +207,9 @@ async def transcribe(
             min_speakers=min_speakers,
             max_speakers=max_speakers,
         )
+        result.setdefault("provider", "whisper")
+        if stt_model_name:
+            result.setdefault("model", stt_model_name)
         return result
 
     except HTTPException:

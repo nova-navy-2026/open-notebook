@@ -41,7 +41,11 @@ export default function SearchPage() {
 
   // Determine search type from admin settings, falling back to hybrid or text
   const searchType: "text" | "vector" | "hybrid" = (() => {
-    const configured = settings?.default_search_type as "text" | "vector" | "hybrid" | undefined;
+    const configured = settings?.default_search_type as
+      | "text"
+      | "vector"
+      | "hybrid"
+      | undefined;
     if (configured === "vector" || configured === "hybrid") {
       return hasEmbeddingModel ? configured : "text";
     }
@@ -213,37 +217,67 @@ export default function SearchPage() {
                       return null;
                     }
                     const [type, id] = result.parent_id.split(":");
-                    const modalType =
-                      type === "source_insight"
+                    const isNavy = type === "navy";
+                    const modalType = isNavy
+                      ? null
+                      : type === "source_insight"
                         ? "insight"
                         : (type as "source" | "note" | "insight");
+                    const typeLabel = isNavy
+                      ? "Document"
+                      : type === "source"
+                        ? "Source"
+                        : type === "note"
+                          ? "Note"
+                          : "Insight";
 
                     const matchCount = result.matches?.length ?? 0;
 
                     return (
-                      <Card key={index} className="hover:border-primary/30 transition-colors">
+                      <Card
+                        key={index}
+                        className="hover:border-primary/30 transition-colors"
+                      >
                         <CardContent className="pt-4">
                           <div className="flex items-start justify-between gap-4">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                                <Badge variant="outline" className="text-xs flex-shrink-0">
-                                  {type === "source" ? "Source" : type === "note" ? "Note" : "Insight"}
+                                <Badge
+                                  variant="outline"
+                                  className="text-xs flex-shrink-0"
+                                >
+                                  {typeLabel}
                                 </Badge>
-                                <Badge variant="secondary" className="text-xs flex-shrink-0">
+                                <Badge
+                                  variant="secondary"
+                                  className="text-xs flex-shrink-0"
+                                >
                                   {result.final_score.toFixed(2)}
                                 </Badge>
                                 {matchCount > 1 && (
-                                  <Badge variant="secondary" className="text-xs flex-shrink-0">
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-xs flex-shrink-0"
+                                  >
                                     {matchCount} chunks
                                   </Badge>
                                 )}
                               </div>
-                              <button
-                                onClick={() => openModal(modalType, id)}
-                                className="text-primary hover:underline font-medium text-left truncate block w-full"
-                              >
-                                {result.title}
-                              </button>
+                              {modalType ? (
+                                <button
+                                  onClick={() => openModal(modalType, id)}
+                                  className="text-primary hover:underline font-medium text-left truncate block w-full"
+                                >
+                                  {result.title}
+                                </button>
+                              ) : (
+                                <span
+                                  className="font-medium text-left truncate block w-full"
+                                  title={result.title}
+                                >
+                                  {result.title}
+                                </span>
+                              )}
                             </div>
                           </div>
 
@@ -281,4 +315,3 @@ export default function SearchPage() {
     </div>
   );
 }
-

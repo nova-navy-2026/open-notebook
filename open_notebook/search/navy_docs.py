@@ -16,12 +16,27 @@ embedding model in the open-notebook process.
 import asyncio
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from open_notebook.config import NAVY_OPENSEARCH_INDEX
 from open_notebook.search.client import get_client
+
+# In-process TTL cache for the navy documents listing. The corpus
+# changes rarely (manual re-index), but every notebook/source page
+# load asks for it, so caching avoids hitting OpenSearch with an
+# expensive terms+top_hits aggregation on every navigation.
+_LIST_CACHE: Dict[str, Any] = {"data": None, "expires_at": 0.0}
+_LIST_CACHE_TTL_SECONDS = 300.0  # 5 minutes
+_LIST_CACHE_LOCK = asyncio.Lock()
+
+
+def invalidate_navy_documents_cache() -> None:
+    """Drop the cached navy documents listing (call after re-indexing)."""
+    _LIST_CACHE["data"] = None
+    _LIST_CACHE["expires_at"] = 0.0
 
 
 async def list_navy_documents() -> List[Dict[str, Any]]:
@@ -30,7 +45,29 @@ async def list_navy_documents() -> List[Dict[str, Any]]:
     Each item contains:
         - doc_id: str
         - chunk_count: int  (number of chunks/passages)
+
+    Results are cached in-process for ``_LIST_CACHE_TTL_SECONDS`` to
+    keep the sources view and notebook sidebar snappy.
     """
+    now = time.monotonic()
+    cached = _LIST_CACHE["data"]
+    if cached is not None and now < _LIST_CACHE["expires_at"]:
+        return cached  # type: ignore[return-value]
+
+    async with _LIST_CACHE_LOCK:
+        # Re-check inside the lock so concurrent callers share one fetch.
+        now = time.monotonic()
+        cached = _LIST_CACHE["data"]
+        if cached is not None and now < _LIST_CACHE["expires_at"]:
+            return cached  # type: ignore[return-value]
+
+        documents = await _list_navy_documents_uncached()
+        _LIST_CACHE["data"] = documents
+        _LIST_CACHE["expires_at"] = time.monotonic() + _LIST_CACHE_TTL_SECONDS
+        return documents
+
+
+async def _list_navy_documents_uncached() -> List[Dict[str, Any]]:
     try:
         client = await get_client()
 
