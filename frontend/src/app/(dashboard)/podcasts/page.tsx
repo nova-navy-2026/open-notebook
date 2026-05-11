@@ -12,6 +12,7 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { useEpisodeProfiles, useSpeakerProfiles } from '@/lib/hooks/use-podcasts'
 import { needsModelSetup } from '@/lib/types/podcasts'
 import { ProtectedRouteGuard } from '@/lib/hooks/use-authorization'
+import { AdminNavBar } from '@/components/admin/AdminNavBar'
 
 export default function PodcastsPage() {
   const { t } = useTranslation()
@@ -51,6 +52,7 @@ export default function PodcastsPage() {
             className="space-y-6"
           >
             <div className="space-y-2">
+              <AdminNavBar active="podcasts" />
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t.podcasts.chooseAView}</p>
               <TabsList aria-label={t.common.accessibility.podcastViews} className="w-full max-w-md">
                 <TabsTrigger value="episodes">

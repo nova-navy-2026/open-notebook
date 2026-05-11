@@ -29,6 +29,7 @@ import {
   AlertCircle,
   Settings,
   Save,
+  Mic,
 } from "lucide-react";
 import { useAsk } from "@/lib/hooks/use-ask";
 import { useModelDefaults, useModels } from "@/lib/hooks/use-models";
@@ -92,8 +93,13 @@ export default function AdminDashboardPage() {
     }
   }, [searchParams]);
 
-  // Handle tab change - update URL
+  // Handle tab change - update URL. Podcasts is a separate route, so
+  // navigate there instead of switching tab state.
   const handleTabChange = (tabValue: string) => {
+    if (tabValue === "podcasts") {
+      router.push("/podcasts");
+      return;
+    }
     setActiveTab(tabValue);
     router.push(`/admin?tab=${tabValue}`);
   };
@@ -115,7 +121,7 @@ export default function AdminDashboardPage() {
               onValueChange={handleTabChange}
               className="w-full"
             >
-              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 mb-6 sm:mb-8">
+              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-6 mb-6 sm:mb-8">
                 <TabsTrigger value="overview" className="gap-2">
                   <BarChart3 className="h-4 w-4" />
                   <span className="hidden sm:inline">Overview</span>
@@ -123,6 +129,10 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="ask" className="gap-2">
                   <MessageCircleQuestion className="h-4 w-4" />
                   <span className="hidden sm:inline">Ask</span>
+                </TabsTrigger>
+                <TabsTrigger value="podcasts" className="gap-2">
+                  <Mic className="h-4 w-4" />
+                  <span className="hidden sm:inline">Podcasts</span>
                 </TabsTrigger>
                 <TabsTrigger value="users" className="gap-2">
                   <Users className="h-4 w-4" />
@@ -193,6 +203,23 @@ export default function AdminDashboardPage() {
                     <CardContent>
                       <p className="text-sm text-muted-foreground">
                         Review system activities
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card
+                    className="cursor-pointer hover:shadow-lg transition-shadow"
+                    onClick={() => router.push("/podcasts")}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">Podcasts</CardTitle>
+                        <Mic className="h-5 w-5 text-purple-600" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground">
+                        Generate and manage podcast episodes
                       </p>
                     </CardContent>
                   </Card>
