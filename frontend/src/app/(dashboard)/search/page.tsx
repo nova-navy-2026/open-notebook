@@ -60,7 +60,7 @@ export default function SearchPage() {
     searchMutation.mutate({
       query: searchQuery,
       type: searchType,
-      limit: 100,
+      limit: 10,
       search_sources: searchSources,
       search_notes: searchNotes,
       minimum_score: 0.2,
