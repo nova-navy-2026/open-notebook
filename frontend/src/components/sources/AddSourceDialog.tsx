@@ -142,11 +142,13 @@ export function AddSourceDialog({
   // Initialize form values when settings and transformations are loaded
   useEffect(() => {
     if (settings && transformations.length > 0) {
-      const defaultTransformations = transformations
-        .filter(t => t.apply_default)
-        .map(t => t.id)
-
-      setSelectedTransformations(defaultTransformations)
+      // Note: we intentionally do NOT auto-select transformations marked as
+      // `apply_default`. Each transformation triggers an LLM call inside the
+      // source-processing graph, which is the dominant cost when ingesting a
+      // source (a 2 KB document with several default transformations easily
+      // takes minutes). Users can still tick the transformations they want
+      // before submitting.
+      setSelectedTransformations([])
 
       // Reset form with proper embed value based on settings
       const embedValue = settings.default_embedding_option === 'always' ||
@@ -437,15 +439,9 @@ export function AddSourceDialog({
     setUrlValidationErrors([])
     setBatchProgress(null)
 
-    // Reset to default transformations
-    if (transformations.length > 0) {
-      const defaultTransformations = transformations
-        .filter(t => t.apply_default)
-        .map(t => t.id)
-      setSelectedTransformations(defaultTransformations)
-    } else {
-      setSelectedTransformations([])
-    }
+    // Reset transformations selection (no auto-select of apply_default ones —
+    // they make ingestion slow because each runs an LLM call).
+    setSelectedTransformations([])
 
     onOpenChange(false)
   }

@@ -447,58 +447,70 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
         logger.debug(f"Inserting {len(records)} source_embedding records")
         inserted = await repo_insert("source_embedding", records)
 
-        # 7. Dual-write: sync to OpenSearch (best-effort)
-        try:
-            from open_notebook.search.indexer import sync_source_embeddings
+        # 7. Dual-write to OpenSearch (per-user index AND navy corpus).
+        # Gated behind INDEX_USER_SOURCES_TO_OPENSEARCH (default: False).
+        # When disabled, user-uploaded sources are stored in SurrealDB only.
+        from open_notebook.config import INDEX_USER_SOURCES_TO_OPENSEARCH
 
-            os_chunks = [
-                {
-                    "id": str(rec["id"]),
-                    "content": rec["content"],
-                    "embedding": rec["embedding"],
-                    "order": rec.get("order", idx),
-                }
-                for idx, rec in enumerate(inserted)
-                if rec.get("id")
-            ]
-            if os_chunks:
-                indexed = await sync_source_embeddings(
+        if not INDEX_USER_SOURCES_TO_OPENSEARCH:
+            logger.info(
+                f"Skipping OpenSearch sync for source {input_data.source_id} "
+                f"(INDEX_USER_SOURCES_TO_OPENSEARCH=false). Stored in "
+                f"SurrealDB only."
+            )
+        else:
+            # 7a. Sync to per-user OpenSearch index (best-effort)
+            try:
+                from open_notebook.search.indexer import sync_source_embeddings
+
+                os_chunks = [
+                    {
+                        "id": str(rec["id"]),
+                        "content": rec["content"],
+                        "embedding": rec["embedding"],
+                        "order": rec.get("order", idx),
+                    }
+                    for idx, rec in enumerate(inserted)
+                    if rec.get("id")
+                ]
+                if os_chunks:
+                    indexed = await sync_source_embeddings(
+                        source_id=input_data.source_id,
+                        source_title=source.title,
+                        chunks=os_chunks,
+                        owner=getattr(source, "owner", None),
+                    )
+                    logger.debug(
+                        f"Synced {indexed}/{len(os_chunks)} chunks to OpenSearch"
+                    )
+            except Exception as os_err:
+                logger.warning(
+                    f"OpenSearch sync failed for source {input_data.source_id} "
+                    f"(non-fatal): {os_err}"
+                )
+
+            # 7b. Sync to Navy corpus OpenSearch index (best-effort)
+            try:
+                from open_notebook.search.navy_docs import navy_delete_source, navy_index_source
+
+                # Delete old entries first (idempotency)
+                await navy_delete_source(source.title)
+
+                # Index chunks (without embeddings — navy uses BAAI/bge-m3
+                # which we don't generate here; BM25 search still works)
+                navy_indexed = await navy_index_source(
                     source_id=input_data.source_id,
                     source_title=source.title,
-                    chunks=os_chunks,
-                    owner=getattr(source, "owner", None),
+                    chunks=chunks,
                 )
                 logger.debug(
-                    f"Synced {indexed}/{len(os_chunks)} chunks to OpenSearch"
+                    f"Synced {navy_indexed}/{len(chunks)} chunks to Navy index"
                 )
-        except Exception as os_err:
-            logger.warning(
-                f"OpenSearch sync failed for source {input_data.source_id} "
-                f"(non-fatal): {os_err}"
-            )
-
-        # 8. Dual-write: sync to Navy corpus OpenSearch index (best-effort)
-        try:
-            from open_notebook.search.navy_docs import navy_delete_source, navy_index_source
-
-            # Delete old entries first (idempotency)
-            await navy_delete_source(source.title)
-
-            # Index chunks (without embeddings — navy uses BAAI/bge-m3
-            # which we don't generate here; BM25 search still works)
-            navy_indexed = await navy_index_source(
-                source_id=input_data.source_id,
-                source_title=source.title,
-                chunks=chunks,
-            )
-            logger.debug(
-                f"Synced {navy_indexed}/{len(chunks)} chunks to Navy index"
-            )
-        except Exception as navy_err:
-            logger.warning(
-                f"Navy index sync failed for source {input_data.source_id} "
-                f"(non-fatal): {navy_err}"
-            )
+            except Exception as navy_err:
+                logger.warning(
+                    f"Navy index sync failed for source {input_data.source_id} "
+                    f"(non-fatal): {navy_err}"
+                )
 
         processing_time = time.time() - start_time
         logger.info(

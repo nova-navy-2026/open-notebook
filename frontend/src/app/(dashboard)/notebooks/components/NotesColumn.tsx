@@ -10,12 +10,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, StickyNote, Bot, User, MoreVertical, Trash2, Search, Image as ImageIcon, Video as VideoIcon, PlayCircle } from 'lucide-react'
+import { Plus, StickyNote, Bot, User, MoreVertical, Trash2, Image as ImageIcon, Video as VideoIcon, PlayCircle } from 'lucide-react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { NoteEditorDialog } from './NoteEditorDialog'
-import { NotebookResearchDialog } from './NotebookResearchDialog'
 import {
   MediaNoteViewerDialog,
   detectMediaNote,
@@ -107,7 +106,6 @@ export function NotesColumn({
 }: NotesColumnProps) {
   const { t, language } = useTranslation()
   const [showAddDialog, setShowAddDialog] = useState(false)
-  const [showResearchDialog, setShowResearchDialog] = useState(false)
   const [editingNote, setEditingNote] = useState<NoteResponse | null>(null)
   const [viewingMediaNote, setViewingMediaNote] = useState<NoteResponse | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -152,15 +150,6 @@ export function NotesColumn({
             <div className="flex items-center justify-between gap-2 min-w-0">
               <CardTitle className="text-lg truncate">{t.notebooks.agentNotes}</CardTitle>
               <div className="flex items-center gap-1 flex-shrink-0">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowResearchDialog(true)}
-                  title={t.research?.title ?? 'Research'}
-                >
-                  <Search className="h-4 w-4" />
-                  <span className="hidden xl:inline ml-1">{t.research?.title ?? 'Research'}</span>
-                </Button>
                 <Button
                   size="sm"
                   onClick={() => {
@@ -385,12 +374,6 @@ export function NotesColumn({
         onConfirm={handleDeleteConfirm}
         isLoading={deleteNote.isPending}
         confirmVariant="destructive"
-      />
-
-      <NotebookResearchDialog
-        open={showResearchDialog}
-        onOpenChange={setShowResearchDialog}
-        notebookId={notebookId}
       />
     </>
   )

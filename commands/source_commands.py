@@ -50,12 +50,21 @@ class SourceProcessingOutput(CommandOutput):
     "process_source",
     app="open_notebook",
     retry={
-        "max_attempts": 15,  # Handle deep queues (workaround for SurrealDB v2 transaction conflicts)
+        # Lowered from 15 → 3. The previous value caused a multi-minute retry
+        # storm whenever extract_content raised a non-validation error
+        # (e.g. a hang inside content_core or a missing temp file after
+        # delete_source=True). 3 attempts are enough for transient SurrealDB
+        # transaction conflicts; permanent failures bail out fast now.
+        "max_attempts": 3,
         "wait_strategy": "exponential_jitter",
         "wait_min": 1,
-        "wait_max": 120,  # Allow queue to drain
-        "stop_on": [ValueError, ConfigurationError],  # Don't retry validation/config errors
-        "retry_log_level": "debug",  # Avoid log noise during transaction conflicts
+        "wait_max": 30,
+        # FileNotFoundError is permanent (file already deleted by a previous
+        # attempt when delete_source=True), so don't waste retries on it.
+        "stop_on": [ValueError, ConfigurationError, FileNotFoundError],
+        # Bumped from "debug" → "warning" so retried failures actually appear
+        # in the logs. Without this, hangs/crashes are completely invisible.
+        "retry_log_level": "warning",
     },
 )
 async def process_source_command(
@@ -141,17 +150,35 @@ async def process_source_command(
     except ValueError as e:
         # Validation errors are permanent failures - don't retry
         processing_time = time.time() - start_time
-        logger.error(f"Source processing failed: {e}")
+        logger.error(f"Source processing failed (validation): {e}")
         return SourceProcessingOutput(
             success=False,
             source_id=input_data.source_id,
             processing_time=processing_time,
             error_message=str(e),
         )
+    except FileNotFoundError as e:
+        # The temp file was already consumed (and deleted) by a previous
+        # attempt. Retrying cannot help — fail fast and visibly.
+        processing_time = time.time() - start_time
+        logger.error(
+            f"Source processing failed: input file missing (likely already "
+            f"deleted by a previous attempt): {e}"
+        )
+        return SourceProcessingOutput(
+            success=False,
+            source_id=input_data.source_id,
+            processing_time=processing_time,
+            error_message=f"Input file no longer available: {e}",
+        )
     except Exception as e:
-        # Transient failure - will be retried (surreal-commands logs final failure)
-        logger.debug(
-            f"Transient error processing source {input_data.source_id}: {e}"
+        # Transient failure - will be retried by surreal-commands. We log it
+        # loudly so the actual error is visible in container logs (the old
+        # debug-level log made hangs and crashes effectively invisible).
+        processing_time = time.time() - start_time
+        logger.exception(
+            f"Transient error processing source {input_data.source_id} "
+            f"after {processing_time:.2f}s: {type(e).__name__}: {e}"
         )
         raise
 

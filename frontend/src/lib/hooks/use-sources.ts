@@ -94,20 +94,26 @@ export function useCreateSource() {
   return useMutation({
     mutationFn: (data: CreateSourceRequest) => sourcesApi.create(data),
     onSuccess: (result: SourceResponse, variables) => {
-      // Invalidate queries for all relevant notebooks with immediate refetch
-      if (variables.notebooks) {
-        variables.notebooks.forEach(notebookId => {
-          queryClient.invalidateQueries({
-            queryKey: QUERY_KEYS.sources(notebookId),
-            refetchType: 'active' // Refetch active queries immediately
-          })
-        })
-      } else if (variables.notebook_id) {
+      // Invalidate queries for all relevant notebooks with immediate refetch.
+      // The notebook page uses the *infinite* query key (sourcesInfinite),
+      // so we must invalidate that one too — otherwise the newly created
+      // source only appears after a manual reload.
+      const notebookIds: string[] = variables.notebooks
+        ? variables.notebooks
+        : variables.notebook_id
+          ? [variables.notebook_id]
+          : []
+
+      notebookIds.forEach((notebookId) => {
         queryClient.invalidateQueries({
-          queryKey: QUERY_KEYS.sources(variables.notebook_id),
-          refetchType: 'active'
+          queryKey: QUERY_KEYS.sources(notebookId),
+          refetchType: 'active',
         })
-      }
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.sourcesInfinite(notebookId),
+          refetchType: 'active',
+        })
+      })
 
       // Invalidate general sources query too with immediate refetch
       queryClient.invalidateQueries({

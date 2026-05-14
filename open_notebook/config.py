@@ -48,3 +48,12 @@ OPENSEARCH_USE_SSL = OPENSEARCH_SCHEME == "https"
 
 # Navy corpus index (pre-indexed documents from NOVA-Researcher)
 NAVY_OPENSEARCH_INDEX = os.environ.get("NAVY_OPENSEARCH_INDEX", "amalia_navy_test").strip()
+
+# When False (default), user-uploaded sources are NEVER pushed to OpenSearch.
+# They are persisted to SurrealDB only. The Navy corpus (read-only,
+# pre-indexed) remains searchable via OpenSearch independently.
+# Set INDEX_USER_SOURCES_TO_OPENSEARCH=true to opt back into the dual-write
+# behavior (both OPENSEARCH_INDEX and NAVY_OPENSEARCH_INDEX).
+INDEX_USER_SOURCES_TO_OPENSEARCH = os.environ.get(
+    "INDEX_USER_SOURCES_TO_OPENSEARCH", "false"
+).strip().lower() in ("true", "1", "yes")

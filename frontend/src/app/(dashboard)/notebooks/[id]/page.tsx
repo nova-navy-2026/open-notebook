@@ -222,12 +222,17 @@ export default function NotebookPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    // h-full is critical here: our parent in AppShell is `flex-1 overflow-auto`
+    // (not a flex container), so `flex-1` on this root would NOT resolve to a
+    // real height. Without an explicit height the inner grid row would grow
+    // with its content — which is exactly what made the Sources/Notes/Chat
+    // boxes resize when the Knowledge Base panel expanded/collapsed.
+    <div className="flex flex-col h-full min-h-0">
       <div className="flex-shrink-0 p-6 pb-0">
         <NotebookHeader notebook={notebook} />
       </div>
 
-      <div className="flex-1 p-6 pt-6 overflow-hidden flex flex-col">
+      <div className="flex-1 min-h-0 p-6 pt-6 overflow-hidden flex flex-col">
         {/* Mobile: Tabbed interface - only render on mobile to avoid double-mounting */}
         {!isDesktop && (
           <>
@@ -303,7 +308,7 @@ export default function NotebookPage() {
         {/* Desktop: Collapsible columns layout */}
         <div
           className={cn(
-            "hidden lg:grid h-full min-h-0 gap-4 transition-all duration-150",
+            "hidden lg:grid h-full min-h-0 grid-rows-1 gap-4 transition-all duration-150",
             sourcesCollapsed && notesCollapsed
               ? "grid-cols-[auto_auto_1fr]"
               : sourcesCollapsed
@@ -316,7 +321,7 @@ export default function NotebookPage() {
           {/* Sources Column */}
           <div
             className={cn(
-              "transition-all duration-150 min-w-0 overflow-hidden",
+              "h-full min-h-0 transition-all duration-150 min-w-0 overflow-hidden",
               sourcesCollapsed && "w-12",
             )}
           >
@@ -342,7 +347,7 @@ export default function NotebookPage() {
           {/* Notes Column */}
           <div
             className={cn(
-              "transition-all duration-150 min-w-0 overflow-hidden",
+              "h-full min-h-0 transition-all duration-150 min-w-0 overflow-hidden",
               notesCollapsed && "w-12",
             )}
           >
@@ -358,7 +363,7 @@ export default function NotebookPage() {
           </div>
 
           {/* Chat Column - always expanded, takes remaining space */}
-          <div className="transition-all duration-150 min-w-0 overflow-hidden">
+          <div className="h-full min-h-0 transition-all duration-150 min-w-0 overflow-hidden">
             <ChatColumn
               notebookId={notebookId}
               contextSelections={contextSelections}

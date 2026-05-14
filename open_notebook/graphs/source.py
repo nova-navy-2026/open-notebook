@@ -1,5 +1,13 @@
+import asyncio
 import operator
+import os
+import time
 from typing import Any, Dict, List, Optional
+
+# Hard timeout (seconds) on a single extract_content call. Without this,
+# a hang inside content_core (e.g. docling model load, network fetch) would
+# pin a worker indefinitely and only surface as a silent retry storm.
+EXTRACT_CONTENT_TIMEOUT_SECONDS = 180
 
 from content_core import extract_content
 from content_core.common import ProcessSourceState
@@ -41,6 +49,7 @@ class TransformationState(TypedDict):
 
 
 async def content_process(state: SourceState) -> dict:
+    _t0 = time.time()
     content_settings: ContentSettings = await ContentSettings.get_instance()  # type: ignore[assignment]
     content_state: Dict[str, Any] = state["content_state"]  # type: ignore[assignment]
 
@@ -68,7 +77,87 @@ async def content_process(state: SourceState) -> dict:
         logger.warning(f"Failed to retrieve speech-to-text model configuration: {e}")
         # Continue without custom audio model (content-core will use its default)
 
-    processed_state = await extract_content(content_state)
+    # Pre-flight: if a file_path was provided but it doesn't exist on disk,
+    # try to rehydrate the file from the SurrealDB Source record. This handles:
+    #   1. Cross-process file-visibility issues on Docker Desktop's 9p mount
+    #      (Windows host) where the API just wrote the file but the worker
+    #      can't see it yet.
+    #   2. delete_source=True having consumed the file on a previous attempt.
+    #   3. Future deployments where the API doesn't write a temp file at all.
+    fp = content_state.get("file_path")
+    if fp and not os.path.isfile(fp):
+        rehydrated = False
+        source_id = state.get("source_id")
+        if source_id:
+            try:
+                src_for_bytes = await Source.get(source_id)
+                file_bytes = (
+                    src_for_bytes.get_file_bytes() if src_for_bytes else None
+                )
+                if file_bytes:
+                    # Write to /tmp (container overlay FS, not the 9p mount)
+                    # using the original filename so content_core's extension
+                    # detection still routes to the correct processor.
+                    import tempfile
+                    suffix = os.path.splitext(fp)[1] or ""
+                    tmp_dir = tempfile.mkdtemp(prefix="onb_source_")
+                    rehydrated_path = os.path.join(
+                        tmp_dir, os.path.basename(fp) or f"source{suffix}"
+                    )
+                    with open(rehydrated_path, "wb") as fh:
+                        fh.write(file_bytes)
+                    logger.info(
+                        f"[source_graph] content_process: rehydrated "
+                        f"{len(file_bytes)} bytes from DB to {rehydrated_path} "
+                        f"(original path '{fp}' was missing on disk)"
+                    )
+                    content_state["file_path"] = rehydrated_path
+                    fp = rehydrated_path
+                    rehydrated = True
+            except Exception as rehydrate_err:
+                logger.warning(
+                    f"[source_graph] content_process: failed to rehydrate "
+                    f"source {source_id} from DB: {rehydrate_err}"
+                )
+
+        if not rehydrated:
+            raise ValueError(
+                f"Input file not found at '{fp}' and no DB-stored bytes "
+                f"available for source {source_id}. The upload may have "
+                f"failed or the file was consumed by a previous attempt."
+            )
+
+    logger.info(
+        f"[source_graph] content_process: starting extract_content "
+        f"(url_engine={content_state.get('url_engine')}, "
+        f"document_engine={content_state.get('document_engine')})"
+    )
+    _extract_t0 = time.time()
+    try:
+        processed_state = await asyncio.wait_for(
+            extract_content(content_state),
+            timeout=EXTRACT_CONTENT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            f"[source_graph] content_process: extract_content TIMED OUT after "
+            f"{EXTRACT_CONTENT_TIMEOUT_SECONDS}s "
+            f"(url_engine={content_state.get('url_engine')}, "
+            f"document_engine={content_state.get('document_engine')}, "
+            f"file_path={content_state.get('file_path')}, "
+            f"url={content_state.get('url')})"
+        )
+        # Raise ValueError so source_commands stop_on prevents retry storm.
+        raise ValueError(
+            f"Content extraction timed out after "
+            f"{EXTRACT_CONTENT_TIMEOUT_SECONDS}s. The source may be too large "
+            f"or the configured engine may be hanging. Try a different "
+            f"document/url engine in Settings."
+        )
+    logger.info(
+        f"[source_graph] content_process: extract_content took "
+        f"{time.time() - _extract_t0:.2f}s"
+    )
 
     if not processed_state.content or not processed_state.content.strip():
         url = processed_state.url or ""
@@ -84,6 +173,10 @@ async def content_process(state: SourceState) -> dict:
             "The content may be empty, inaccessible, or in an unsupported format."
         )
 
+    logger.info(
+        f"[source_graph] content_process: total {time.time() - _t0:.2f}s, "
+        f"extracted {len(processed_state.content or '')} chars"
+    )
     return {"content_state": processed_state}
 
 
@@ -200,6 +293,7 @@ async def vision_process(state: SourceState) -> dict:
 
 
 async def save_source(state: SourceState) -> dict:
+    _t0 = time.time()
     content_state = state["content_state"]
 
     # Get existing source using the provided source_id
@@ -234,6 +328,10 @@ async def save_source(state: SourceState) -> dict:
                 f"Source {source.id} has no text content to embed, skipping vectorization"
             )
 
+    logger.info(
+        f"[source_graph] save_source: total {time.time() - _t0:.2f}s "
+        f"(embed_submitted={state['embed']})"
+    )
     return {"source": source}
 
 
@@ -263,9 +361,17 @@ async def transform_content(state: TransformationState) -> Optional[dict]:
         return None
     transformation: Transformation = state["transformation"]
 
-    logger.debug(f"Applying transformation {transformation.name}")
+    logger.info(
+        f"[source_graph] transform_content: starting transformation "
+        f"'{transformation.name}' on {len(content)} chars"
+    )
+    _t0 = time.time()
     result = await transform_graph.ainvoke(
         dict(input_text=content, transformation=transformation)  # type: ignore[arg-type]
+    )
+    logger.info(
+        f"[source_graph] transform_content: transformation '{transformation.name}' "
+        f"took {time.time() - _t0:.2f}s"
     )
     await source.add_insight(transformation.title, result["output"])
     return {

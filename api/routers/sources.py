@@ -441,7 +441,11 @@ async def create_source(
                     status_code=400,
                     detail="File upload or file_path is required for upload type",
                 )
-            content_state["file_path"] = final_file_path
+            # Always pass an absolute path: API and worker run as separate
+            # supervisord processes which may have different CWDs, so a
+            # relative path like "data/uploads/test.docx" can fail to resolve
+            # in the worker even though the file was just written by the API.
+            content_state["file_path"] = os.path.abspath(final_file_path)
             # Always delete temp file after processing since the real file is in the DB
             content_state["delete_source"] = True
         elif source_data.type == "text":
