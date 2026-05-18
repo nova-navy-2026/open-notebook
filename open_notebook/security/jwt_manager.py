@@ -3,9 +3,9 @@ JWT Token Manager for OAuth and local authentication.
 Handles token creation, verification, and refresh.
 """
 
-from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import os
+import time
 import jwt
 from loguru import logger
 
@@ -22,26 +22,38 @@ class JWTManager:
         user_id: str,
         email: str,
         roles: list = None,
-        expires_in: Optional[int] = None
+        expires_in: Optional[int] = None,
+        extra_claims: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Create a JWT token with user claims"""
+        """Create a JWT token with user claims.
+
+        ``extra_claims`` is merged into the payload (after the standard
+        fields, so it cannot overwrite ``sub``/``user_id``/``email``/
+        ``roles``/``exp``/``iat``). Use it for app-specific claims such
+        as the navy user id / department / clearance.
+        """
         
         if not roles:
-            roles = ["viewer"]
+            roles = ["user"]
         
         expires_in = expires_in or JWTManager.EXPIRY_SECONDS
-        
-        now = datetime.utcnow()
-        exp_time = now + timedelta(seconds=expires_in)
-        
-        payload = {
+
+        now_ts = int(time.time())
+        exp_ts = now_ts + expires_in
+
+        payload: Dict[str, Any] = {}
+        if extra_claims:
+            payload.update(
+                {k: v for k, v in extra_claims.items() if v is not None}
+            )
+        payload.update({
             "sub": email,  # Subject (unique identifier)
             "user_id": user_id,
             "email": email,
             "roles": roles,
-            "exp": int(exp_time.timestamp()),  # Unix timestamp as integer
-            "iat": int(now.timestamp()),       # Unix timestamp as integer
-        }
+            "exp": exp_ts,
+            "iat": now_ts,
+        })
         
         try:
             token = jwt.encode(
@@ -87,11 +99,17 @@ class JWTManager:
                 options={"verify_exp": False}
             )
             
-            # Create new token with same claims but new expiry
+            # Create new token with same claims but new expiry, including
+            # any app-specific extra claims (e.g. navy_user_id).
+            standard_keys = {"sub", "user_id", "email", "roles", "exp", "iat"}
+            extra_claims = {
+                k: v for k, v in payload.items() if k not in standard_keys
+            }
             new_token = JWTManager.create_token(
                 user_id=payload["user_id"],
                 email=payload["email"],
-                roles=payload.get("roles", ["viewer"])
+                roles=payload.get("roles", ["user"]),
+                extra_claims=extra_claims or None,
             )
             return {"token": new_token, "payload": payload}
         except jwt.InvalidTokenError as e:

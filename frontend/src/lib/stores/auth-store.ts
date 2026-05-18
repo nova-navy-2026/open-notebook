@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { getApiUrl } from "@/lib/config";
+import { queryClient } from "@/lib/api/query-client";
 
 export type UserRole = "admin" | "editor" | "viewer";
 
@@ -211,6 +212,9 @@ export const useAuthStore = create<AuthState>()(
               error: null,
             });
 
+            // Clear stale cache from any previous user session
+            queryClient.clear();
+
             // Schedule proactive refresh before token expires
             _scheduleRefresh(expiresIn);
             return true;
@@ -406,6 +410,9 @@ export const useAuthStore = create<AuthState>()(
           oauthState: undefined,
           oauthProvider: undefined,
         });
+
+        // Clear all cached query data so the next user starts fresh
+        queryClient.clear();
 
         // Then notify server (fire-and-forget, don't block on this)
         if (oldToken && oldToken !== "not-required") {

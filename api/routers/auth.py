@@ -16,6 +16,23 @@ from loguru import logger
 from open_notebook.domain.user import User
 from open_notebook.security.jwt_manager import JWTManager
 from open_notebook.utils.encryption import get_secret_from_env
+from open_notebook.access_control import get_user_by_email as navy_get_user_by_email
+
+
+def _navy_claims_for_email(email: Optional[str]) -> dict:
+    """Return navy-specific JWT claims for the given email, or {}."""
+    if not email:
+        return {}
+    match = navy_get_user_by_email(email)
+    if not match:
+        return {}
+    navy_id, entry = match
+    claims: dict = {"navy_user_id": navy_id}
+    if entry.get("department") is not None:
+        claims["department"] = entry.get("department")
+    if entry.get("clearence") is not None:
+        claims["clearence"] = entry.get("clearence")
+    return claims
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -90,10 +107,21 @@ async def login_local(request: LoginRequest):
 
                 user_data = user.to_safe_dict()
 
+                # The env-var admin must always carry the admin role in the JWT
+                # even if the SurrealDB record was created with a lower role.
+                _admin_email = os.getenv("ADMIN_EMAIL")
+                if email.lower() == _admin_email.lower():
+                    user_data["roles"] = ["admin"]
+
+                navy_claims = _navy_claims_for_email(user_data.get("email"))
+                if navy_claims:
+                    user_data.update(navy_claims)
+
                 token = JWTManager.create_token(
                     user_id=user_data["id"],
                     email=user_data["email"],
                     roles=user_data["roles"],
+                    extra_claims=navy_claims or None,
                 )
 
                 logger.info(f"✅ DB user login successful: {email}")
@@ -113,7 +141,7 @@ async def login_local(request: LoginRequest):
             and provided_password == admin_password
         ):
             user_data = {
-                "id": "admin-user-001",
+                "id": "anonymous",
                 "email": email,
                 "name": "Administrator",
                 "roles": ["admin"],
@@ -123,11 +151,15 @@ async def login_local(request: LoginRequest):
                 "updated": None,
                 "last_login": None,
             }
+            navy_claims = _navy_claims_for_email(email)
+            if navy_claims:
+                user_data.update(navy_claims)
 
             token = JWTManager.create_token(
                 user_id=user_data["id"],
                 email=user_data["email"],
                 roles=user_data["roles"],
+                extra_claims=navy_claims or None,
             )
 
             logger.info(f"✅ Env-var admin login (bootstrap): {email}")
@@ -238,6 +270,9 @@ async def get_current_user(request: Request):
         # First try to get user from request.state (set by middleware)
         user = getattr(request.state, 'user', None)
         if user and user.get("id") != "anonymous":
+            _admin_email = os.getenv("ADMIN_EMAIL", "admin@open-notebook.local")
+            if (user.get("email") or "").lower() == _admin_email.lower():
+                user = {**user, "roles": ["admin"]}
             logger.debug(f"✅ User from middleware: {user}")
             return user
         
@@ -266,8 +301,14 @@ async def get_current_user(request: Request):
                 "roles": payload.get("roles", ["viewer"]),
                 "authenticated_via": "jwt",
             }
-        
-        logger.info(f"✅ /me endpoint: User authenticated: {payload['email']}")
+
+        # Force admin role for the configured ADMIN_EMAIL — the DB-stored
+        # roles may say "user" but the admin email is always admin.
+        _admin_email = os.getenv("ADMIN_EMAIL", "admin@open-notebook.local")
+        if payload.get("email", "").lower() == _admin_email.lower():
+            user_data["roles"] = ["admin"]
+
+        logger.info(f"✅ /me endpoint: User authenticated: {payload['email']} roles={user_data.get('roles')}")
         return user_data
         
     except HTTPException:

@@ -121,7 +121,7 @@ Then visit https://smith.langchain.com to see traces.
 ### Default Ports
 
 ```
-Frontend: 8502 (Docker deployment)
+Frontend: 3675 (Docker deployment)
 Frontend: 3000 (Development from source)
 API: 5055
 SurrealDB: 8000
@@ -135,7 +135,7 @@ Edit `docker-compose.yml`:
 services:
   open-notebook:
     ports:
-      - "8001:8502"  # Change from 8502 to 8001
+      - "8001:3675"  # Change from 3675 to 8001
 ```
 
 Access at: `http://localhost:8001`
@@ -148,7 +148,7 @@ API auto-detects to: `http://localhost:5055` ✓
 services:
   open-notebook:
     ports:
-      - "127.0.0.1:8502:8502"  # Frontend
+      - "127.0.0.1:3675:3675"  # Frontend
       - "5056:5055"            # Change API from 5055 to 5056
     environment:
       - API_URL=http://localhost:5056  # Update API_URL
@@ -242,7 +242,7 @@ API_URL=https://mynotebook.example.com
 ### Firewall Rules
 
 Restrict access to your Open Notebook:
-- Port 8502 (frontend): Only from your IP
+- Port 3675 (frontend): Only from your IP
 - Port 5055 (API): Only from frontend
 - Port 8000 (SurrealDB): Never expose to internet
 

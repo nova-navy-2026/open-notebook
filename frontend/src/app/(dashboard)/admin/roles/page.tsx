@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { RoleManagementComponent } from "@/components/admin/RoleManagementComponent";
 import { UserCreationDialog } from "@/components/admin/UserCreationDialog";
-import { PermissionsManagementComponent } from "@/components/admin/PermissionsManagementComponent";
 import { ProtectedRouteGuard } from "@/lib/hooks/use-authorization";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
@@ -43,7 +42,6 @@ export default function RolesAdminPage() {
 
         <div className="space-y-6">
           <RoleManagementComponent key={refreshKey} />
-          <PermissionsManagementComponent />
         </div>
       </div>
     </ProtectedRouteGuard>

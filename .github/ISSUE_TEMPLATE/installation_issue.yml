@@ -77,7 +77,7 @@ body:
           open_notebook:
             image: lfnovo/open_notebook:v1-latest-single
             ports:
-              - "8502:8502"
+              - "3675:3675"
               - "5055:5055"
             environment:
               - OPENAI_API_KEY=sk-***REDACTED***

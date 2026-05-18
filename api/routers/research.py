@@ -10,10 +10,11 @@ Provides REST endpoints for:
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
+from api.auth import get_navy_acl_user_id
 from open_notebook.research.researcher_service import (
     ResearchReportSource,
     ResearchReportType,
@@ -107,7 +108,10 @@ async def get_sources():
 
 
 @router.post("/research/generate")
-async def generate_research(request: GenerateResearchRequest):
+async def generate_research(
+    request: GenerateResearchRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
     """
     Generate a research report.
 
@@ -116,7 +120,7 @@ async def generate_research(request: GenerateResearchRequest):
     """
     try:
         # Build internal request
-        logger.debug(f"Research request received: query='{request.query[:100]}', type={request.report_type}")
+        logger.debug(f"Research request received: query='{request.query[:100]}', type={request.report_type}, navy_user={user_id}")
         research_request = ResearchRequest(
             query=request.query,
             report_type=ResearchReportType(request.report_type),
@@ -126,6 +130,7 @@ async def generate_research(request: GenerateResearchRequest):
             notebook_id=request.notebook_id,
             model_id=request.model_id,
             use_amalia=request.use_amalia,
+            user_id=user_id,
         )
 
         if request.run_in_background:

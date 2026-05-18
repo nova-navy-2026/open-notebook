@@ -125,7 +125,7 @@ services:
   open_notebook:
     image: lfnovo/open_notebook:v1-latest
     ports:
-      - "8502:8502"
+      - "3675:3675"
       - "5055:5055"
     environment:
       - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
@@ -153,7 +153,7 @@ to any secret value (e.g., `my-super-secret-key-123`)
 docker compose up -d
 ```
 
-Wait 15-20 seconds, then open: **http://localhost:8502**
+Wait 15-20 seconds, then open: **http://localhost:3675**
 
 ### Step 4: Configure AI Provider
 1. Go to **Settings** → **API Keys**

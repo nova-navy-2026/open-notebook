@@ -36,7 +36,7 @@ services:
   open_notebook:
     image: lfnovo/open_notebook:v1-latest
     ports:
-      - "8502:8502"
+      - "3675:3675"
       - "5055:5055"
     environment:
       # REQUIRED: Change this to your own secret string

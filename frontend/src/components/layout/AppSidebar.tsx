@@ -44,7 +44,6 @@ import {
   Wrench,
   Command,
   LayoutDashboard,
-  Shield,
   FlaskConical,
   MessageCircle,
   MessageCircleQuestion,
@@ -144,7 +143,6 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
         { name: "Ask", href: "/admin?tab=ask", icon: MessageCircleQuestion },
         { name: t.navigation.podcasts, href: "/podcasts", icon: Mic },
         { name: "Users & Roles", href: "/admin?tab=users", icon: Settings },
-        { name: "Permissions", href: "/admin?tab=permissions", icon: Shield },
         { name: "Audit Logs", href: "/admin?tab=audit", icon: FileText },
       ],
     });

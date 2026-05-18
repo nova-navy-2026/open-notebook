@@ -82,10 +82,12 @@ async def create_user(request: Request):
         if existing:
             raise HTTPException(status_code=409, detail="User with this email already exists")
 
+        # Force role to "user" - admin creation via the API is not allowed here.
+        # Only the bootstrap admin (ADMIN_EMAIL / ADMIN_PASSWORD) can be an admin.
         new_user = User(
             email=email,
             name=body.get("name"),
-            roles=body.get("roles", ["viewer"]),
+            roles=["user"],
             provider=body.get("provider", "local"),
             is_active=True,
         )

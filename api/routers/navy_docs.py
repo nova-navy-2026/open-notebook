@@ -8,10 +8,11 @@ Endpoints:
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.auth import get_navy_acl_user_id
 from open_notebook.search.navy_docs import list_navy_documents, search_navy_documents
 
 router = APIRouter()
@@ -59,10 +60,19 @@ class NavySearchResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/navy-docs", response_model=NavyDocumentListResponse)
-async def get_navy_documents():
-    """List all unique documents in the navy corpus index."""
+async def get_navy_documents(
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
+    """List all unique documents in the navy corpus the current user can access.
+
+    Admins see all documents. Regular users are ACL-filtered by clearance +
+    department. Callers with no navy identity get an empty list (fail-closed).
+    """
+    # Fail-closed for authenticated users with no navy identity.
+    if user_id is None:
+        return NavyDocumentListResponse(documents=[], total=0)
     try:
-        documents = await list_navy_documents()
+        documents = await list_navy_documents(user_id=user_id)
         return NavyDocumentListResponse(
             documents=[NavyDocument(**d) for d in documents],
             total=len(documents),
@@ -73,13 +83,23 @@ async def get_navy_documents():
 
 
 @router.post("/navy-docs/search", response_model=NavySearchResponse)
-async def search_navy_docs(request: NavySearchRequest):
-    """Search the navy corpus with BM25, optionally filtered by doc_ids."""
+async def search_navy_docs(
+    request: NavySearchRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
+    """Search the navy corpus with BM25, ACL-filtered for the current user.
+
+    Admins see all documents. Regular users are ACL-filtered by clearance +
+    department. Callers with no navy identity get no results (fail-closed).
+    """
+    if user_id is None:
+        return NavySearchResponse(results=[], total=0)
     try:
         results = await search_navy_documents(
             query=request.query,
             doc_ids=request.doc_ids,
             k=request.k,
+            user_id=user_id,
         )
         return NavySearchResponse(
             results=[NavySearchResult(**r) for r in results],

@@ -108,7 +108,7 @@ COPY --from=builder /app/frontend/public /app/frontend/public
 COPY --from=builder /app/frontend/start-server.js /app/frontend/start-server.js
 
 # Expose ports for Frontend and API
-EXPOSE 8502 5055
+EXPOSE 3675 5055
 
 RUN mkdir -p /app/data
 

@@ -41,7 +41,7 @@ services:
     image: lfnovo/open_notebook:v1-latest-single
     pull_policy: always
     ports:
-      - "8502:8502"  # Web UI (React frontend)
+      - "3675:3675"  # Web UI (React frontend)
       - "5055:5055"  # API (required!)
     environment:
       # Encryption key for credential storage (required)
@@ -113,7 +113,7 @@ This downloads the model (will take 1-5 minutes depending on your internet).
 
 Open your browser:
 ```
-http://localhost:8502
+http://localhost:3675
 ```
 
 You should see the Open Notebook interface.
@@ -172,7 +172,7 @@ You should see the Open Notebook interface.
 ## Verification Checklist
 
 - [ ] Docker is running
-- [ ] You can access `http://localhost:8502`
+- [ ] You can access `http://localhost:3675`
 - [ ] Ollama credential is configured and tested
 - [ ] Models are registered
 - [ ] You created a notebook

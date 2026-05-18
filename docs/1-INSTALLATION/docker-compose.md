@@ -45,7 +45,7 @@ services:
   open_notebook:
     image: lfnovo/open_notebook:v1-latest
     ports:
-      - "8502:8502"  # Web UI
+      - "3675:3675"  # Web UI
       - "5055:5055"  # REST API
     environment:
       # REQUIRED: Change this to your own secret string
@@ -81,7 +81,7 @@ docker compose up -d
 Wait 15-20 seconds for all services to start:
 ```
 ✅ surrealdb running on :8000
-✅ open_notebook running on :8502 (UI) and :5055 (API)
+✅ open_notebook running on :3675 (UI) and :5055 (API)
 ```
 
 Check status:
@@ -102,7 +102,7 @@ curl http://localhost:5055/health
 **Frontend Access:**
 Open browser to:
 ```
-http://localhost:8502
+http://localhost:3675
 ```
 
 You should see the Open Notebook interface!
@@ -262,11 +262,11 @@ docker compose logs api
 
 ### Port Already in Use
 
-If you get "Port 8502 already in use", change the port:
+If you get "Port 3675 already in use", change the port:
 
 ```yaml
 ports:
-  - "8503:8502"  # Use 8503 instead
+  - "8503:3675"  # Use 8503 instead
   - "5055:5055"  # Keep API port same
 ```
 

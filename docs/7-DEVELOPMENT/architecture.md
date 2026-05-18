@@ -7,12 +7,12 @@ Open Notebook follows a three-tier architecture with clear separation of concern
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Your Browser                                           │
-│  Access: http://your-server-ip:8502                     │
+│  Access: http://your-server-ip:3675                     │
 └────────────────┬────────────────────────────────────────┘
                  │
                  ▼
          ┌───────────────┐
-         │   Port 8502   │  ← Next.js Frontend (what you see)
+         │   Port 3675   │  ← Next.js Frontend (what you see)
          │   Frontend    │    Also proxies API requests internally!
          └───────┬───────┘
                  │ proxies /api/* requests ↓
@@ -31,9 +31,9 @@ Open Notebook follows a three-tier architecture with clear separation of concern
 
 **Key Points:**
 - **v1.1+**: Next.js automatically proxies `/api/*` requests to the backend, simplifying reverse proxy setup
-- Your browser loads the frontend from port 8502
+- Your browser loads the frontend from port 3675
 - The frontend needs to know where to find the API - when accessing remotely, set: `API_URL=http://your-server-ip:5055`
-- **Behind reverse proxy?** You only need to proxy to port 8502 now! See [Reverse Proxy Configuration](../5-CONFIGURATION/reverse-proxy.md)
+- **Behind reverse proxy?** You only need to proxy to port 3675 now! See [Reverse Proxy Configuration](../5-CONFIGURATION/reverse-proxy.md)
 
 ---
 

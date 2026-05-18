@@ -19,6 +19,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from open_notebook.config import DATA_FOLDER, NAVY_OPENSEARCH_INDEX
+from open_notebook.access_control import build_opensearch_filter
 
 # NOVA-Researcher API base URL
 NOVA_RESEARCHER_URL = os.environ.get("NOVA_RESEARCHER_URL", "http://localhost:3800").rstrip("/")
@@ -75,7 +76,10 @@ class ResearchRequest(BaseModel):
     source_urls: List[str] = []
     notebook_id: Optional[str] = None
     model_id: Optional[str] = None
-    use_amalia: bool = True  # Default to Amália model
+    use_amalia: bool = True  # Default to Amalia model
+    # Authenticated user id (e.g. "m24409"). Used to build the navy
+    # OpenSearch access-control filter (classification + department).
+    user_id: Optional[str] = None
 
 
 class RetrievedDocument(BaseModel):
@@ -203,7 +207,7 @@ async def _resolve_model_provider(model_id: Optional[str]) -> Optional[str]:
 
 
 async def _prefetch_opensearch_docs(
-    query: str, index: str, max_results: int = 30
+    query: str, index: str, max_results: int = 30, user_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Pre-fetch documents from the navy OpenSearch corpus via the
@@ -214,7 +218,12 @@ async def _prefetch_opensearch_docs(
     try:
         resp = await _http_client.post(
             f"{NOVA_RESEARCHER_URL}/opensearch/prefetch",
-            json={"query": query, "index": index, "max_results": max_results},
+            json={
+                "query": query,
+                "index": index,
+                "max_results": max_results,
+                "retriever_filter": build_opensearch_filter(user_id),
+            },
         )
         resp.raise_for_status()
         data = resp.json()
@@ -298,6 +307,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
             "query": request.query,
             "source_urls": request.source_urls,
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
+            "retriever_filter": build_opensearch_filter(request.user_id),
         }
         params: Dict[str, Any] = {"stream": "true"}
         if provider:
@@ -424,6 +434,7 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
             query=request.query,
             index=NAVY_OPENSEARCH_INDEX,
             max_results=int(os.environ.get("AMALIA_PREFETCH_DOCS", "30")),
+            user_id=request.user_id,
         )
 
         if os_docs:
@@ -446,6 +457,10 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
             # that — on follow-up / cross-corpus queries — the server-side
             # CustomRetriever targets the right index.
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
+            # Navy-specific access-control filter (classification +
+            # department). NOVA-Researcher applies it verbatim as the
+            # OpenSearch kNN filter.
+            "retriever_filter": build_opensearch_filter(request.user_id),
         }
 
         resp = await _http_client.post(

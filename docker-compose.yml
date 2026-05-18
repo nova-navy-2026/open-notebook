@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     pull_policy: build
     ports:
-      - "8502:8502"  # Web UI
+      - "3675:3675"  # Web UI
       - "5055:5055"  # REST API
     env_file:
       - .env

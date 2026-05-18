@@ -27,47 +27,59 @@ from open_notebook.search.client import get_client
 # In-process TTL cache for the navy documents listing. The corpus
 # changes rarely (manual re-index), but every notebook/source page
 # load asks for it, so caching avoids hitting OpenSearch with an
-# expensive terms+top_hits aggregation on every navigation.
-_LIST_CACHE: Dict[str, Any] = {"data": None, "expires_at": 0.0}
+# expensive terms+top_hits aggregation on every navigation. The
+# listing is ACL-filtered per user, so we key the cache by user_id
+# (using the sentinel ``"__all__"`` when no ACL is applied).
+_LIST_CACHE: Dict[str, Dict[str, Any]] = {}
 _LIST_CACHE_TTL_SECONDS = 300.0  # 5 minutes
 _LIST_CACHE_LOCK = asyncio.Lock()
 
 
 def invalidate_navy_documents_cache() -> None:
     """Drop the cached navy documents listing (call after re-indexing)."""
-    _LIST_CACHE["data"] = None
-    _LIST_CACHE["expires_at"] = 0.0
+    _LIST_CACHE.clear()
 
 
-async def list_navy_documents() -> List[Dict[str, Any]]:
+async def list_navy_documents(
+    user_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Return all unique documents in the navy corpus index.
 
     Each item contains:
         - doc_id: str
         - chunk_count: int  (number of chunks/passages)
 
-    Results are cached in-process for ``_LIST_CACHE_TTL_SECONDS`` to
-    keep the sources view and notebook sidebar snappy.
+    When ``user_id`` is given, the navy access-control filter (clearance +
+    department) is applied so the returned list only contains documents
+    the user is allowed to see.
+
+    Results are cached in-process per-user for ``_LIST_CACHE_TTL_SECONDS``
+    to keep the sources view and notebook sidebar snappy.
     """
+    cache_key = user_id or "__all__"
     now = time.monotonic()
-    cached = _LIST_CACHE["data"]
-    if cached is not None and now < _LIST_CACHE["expires_at"]:
-        return cached  # type: ignore[return-value]
+    entry = _LIST_CACHE.get(cache_key)
+    if entry is not None and now < entry["expires_at"]:
+        return entry["data"]  # type: ignore[return-value]
 
     async with _LIST_CACHE_LOCK:
         # Re-check inside the lock so concurrent callers share one fetch.
         now = time.monotonic()
-        cached = _LIST_CACHE["data"]
-        if cached is not None and now < _LIST_CACHE["expires_at"]:
-            return cached  # type: ignore[return-value]
+        entry = _LIST_CACHE.get(cache_key)
+        if entry is not None and now < entry["expires_at"]:
+            return entry["data"]  # type: ignore[return-value]
 
-        documents = await _list_navy_documents_uncached()
-        _LIST_CACHE["data"] = documents
-        _LIST_CACHE["expires_at"] = time.monotonic() + _LIST_CACHE_TTL_SECONDS
+        documents = await _list_navy_documents_uncached(user_id=user_id)
+        _LIST_CACHE[cache_key] = {
+            "data": documents,
+            "expires_at": time.monotonic() + _LIST_CACHE_TTL_SECONDS,
+        }
         return documents
 
 
-async def _list_navy_documents_uncached() -> List[Dict[str, Any]]:
+async def _list_navy_documents_uncached(
+    user_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     try:
         client = await get_client()
 
@@ -91,6 +103,15 @@ async def _list_navy_documents_uncached() -> List[Dict[str, Any]]:
             },
         }
 
+        # Apply navy access-control filter so the aggregation only
+        # considers documents the user is allowed to see.
+        if user_id is not None:
+            from open_notebook.access_control import build_opensearch_filter
+
+            acl_filter = build_opensearch_filter(user_id)
+            if acl_filter is not None:
+                body["query"] = acl_filter
+
         response = await asyncio.to_thread(
             client.search, index=NAVY_OPENSEARCH_INDEX, body=body
         )
@@ -113,7 +134,10 @@ async def _list_navy_documents_uncached() -> List[Dict[str, Any]]:
                 "sample_section": sample.get("section_title", ""),
             })
 
-        logger.info(f"Listed {len(documents)} documents from navy corpus index '{NAVY_OPENSEARCH_INDEX}'")
+        logger.info(
+            f"Listed {len(documents)} documents from navy corpus index "
+            f"'{NAVY_OPENSEARCH_INDEX}' (user_id={user_id!r})"
+        )
         return documents
 
     except Exception as e:
@@ -125,8 +149,13 @@ async def search_navy_documents(
     query: str,
     doc_ids: Optional[List[str]] = None,
     k: int = 10,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """BM25 text search on the navy corpus, optionally filtered by doc_ids.
+
+    When ``user_id`` is given, the navy access-control filter (clearance +
+    department) is applied so that only documents the user is allowed to
+    see can be returned.
 
     Returns a list of dicts with:
         - doc_id, content, source, section_title, page_start, page_end, score
@@ -148,6 +177,11 @@ async def search_navy_documents(
         filter_clause: List[Dict[str, Any]] = []
         if doc_ids:
             filter_clause.append({"terms": {"doc_id": doc_ids}})
+
+        from open_notebook.access_control import build_opensearch_filter
+        acl = build_opensearch_filter(user_id)
+        if acl is not None:
+            filter_clause.append(acl)
 
         body: Dict[str, Any] = {
             "size": k,
@@ -197,6 +231,7 @@ async def vector_search_navy_documents(
     doc_ids: Optional[List[str]] = None,
     k: int = 5,
     min_score: float = 0.0,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Semantic kNN search on the navy corpus using BGE-M3 embeddings.
 
@@ -204,6 +239,9 @@ async def vector_search_navy_documents(
     The query is embedded with the configured embedding model (which must
     also be BGE-M3 for the vectors to be comparable) and matched against
     those vectors via the OpenSearch k-NN plugin.
+
+    When ``user_id`` is given, the navy access-control filter (clearance +
+    department) is applied alongside the kNN match.
 
     Returns the same fields as :func:`search_navy_documents`.
     """
@@ -218,7 +256,9 @@ async def vector_search_navy_documents(
                 "Navy vector search: empty embedding for query, "
                 "falling back to BM25"
             )
-            return await search_navy_documents(query, doc_ids=doc_ids, k=k)
+            return await search_navy_documents(
+                query, doc_ids=doc_ids, k=k, user_id=user_id
+            )
 
         client = await get_client()
 
@@ -226,8 +266,18 @@ async def vector_search_navy_documents(
             "vector": embedding,
             "k": max(k, 1),
         }
+
+        from open_notebook.access_control import build_opensearch_filter
+        acl = build_opensearch_filter(user_id)
+        knn_filters: List[Dict[str, Any]] = []
         if doc_ids:
-            knn_clause["filter"] = {"terms": {"doc_id": doc_ids}}
+            knn_filters.append({"terms": {"doc_id": doc_ids}})
+        if acl is not None:
+            knn_filters.append(acl)
+        if len(knn_filters) == 1:
+            knn_clause["filter"] = knn_filters[0]
+        elif knn_filters:
+            knn_clause["filter"] = {"bool": {"must": knn_filters}}
 
         body: Dict[str, Any] = {
             "size": k,

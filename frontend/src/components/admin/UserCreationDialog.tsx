@@ -13,13 +13,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Plus, Loader2 } from "lucide-react";
 import { useToast } from "@/lib/hooks/use-toast";
 
@@ -35,7 +28,6 @@ export function UserCreationDialog({ onUserCreated }: UserCreationDialogProps) {
     email: "",
     name: "",
     password: "",
-    role: "viewer" as "admin" | "editor" | "viewer",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -47,15 +39,15 @@ export function UserCreationDialog({ onUserCreated }: UserCreationDialogProps) {
         email: formData.email,
         name: formData.name || undefined,
         password: formData.password,
-        roles: [formData.role],
+        roles: ["user"],
       });
 
       toast({
         title: "Success",
-        description: `User ${formData.email} created with ${formData.role} role`,
+        description: `User ${formData.email} created`,
       });
 
-      setFormData({ email: "", name: "", password: "", role: "viewer" });
+      setFormData({ email: "", name: "", password: "" });
       setOpen(false);
       onUserCreated();
     } catch (err: any) {
@@ -131,37 +123,6 @@ export function UserCreationDialog({ onUserCreated }: UserCreationDialogProps) {
               required
               disabled={isLoading}
             />
-          </div>
-
-          <div>
-            <Label htmlFor="role">Role</Label>
-            <Select
-              value={formData.role}
-              onValueChange={(value: any) =>
-                setFormData({ ...formData, role: value })
-              }
-            >
-              <SelectTrigger id="role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="admin">Admin - Full access</SelectItem>
-                <SelectItem value="editor">
-                  Editor - Can create and edit
-                </SelectItem>
-                <SelectItem value="viewer">
-                  Viewer - Read-only access
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              {formData.role === "admin" &&
-                "Full system access, manage users and settings"}
-              {formData.role === "editor" &&
-                "Can create, edit, and delete own resources"}
-              {formData.role === "viewer" &&
-                "Can only view and search resources"}
-            </p>
           </div>
 
           <div className="flex gap-2 justify-end">

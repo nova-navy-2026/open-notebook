@@ -21,6 +21,44 @@ def get_current_user_id(request: Request) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
+def get_current_navy_user_id(request: Request) -> Optional[str]:
+    """FastAPI dependency that returns the navy directory user id (e.g. "m24409").
+
+    Set by the JWT middleware from the ``navy_user_id`` claim, which is in
+    turn populated at login time from the navy users.json directory. Returns
+    None when the logged-in user has no matching navy entry (e.g. the
+    bootstrap admin), in which case access-control filtering will fail-closed
+    downstream.
+    """
+    return getattr(request.state, "navy_user_id", None)
+
+
+def is_admin(request: Request) -> bool:
+    """Return True when the authenticated user carries the ``admin`` role."""
+    roles = getattr(request.state, "user_permissions", []) or []
+    return "admin" in roles
+
+
+def get_navy_acl_user_id(request: Request) -> Optional[str]:
+    """FastAPI dependency that returns the navy user id to use for ACL filtering.
+
+    - Admins bypass ACL entirely → returns ``"__admin__"`` so callers skip
+      the filter and see all documents.
+    - Regular users with a navy entry → returns their ``navy_user_id``
+      (ACL filter applied via ``build_opensearch_filter``).
+    - Regular users without a navy entry → returns ``None``, callers
+      fail-closed (empty results).
+    """
+    roles = getattr(request.state, "user_permissions", []) or []
+    navy_id = getattr(request.state, "navy_user_id", None)
+    logger.debug(
+        f"[navy-acl] resolving user_id: roles={roles!r} navy_user_id={navy_id!r}"
+    )
+    if "admin" in roles:
+        return "__admin__"
+    return navy_id
+
+
 class PasswordAuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware to check password authentication for all API requests.

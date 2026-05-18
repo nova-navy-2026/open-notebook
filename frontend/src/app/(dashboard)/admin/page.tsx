@@ -5,7 +5,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { StatusDashboard } from "@/components/admin/StatusDashboard";
 import { RoleManagementComponent } from "@/components/admin/RoleManagementComponent";
 import { UserCreationDialog } from "@/components/admin/UserCreationDialog";
-import { PermissionsManagementComponent } from "@/components/admin/PermissionsManagementComponent";
 import { AuditLogViewer } from "@/components/admin/AuditLogViewer";
 import { ProtectedRouteGuard } from "@/lib/hooks/use-authorization";
 import {
@@ -22,7 +21,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Users,
-  Shield,
   Activity,
   BarChart3,
   MessageCircleQuestion,
@@ -87,7 +85,7 @@ export default function AdminDashboardPage() {
     const tabParam = searchParams.get("tab");
     if (
       tabParam &&
-      ["overview", "ask", "users", "permissions", "audit"].includes(tabParam)
+      ["overview", "ask", "users", "audit"].includes(tabParam)
     ) {
       setActiveTab(tabParam);
     }
@@ -121,7 +119,7 @@ export default function AdminDashboardPage() {
               onValueChange={handleTabChange}
               className="w-full"
             >
-              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-6 mb-6 sm:mb-8">
+              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 mb-6 sm:mb-8">
                 <TabsTrigger value="overview" className="gap-2">
                   <BarChart3 className="h-4 w-4" />
                   <span className="hidden sm:inline">Overview</span>
@@ -137,10 +135,6 @@ export default function AdminDashboardPage() {
                 <TabsTrigger value="users" className="gap-2">
                   <Users className="h-4 w-4" />
                   <span className="hidden sm:inline">Users & Roles</span>
-                </TabsTrigger>
-                <TabsTrigger value="permissions" className="gap-2">
-                  <Shield className="h-4 w-4" />
-                  <span className="hidden sm:inline">Permissions</span>
                 </TabsTrigger>
                 <TabsTrigger value="audit" className="gap-2">
                   <Activity className="h-4 w-4" />
@@ -169,23 +163,6 @@ export default function AdminDashboardPage() {
                     <CardContent>
                       <p className="text-sm text-muted-foreground">
                         Manage users and assign roles
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card
-                    className="cursor-pointer hover:shadow-lg transition-shadow"
-                    onClick={() => setActiveTab("permissions")}
-                  >
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base">Permissions</CardTitle>
-                        <Shield className="h-5 w-5 text-green-600" />
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground">
-                        Configure role permissions
                       </p>
                     </CardContent>
                   </Card>
@@ -423,21 +400,7 @@ export default function AdminDashboardPage() {
 
                   <div className="space-y-6">
                     <RoleManagementComponent key={refreshKey} />
-                    <PermissionsManagementComponent />
                   </div>
-                </div>
-              </TabsContent>
-
-              {/* Permissions Tab */}
-              <TabsContent value="permissions" className="space-y-6">
-                <div>
-                  <h2 className="text-3xl font-bold mb-2">
-                    Permission Management
-                  </h2>
-                  <p className="text-muted-foreground mb-6">
-                    Configure granular permissions for each role
-                  </p>
-                  <PermissionsManagementComponent />
                 </div>
               </TabsContent>
 

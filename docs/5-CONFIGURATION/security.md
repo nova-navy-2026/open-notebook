@@ -250,7 +250,7 @@ services:
     image: lfnovo/open_notebook:v1-latest-single
     pull_policy: always
     ports:
-      - "127.0.0.1:8502:8502"  # Bind to localhost only
+      - "127.0.0.1:3675:3675"  # Bind to localhost only
     environment:
       - OPEN_NOTEBOOK_PASSWORD=your_secure_password
     security_opt:
@@ -270,7 +270,7 @@ services:
 sudo ufw allow ssh
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
-sudo ufw deny 8502/tcp   # Block direct access
+sudo ufw deny 3675/tcp   # Block direct access
 sudo ufw deny 5055/tcp   # Block direct API access
 sudo ufw enable
 
@@ -278,7 +278,7 @@ sudo ufw enable
 iptables -A INPUT -p tcp --dport 22 -j ACCEPT
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-iptables -A INPUT -p tcp --dport 8502 -j DROP
+iptables -A INPUT -p tcp --dport 3675 -j DROP
 iptables -A INPUT -p tcp --dport 5055 -j DROP
 ```
 

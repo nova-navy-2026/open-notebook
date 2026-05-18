@@ -3,7 +3,9 @@ import json
 import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from api.auth import get_navy_acl_user_id
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
@@ -471,7 +473,10 @@ async def execute_chat_stream(request: ExecuteChatRequest):
 
 
 @router.post("/chat/context", response_model=BuildContextResponse)
-async def build_context(request: BuildContextRequest):
+async def build_context(
+    request: BuildContextRequest,
+    navy_user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
     """Build context for a notebook based on context configuration."""
     try:
         # Verify notebook exists
@@ -686,6 +691,7 @@ async def build_context(request: BuildContextRequest):
                     query=request.query,
                     doc_ids=navy_doc_ids,
                     k=5,
+                    user_id=navy_user_id,
                 )
                 navy_context_items = []
                 for r in navy_results:

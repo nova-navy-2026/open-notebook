@@ -75,12 +75,17 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 request.state.user = {
                     "id": payload["user_id"],
                     "email": payload["email"],
-                    "roles": payload.get("roles", ["viewer"]),
+                    "roles": payload.get("roles", ["user"]),
                     "authenticated_via": "jwt"
                 }
                 request.state.user_id = payload["user_id"]
-                request.state.user_role = payload.get("roles", ["viewer"])[0]
-                request.state.user_permissions = payload.get("roles", ["viewer"])
+                request.state.user_role = payload.get("roles", ["user"])[0]
+                request.state.user_permissions = payload.get("roles", ["user"])
+
+                # Navy-specific claims (populated at login from users.json).
+                request.state.navy_user_id = payload.get("navy_user_id")
+                request.state.navy_department = payload.get("department")
+                request.state.navy_clearance = payload.get("clearence")
                 
                 logger.debug(f"✅ JWT auth successful: {payload['email']}")
                 

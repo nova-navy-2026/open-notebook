@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   } as NextConfig["experimental"],
 
   // API Rewrites: Proxy /api/* requests to FastAPI backend
-  // This simplifies reverse proxy configuration - users only need to proxy to port 8502
+  // This simplifies reverse proxy configuration - users only need to proxy to port 3675
   // Next.js handles internal routing to the API backend on port 5055
   async rewrites() {
     // INTERNAL_API_URL: Where Next.js server-side should proxy API requests

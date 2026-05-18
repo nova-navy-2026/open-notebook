@@ -33,7 +33,7 @@ services:
     image: lfnovo/open_notebook:v1-latest
     pull_policy: always
     ports:
-      - "8502:8502"  # Web UI
+      - "3675:3675"  # Web UI
       - "5055:5055"  # API
     environment:
       # Encryption key for credential storage (required)
@@ -74,7 +74,7 @@ Wait 15-20 seconds for services to start.
 
 Open your browser:
 ```
-http://localhost:8502
+http://localhost:3675
 ```
 
 You should see the Open Notebook interface!
@@ -126,7 +126,7 @@ Your OpenAI models are now available!
 ## Verification Checklist
 
 - [ ] Docker is running
-- [ ] You can access `http://localhost:8502`
+- [ ] You can access `http://localhost:3675`
 - [ ] OpenAI credential is configured and tested
 - [ ] You created a notebook
 - [ ] You added a source
@@ -146,12 +146,12 @@ In your notebook, go to **Settings** → **Models** to choose:
 
 ## Troubleshooting
 
-### "Port 8502 already in use"
+### "Port 3675 already in use"
 
 Change the port in docker-compose.yml:
 ```yaml
 ports:
-  - "8503:8502"  # Use 8503 instead
+  - "8503:3675"  # Use 8503 instead
 ```
 
 Then access at `http://localhost:8503`

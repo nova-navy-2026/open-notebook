@@ -34,7 +34,7 @@ class User(ObjectModel):
 
     email: str
     name: Optional[str] = None
-    roles: List[str] = ["viewer"]
+    roles: List[str] = ["user"]
     provider: str = "local"
     external_id: Optional[str] = None
     is_active: bool = True

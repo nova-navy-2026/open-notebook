@@ -11,7 +11,7 @@ Starting with v1.1, Open Notebook uses Next.js rewrites to simplify configuratio
 ### How It Works
 
 ```
-Browser → Reverse Proxy → Port 8502 (Next.js)
+Browser → Reverse Proxy → Port 3675 (Next.js)
                              ↓ (internal proxy)
                           Port 5055 (FastAPI)
 ```
@@ -37,7 +37,7 @@ server {
 
     # Single location block - that's it!
     location / {
-        proxy_pass http://open-notebook:8502;
+        proxy_pass http://open-notebook:3675;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -61,7 +61,7 @@ server {
 
 ```caddy
 notebook.example.com {
-    reverse_proxy open-notebook:8502 {
+    reverse_proxy open-notebook:3675 {
         transport http {
             read_timeout 600s
             write_timeout 600s
@@ -86,7 +86,7 @@ services:
       - "traefik.http.routers.notebook.rule=Host(`notebook.example.com`)"
       - "traefik.http.routers.notebook.entrypoints=websecure"
       - "traefik.http.routers.notebook.tls.certresolver=myresolver"
-      - "traefik.http.services.notebook.loadbalancer.server.port=8502"
+      - "traefik.http.services.notebook.loadbalancer.server.port=3675"
       # Timeout for long-running operations (transformations, podcasts)
       - "traefik.http.services.notebook.loadbalancer.responseforwarding.flushinterval=100ms"
     networks:
@@ -107,7 +107,7 @@ serversTransport:
 ### Coolify
 
 1. Create new service with `lfnovo/open_notebook:v1-latest-single`
-2. Set port to **8502**
+2. Set port to **3675**
 3. Add environment: `API_URL=https://your-domain.com`
 4. Enable HTTPS in Coolify
 5. Done!
@@ -145,7 +145,7 @@ When `API_URL` is not set, the Next.js frontend:
 - Extracts the hostname from the `host` header
 - Respects the `X-Forwarded-Proto` header (for HTTPS behind reverse proxies)
 - Constructs the API URL as `{protocol}://{hostname}:5055`
-- Example: Request to `http://10.20.30.20:8502` → API URL becomes `http://10.20.30.20:5055`
+- Example: Request to `http://10.20.30.20:3675` → API URL becomes `http://10.20.30.20:5055`
 
 **Why set API_URL explicitly?**
 - **Reliability**: Auto-detection can fail with complex proxy setups
@@ -174,7 +174,7 @@ services:
       - ./surreal_data:/mydata
     # Only expose to localhost (nginx handles public access)
     ports:
-      - "127.0.0.1:8502:8502"
+      - "127.0.0.1:3675:3675"
     restart: unless-stopped
 
   nginx:
@@ -202,7 +202,7 @@ events {
 
 http {
     upstream notebook {
-        server open-notebook:8502;
+        server open-notebook:3675;
     }
 
     # HTTP redirect
@@ -272,7 +272,7 @@ location /api/ {
 
 # Frontend (handles all other traffic)
 location / {
-    proxy_pass http://open-notebook:8502;
+    proxy_pass http://open-notebook:3675;
     # ... same headers as above
 }
 ```
@@ -311,20 +311,20 @@ services:
     environment:
       - API_URL=http://192.168.1.100:5055
     ports:
-      - "8502:8502"
+      - "3675:3675"
       - "5055:5055"
 ```
 
 **Step 4: Access from client machine**
 ```bash
 # In browser on other machine:
-http://192.168.1.100:8502
+http://192.168.1.100:3675
 ```
 
 **Troubleshooting**:
-- Check firewall: `sudo ufw allow 8502 && sudo ufw allow 5055`
+- Check firewall: `sudo ufw allow 3675 && sudo ufw allow 5055`
 - Verify connectivity: `ping 192.168.1.100` from client machine
-- Test port: `telnet 192.168.1.100 8502` from client machine
+- Test port: `telnet 192.168.1.100 3675` from client machine
 
 ---
 
@@ -355,7 +355,7 @@ server {
     ssl_certificate_key /etc/nginx/ssl/privkey.pem;
 
     location / {
-        proxy_pass http://open-notebook:8502;
+        proxy_pass http://open-notebook:3675;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -403,7 +403,7 @@ services:
     environment:
       - API_URL=https://notebook.example.com
     ports:
-      - "8502:8502"
+      - "3675:3675"
 
   api:
     image: lfnovo/open_notebook_api:v1-latest
@@ -428,7 +428,7 @@ services:
 ```nginx
 http {
     upstream frontend {
-        server frontend:8502;
+        server frontend:3675;
     }
 
     upstream api {
@@ -510,7 +510,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 
 2. **Verify reverse proxy reaches container**:
    ```bash
-   curl -I http://localhost:8502
+   curl -I http://localhost:3675
    ```
 
 3. **Check browser console** (F12):
@@ -561,7 +561,7 @@ proxy_send_timeout 600s;
 
 **Caddy:**
 ```caddy
-reverse_proxy open-notebook:8502 {
+reverse_proxy open-notebook:3675 {
     transport http {
         read_timeout 600s
         write_timeout 600s
@@ -624,7 +624,7 @@ curl https://your-domain.com/api/config
 docker logs open-notebook
 
 # Look for:
-# - Frontend startup: "▲ Next.js ready on http://0.0.0.0:8502"
+# - Frontend startup: "▲ Next.js ready on http://0.0.0.0:3675"
 # - API startup: "INFO:     Uvicorn running on http://0.0.0.0:5055"
 # - Connection errors or CORS issues
 ```
@@ -659,7 +659,7 @@ Check browser console (F12) - should see: `✅ [Config] Runtime API URL from ser
 ```nginx
 # Only needed for versions ≤ 1.0.10
 location = /config {
-    proxy_pass http://open-notebook:8502;
+    proxy_pass http://open-notebook:3675;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -743,7 +743,7 @@ When uploading files, your reverse proxy may reject the request due to body size
        request_body {
            max_size 100MB
        }
-       reverse_proxy open-notebook:8502 {
+       reverse_proxy open-notebook:3675 {
            transport http {
                read_timeout 600s
                write_timeout 600s
@@ -855,10 +855,10 @@ curl -H "Authorization: Bearer your-password-here" \
 
 1. **Always use HTTPS** in production
 2. **Set API_URL explicitly** when using reverse proxies to avoid auto-detection issues
-3. **Bind to localhost** (`127.0.0.1:8502`) and let proxy handle public access for security
+3. **Bind to localhost** (`127.0.0.1:3675`) and let proxy handle public access for security
 4. **Enable security headers** (HSTS, X-Frame-Options, X-Content-Type-Options, X-XSS-Protection)
 5. **Set up certificate renewal** for Let's Encrypt (usually automatic with certbot)
-6. **Keep ports 5055 and 8502 accessible** from your reverse proxy container (use Docker networks)
+6. **Keep ports 5055 and 3675 accessible** from your reverse proxy container (use Docker networks)
 7. **Use environment files** (`.env` or `docker.env`) to manage configuration securely
 8. **Test your configuration** before going live:
    - Check browser console for config messages

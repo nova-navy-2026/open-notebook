@@ -19,7 +19,9 @@ import json
 import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from api.auth import get_navy_acl_user_id
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
@@ -97,7 +99,11 @@ class SuccessResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _build_global_context(query: str, k: int = 5) -> Dict[str, Any]:
+async def _build_global_context(
+    query: str,
+    k: int = 5,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """Retrieve the top-``k`` most relevant chunks from OpenSearch (RAG).
 
     Uses semantic retrieval rather than dumping every indexed document:
@@ -168,7 +174,7 @@ async def _build_global_context(query: str, k: int = 5) -> Dict[str, Any]:
         from open_notebook.search.navy_docs import vector_search_navy_documents
 
         navy_results = await vector_search_navy_documents(
-            query=query, doc_ids=None, k=k
+            query=query, doc_ids=None, k=k, user_id=user_id
         )
         logger.info(
             f"Global chat context: navy corpus returned {len(navy_results)} chunks for query='{query[:80]}'"
@@ -435,7 +441,10 @@ async def delete_global_session(session_id: str):
 
 
 @router.post("/global-chat/execute", response_model=ExecuteGlobalChatResponse)
-async def execute_global_chat(request: ExecuteGlobalChatRequest):
+async def execute_global_chat(
+    request: ExecuteGlobalChatRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
     """Send a message in a global chat session.
 
     Context is automatically built by searching all indexed documents
@@ -452,7 +461,7 @@ async def execute_global_chat(request: ExecuteGlobalChatRequest):
             raise HTTPException(status_code=404, detail="Session not found")
 
         # Build context from all indexed docs
-        context = await _build_global_context(request.message)
+        context = await _build_global_context(request.message, user_id=user_id)
 
         model_override = (
             request.model_override
@@ -547,7 +556,10 @@ async def _stream_global_chat_sse(
 
 
 @router.post("/global-chat/execute/stream")
-async def execute_global_chat_stream(request: ExecuteGlobalChatRequest):
+async def execute_global_chat_stream(
+    request: ExecuteGlobalChatRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
     """Send a message in a global chat session with SSE token streaming."""
     full_id = (
         request.session_id
@@ -559,7 +571,7 @@ async def execute_global_chat_stream(request: ExecuteGlobalChatRequest):
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Build context (RAG over indexed docs) up front
-    context = await _build_global_context(request.message)
+    context = await _build_global_context(request.message, user_id=user_id)
 
     model_override = (
         request.model_override

@@ -38,7 +38,7 @@ services:
     image: lfnovo/open_notebook:v1-latest
     pull_policy: always
     ports:
-      - "8502:8502"  # Web UI
+      - "3675:3675"  # Web UI
       - "5055:5055"  # API
     environment:
       - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string
@@ -76,7 +76,7 @@ Wait 15-20 seconds for services to start.
 
 Open your browser:
 ```
-http://localhost:8502
+http://localhost:3675
 ```
 
 You should see the Open Notebook interface!
@@ -138,7 +138,7 @@ Your provider's models are now available!
 ## Verification Checklist
 
 - [ ] Docker is running
-- [ ] You can access `http://localhost:8502`
+- [ ] You can access `http://localhost:3675`
 - [ ] Provider credential is configured and tested
 - [ ] Models are registered
 - [ ] You created a notebook

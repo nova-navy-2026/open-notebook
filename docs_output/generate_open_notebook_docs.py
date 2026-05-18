@@ -154,7 +154,7 @@ h("2.1 Tiers", 2)
 table(
     ["Tier", "Responsibility", "Technology"],
     [
-        ["Frontend", "UI, session, routing, API calls.", "Next.js 16 + React 19 on port 8502."],
+        ["Frontend", "UI, session, routing, API calls.", "Next.js 16 + React 19 on port 3675."],
         ["Backend API", "Business logic, LLM orchestration, persistence.", "FastAPI + Pydantic on port 5055."],
         ["Database", "Storage, vectors, relations, migrations.", "SurrealDB v2 on port 8000."],
         ["Worker", "Async jobs (embeddings, podcasts, long ingestion).", "surreal-commands-worker."],
@@ -336,7 +336,7 @@ h("8. Frontend", 1)
 para(
     "The frontend lives under frontend/ and is a Next.js 16 application "
     "using the App Router, React 19, TypeScript, Tailwind CSS and "
-    "Shadcn-UI components. It listens on port 8502 in production "
+    "Shadcn-UI components. It listens on port 3675 in production "
     "(supervisord) and port 3000 in local dev."
 )
 
@@ -448,7 +448,7 @@ table(
     ["Service", "Image", "Ports", "Purpose"],
     [
         ["surrealdb", "surrealdb/surrealdb:v2", "8000", "Database."],
-        ["open_notebook", "lfnovo/open_notebook:v1-latest", "5055 (API), 8502 (UI)", "API + worker + frontend under supervisord."],
+        ["open_notebook", "lfnovo/open_notebook:v1-latest", "5055 (API), 3675 (UI)", "API + worker + frontend under supervisord."],
     ],
 )
 para("Minimum configuration:")
@@ -463,7 +463,7 @@ code(
     "\n"
     "  open_notebook:\n"
     "    image: lfnovo/open_notebook:v1-latest\n"
-    "    ports: [\"8502:8502\", \"5055:5055\"]\n"
+    "    ports: [\"3675:3675\", \"5055:5055\"]\n"
     "    environment:\n"
     "      - OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me\n"
     "      - SURREAL_URL=ws://surrealdb:8000/rpc\n"
@@ -479,7 +479,7 @@ code(
 h("11.2 Single-container image (Dockerfile.single)", 2)
 bullet("Bundles SurrealDB, API, worker and frontend in one image.")
 bullet("Managed by supervisord (surrealdb, api, worker, frontend) with explicit priorities 5 / 10 / 20 / 30.")
-bullet("Exposes 5055 (API), 8502 (UI) and 8000 (SurrealDB internal).")
+bullet("Exposes 5055 (API), 3675 (UI) and 8000 (SurrealDB internal).")
 bullet("Ideal for small single-host deployments where one container is preferred over compose.")
 
 h("11.3 Build image (standard Dockerfile)", 2)
@@ -502,7 +502,7 @@ h("12. Operating the system", 1)
 
 h("12.1 First start", 2)
 numbered("docker compose up -d.")
-numbered("Open http://localhost:8502.")
+numbered("Open http://localhost:3675.")
 numbered("If OPEN_NOTEBOOK_PASSWORD is set, log in with that password.")
 numbered("Go to Settings / Models, add API keys for the AI providers you want to use; keys are encrypted with OPEN_NOTEBOOK_ENCRYPTION_KEY.")
 numbered("Configure default chat / embedding / TTS / STT models.")
