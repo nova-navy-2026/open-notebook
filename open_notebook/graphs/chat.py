@@ -91,6 +91,11 @@ conn = sqlite3.connect(
     LANGGRAPH_CHECKPOINT_FILE,
     check_same_thread=False,
 )
+# WAL mode allows multiple reader processes and serialises writers without
+# returning "database is locked" errors; busy_timeout lets a writer wait up
+# to 5 s for another writer to finish instead of failing immediately.
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA busy_timeout=5000")
 memory = SqliteSaver(conn)
 
 agent_state = StateGraph(ThreadState)

@@ -15,6 +15,7 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
+    "uvloop>=0.21.0",   # faster async event loop used by uvicorn in production
     "pydantic>=2.9.2",
     "loguru>=0.7.2",
     "langchain>=1.2.0",

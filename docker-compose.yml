@@ -44,6 +44,12 @@ services:
       - RFDETR_API_URL=http://nova-rf-detr:4802
       - BGE_M3_SERVER_URL=http://nova-bge-m3:4803
       - CLIP_SERVER_URL=http://nova-clip:4804
+      # ── Uvicorn production settings ──────────────────────────────────
+      # Workers: WAL mode makes 2 safe; keep ≤ 4 (SQLite checkpoint store limit)
+      - API_WORKERS=${API_WORKERS:-2}
+      - API_BACKLOG=${API_BACKLOG:-2048}
+      - API_TIMEOUT_KEEP_ALIVE=${API_TIMEOUT_KEEP_ALIVE:-75}
+      - API_RELOAD=false
     volumes:
       - ./notebook_data:/app/data
     depends_on:

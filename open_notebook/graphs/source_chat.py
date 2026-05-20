@@ -245,6 +245,8 @@ conn = sqlite3.connect(
     LANGGRAPH_CHECKPOINT_FILE,
     check_same_thread=False,
 )
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA busy_timeout=5000")
 memory = SqliteSaver(conn)
 
 # Create the StateGraph
