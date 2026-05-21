@@ -11,7 +11,7 @@ Total requests in a typical run:
   30×3 search + 10×(1 session + 2 chat) + 10×(1 submit + N polls) ≈ 130+
 
 Usage:
-  python tests/test_load_heavy.py [--users N] [--password SECRET]
+  python test_load_heavy.py [--users N] [--password SECRET]
                                    [--url URL] [--think SECONDS]
 
 Requirements:
@@ -19,6 +19,7 @@ Requirements:
 """
 
 import argparse
+import json
 import random
 import sys
 import threading
@@ -469,6 +470,60 @@ def print_summary(results: list[StepResult], total_elapsed: float, num_users: in
     print()
 
 
+def export_results_to_json(results: list[StepResult], total_elapsed: float, num_users: int, filename="resultados.json"):
+    """
+    Exporta as estatísticas finais para um ficheiro JSON 
+    pronto a ser consumido pelo script de geração de gráficos.
+    """
+    passed = [r for r in results if r.success]
+    failed = [r for r in results if not r.success]
+
+    data = {
+        "test_metadata": {
+            "concurrent_users": num_users,
+            "total_requests": len(results),
+            "passed": len(passed),
+            "failed": len(failed),
+            "wall_time_seconds": round(total_elapsed, 2)
+        },
+        "endpoints": []
+    }
+
+    by_endpoint: dict[str, list[StepResult]] = {}
+    for r in results:
+        by_endpoint.setdefault(r.endpoint, []).append(r)
+
+    ordered = [
+        "search",
+        "global-chat/sessions",
+        "global-chat/execute",
+        "research/generate",
+        "research/jobs/poll",
+    ]
+
+    for ep in ordered:
+        ep_results = by_endpoint.get(ep, [])
+        if not ep_results:
+            continue
+        ok = sum(1 for r in ep_results if r.success)
+        times = [r.elapsed for r in ep_results]
+        avg = sum(times) / len(times) if times else 0
+
+        data["endpoints"].append({
+            "name": f"/{ep}",
+            "total": len(ep_results),
+            "passed": ok,
+            "failed": len(ep_results) - ok,
+            "avg_time_s": round(avg, 2),
+            "min_time_s": round(min(times), 2) if times else 0,
+            "max_time_s": round(max(times), 2) if times else 0
+        })
+
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+    print(f"[+] Resultados exportados para JSON com sucesso: {filename}\n")
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -537,6 +592,9 @@ def main():
 
     total_elapsed = time.monotonic() - t_start
     print_summary(all_results, total_elapsed, n)
+    
+    # Exporta o JSON no final do teste
+    export_results_to_json(all_results, total_elapsed, n)
 
     failed_count = sum(1 for r in all_results if not r.success)
     sys.exit(0 if failed_count == 0 else 1)
