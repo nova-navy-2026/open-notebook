@@ -21,7 +21,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.auth import get_navy_acl_user_id
+from api.auth import get_current_user_id, get_navy_acl_user_id
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
@@ -36,6 +36,25 @@ from open_notebook.utils.graph_utils import get_session_message_count
 router = APIRouter()
 
 GLOBAL_CHAT_TAG = "global_chat"
+
+
+def _owner_tag(user_id: str) -> str:
+    """Build the per-user owner tag stored on global chat sessions."""
+    return f"{GLOBAL_CHAT_TAG}:{user_id or 'anonymous'}"
+
+
+def _session_belongs_to_user(session: "ChatSession", user_id: str) -> bool:
+    """Return True if the session is owned by ``user_id``.
+
+    Sessions created before per-user isolation (owner=None or
+    owner=GLOBAL_CHAT_TAG) are treated as legacy and accessible by any
+    authenticated user, the same way notebooks without an owner are handled.
+    """
+    owner = getattr(session, "owner", None)
+    # Legacy: no owner set, or the old hardcoded tag — accessible to all.
+    if not owner or owner == GLOBAL_CHAT_TAG:
+        return True
+    return owner == _owner_tag(user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -253,11 +272,19 @@ async def _build_global_context(
     return context_data
 
 
-async def _get_global_sessions() -> List[ChatSession]:
-    """Return all chat sessions tagged as global (no notebook relationship)."""
+async def _get_global_sessions(user_id: str) -> List[ChatSession]:
+    """Return all chat sessions tagged as global for the given user.
+
+    Includes legacy sessions (owner IS NULL or owner = 'global_chat') so
+    that pre-existing sessions remain visible and deletable by the current
+    user.
+    """
     rows = await repo_query(
-        "SELECT * FROM chat_session WHERE owner = $tag ORDER BY updated DESC",
-        {"tag": GLOBAL_CHAT_TAG},
+        "SELECT * FROM chat_session WHERE owner = $tag "
+        "OR owner IS NULL "
+        "OR owner = $legacy_tag "
+        "ORDER BY updated DESC",
+        {"tag": _owner_tag(user_id), "legacy_tag": GLOBAL_CHAT_TAG},
     )
     sessions: List[ChatSession] = []
     for row in rows:
@@ -273,10 +300,10 @@ async def _get_global_sessions() -> List[ChatSession]:
 # ---------------------------------------------------------------------------
 
 @router.get("/global-chat/sessions", response_model=List[GlobalChatSessionResponse])
-async def list_global_sessions():
-    """List all global chat sessions."""
+async def list_global_sessions(user_id: str = Depends(get_current_user_id)):
+    """List all global chat sessions for the authenticated user."""
     try:
-        sessions = await _get_global_sessions()
+        sessions = await _get_global_sessions(user_id)
         results = []
         for session in sessions:
             session_id = str(session.id)
@@ -298,13 +325,16 @@ async def list_global_sessions():
 
 
 @router.post("/global-chat/sessions", response_model=GlobalChatSessionResponse)
-async def create_global_session(request: CreateGlobalSessionRequest):
-    """Create a new global chat session."""
+async def create_global_session(
+    request: CreateGlobalSessionRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Create a new global chat session, scoped to the authenticated user."""
     try:
         session = ChatSession(
             title=request.title or f"Chat {asyncio.get_event_loop().time():.0f}",
             model_override=request.model_override,
-            owner=GLOBAL_CHAT_TAG,
+            owner=_owner_tag(user_id),
         )
         await session.save()
 
@@ -325,7 +355,10 @@ async def create_global_session(request: CreateGlobalSessionRequest):
     "/global-chat/sessions/{session_id}",
     response_model=GlobalChatSessionWithMessagesResponse,
 )
-async def get_global_session(session_id: str):
+async def get_global_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """Get a global chat session with its messages."""
     try:
         full_id = (
@@ -335,6 +368,8 @@ async def get_global_session(session_id: str):
         )
         session = await ChatSession.get(full_id)
         if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
             raise HTTPException(status_code=404, detail="Session not found")
 
         thread_state = await asyncio.to_thread(
@@ -375,7 +410,11 @@ async def get_global_session(session_id: str):
     "/global-chat/sessions/{session_id}",
     response_model=GlobalChatSessionResponse,
 )
-async def update_global_session(session_id: str, request: UpdateGlobalSessionRequest):
+async def update_global_session(
+    session_id: str,
+    request: UpdateGlobalSessionRequest,
+    user_id: str = Depends(get_current_user_id),
+):
     """Update a global chat session."""
     try:
         full_id = (
@@ -385,6 +424,8 @@ async def update_global_session(session_id: str, request: UpdateGlobalSessionReq
         )
         session = await ChatSession.get(full_id)
         if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
             raise HTTPException(status_code=404, detail="Session not found")
 
         data = request.model_dump(exclude_unset=True)
@@ -417,7 +458,10 @@ async def update_global_session(session_id: str, request: UpdateGlobalSessionReq
     "/global-chat/sessions/{session_id}",
     response_model=SuccessResponse,
 )
-async def delete_global_session(session_id: str):
+async def delete_global_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """Delete a global chat session."""
     try:
         full_id = (
@@ -427,6 +471,8 @@ async def delete_global_session(session_id: str):
         )
         session = await ChatSession.get(full_id)
         if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
             raise HTTPException(status_code=404, detail="Session not found")
 
         await session.delete()
@@ -444,6 +490,7 @@ async def delete_global_session(session_id: str):
 async def execute_global_chat(
     request: ExecuteGlobalChatRequest,
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
 ):
     """Send a message in a global chat session.
 
@@ -458,6 +505,8 @@ async def execute_global_chat(
         )
         session = await ChatSession.get(full_id)
         if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, auth_user_id):
             raise HTTPException(status_code=404, detail="Session not found")
 
         # Build context from all indexed docs
@@ -559,6 +608,7 @@ async def _stream_global_chat_sse(
 async def execute_global_chat_stream(
     request: ExecuteGlobalChatRequest,
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
 ):
     """Send a message in a global chat session with SSE token streaming."""
     full_id = (
@@ -568,6 +618,8 @@ async def execute_global_chat_stream(
     )
     session = await ChatSession.get(full_id)
     if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not _session_belongs_to_user(session, auth_user_id):
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Build context (RAG over indexed docs) up front

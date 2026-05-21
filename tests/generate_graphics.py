@@ -50,7 +50,7 @@ def generate_report_image(json_path="resultados.json", output_path="load_test_re
     if meta["failed"] > 0:
         explode = (0, 0.1)
     else:
-        explode = (0, 0)
+        explode = (0,)
         labels = ['Sucesso']
         sizes = [meta["passed"]]
         colors = ['#55A868']

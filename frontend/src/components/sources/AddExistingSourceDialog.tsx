@@ -1,4 +1,5 @@
 'use client'
+import { formatDate } from '@/lib/utils/format-datetime'
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useDebounce } from 'use-debounce'
@@ -174,7 +175,7 @@ export function AddExistingSourceDialog({
 
   const formatDate = (dateString: string) => {
     try {
-      return new Date(dateString).toLocaleDateString()
+      return formatDate(dateString)
     } catch {
       return ''
     }

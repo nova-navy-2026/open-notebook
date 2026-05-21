@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTime } from '@/lib/utils/format-datetime'
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -238,7 +239,7 @@ export function ResearchJobsList() {
                     )}
                     <span className="text-xs text-muted-foreground">
                       {job.created_at
-                        ? new Date(job.created_at).toLocaleString()
+                        ? formatDateTime(job.created_at)
                         : ""}
                     </span>
                   </div>

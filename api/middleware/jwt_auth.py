@@ -122,7 +122,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             
             # Verify password
             if token == self.password:
-                # Password auth successful
+                # Password auth successful.
+                # Allow callers to supply a navy user identity via X-Navy-User
+                # so the load test (and other tooling) can exercise the proper
+                # OpenSearch ACL filter path without needing a full JWT token.
+                # This is only honoured AFTER the password has been validated.
+                navy_user_override = request.headers.get("X-Navy-User")
                 request.state.user = {
                     "id": "password-auth",
                     "email": "password-auth@internal",
@@ -132,6 +137,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 request.state.user_id = "password-auth"
                 request.state.user_role = "admin"
                 request.state.user_permissions = ["admin"]
+                if navy_user_override:
+                    request.state.navy_user_id = navy_user_override
                 
                 logger.debug("✅ Password auth successful")
                 

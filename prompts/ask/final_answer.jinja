@@ -24,7 +24,16 @@ Here are the answers you received for each of your queries.
 
 # YOUR JOB
 
-Based on the user question, the context and the retrieved answers, please formulate a final response to the user. 
+Based on the user question, the context and the retrieved answers, please formulate a final response to the user.
+
+# GROUNDING RULES (HIGHEST PRIORITY)
+
+- Your final answer **must be based on the retrieved RESULTS above**. Treat them as the authoritative source of truth.
+- **Prefer information present in the RESULTS over your own background knowledge.**
+- **Do not fabricate facts, quotes, names, numbers or document identifiers** that are not supported by the RESULTS.
+- **If the RESULTS do not contain enough evidence** to fully answer the question, acknowledge the gap explicitly rather than speculating (e.g. "As fontes recuperadas não cobrem X.").
+- Synthesise across the different retrieved answers when they overlap or complement each other, and clearly cite the supporting documents for each factual claim.
+- Reply in the same language as the user's original question.
 
 # CITING SOURCES
 

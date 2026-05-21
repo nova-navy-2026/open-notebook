@@ -1,4 +1,5 @@
 "use client";
+import { formatDateTime } from '@/lib/utils/format-datetime'
 
 import { useState, useEffect } from "react";
 import { useRBAC } from "@/lib/contexts/rbac-context";
@@ -113,7 +114,7 @@ export function AuditLogViewer() {
       ["Timestamp", "User", "Action", "Resource", "Status"].join(","),
       ...filteredLogs.map((log) =>
         [
-          new Date(log.timestamp).toLocaleString(),
+          formatDateTime(log.timestamp),
           log.user_email,
           log.action,
           log.resource_type,
@@ -254,7 +255,7 @@ export function AuditLogViewer() {
                     filteredLogs.map((log) => (
                       <TableRow key={log.id}>
                         <TableCell className="text-sm">
-                          {new Date(log.timestamp).toLocaleString()}
+                          {formatDateTime(log.timestamp)}
                         </TableCell>
                         <TableCell className="text-sm">
                           {log.user_email}
@@ -315,7 +316,7 @@ function UserActivityTable({ logs }: { logs: AuditLog[] }) {
             logs.map((log) => (
               <TableRow key={log.id}>
                 <TableCell className="text-sm">
-                  {new Date(log.timestamp).toLocaleString()}
+                  {formatDateTime(log.timestamp)}
                 </TableCell>
                 <TableCell className="text-sm capitalize">
                   {log.action}

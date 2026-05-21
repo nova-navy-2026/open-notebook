@@ -8,6 +8,7 @@ import { useNotebooks } from '@/lib/hooks/use-notebooks'
 import { useEpisodeProfiles, useGeneratePodcast } from '@/lib/hooks/use-podcasts'
 import { chatApi } from '@/lib/api/chat'
 import { sourcesApi } from '@/lib/api/sources'
+import { formatDateTime } from '@/lib/utils/format-datetime'
 import { notesApi } from '@/lib/api/notes'
 import { BuildContextRequest, NoteResponse, NotebookResponse, SourceListResponse } from '@/lib/types/api'
 import type { QueryClient } from '@tanstack/react-query'
@@ -370,9 +371,7 @@ function ContentSelectionPanel({
                                       </span>
                                       <span className="text-xs text-muted-foreground">
                                         {tr.commonUpdated}{' '}
-                                        {new Date(note.updated).toLocaleString(
-                                          language.startsWith('zh') ? language : 'en-US'
-                                        )}
+                                        {formatDateTime(note.updated)}
                                       </span>
                                     </Label>
                                   </div>

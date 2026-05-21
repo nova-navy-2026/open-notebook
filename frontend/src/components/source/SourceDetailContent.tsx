@@ -1,4 +1,5 @@
 'use client'
+import { formatDateTime } from '@/lib/utils/format-datetime'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -791,7 +792,7 @@ export function SourceDetailContent({
                         })}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(source.created).toLocaleString()}
+                        {formatDateTime(source.created)}
                       </p>
                     </div>
                     <div>
@@ -803,7 +804,7 @@ export function SourceDetailContent({
                         })}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(source.updated).toLocaleString()}
+                        {formatDateTime(source.updated)}
                       </p>
                     </div>
                   </div>

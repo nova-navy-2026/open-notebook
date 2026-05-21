@@ -3,7 +3,7 @@ Audit logging service and middleware.
 Tracks all significant actions for compliance and security.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from uuid import uuid4
@@ -92,7 +92,7 @@ class AuditLog:
         metadata: Optional[Dict[str, Any]] = None,
     ):
         self.id = str(uuid4())
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
         self.user_id = user_id
         self.action = action.value
         self.resource_type = resource_type.value

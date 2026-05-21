@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
-from api.auth import get_navy_acl_user_id
+from api.auth import get_current_user_id, get_navy_acl_user_id
 from open_notebook.research.researcher_service import (
     ResearchReportSource,
     ResearchReportType,
@@ -111,6 +111,7 @@ async def get_sources():
 async def generate_research(
     request: GenerateResearchRequest,
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
 ):
     """
     Generate a research report.
@@ -120,7 +121,7 @@ async def generate_research(
     """
     try:
         # Build internal request
-        logger.debug(f"Research request received: query='{request.query[:100]}', type={request.report_type}, navy_user={user_id}")
+        logger.debug(f"Research request received: query='{request.query[:100]}', type={request.report_type}, navy_user={user_id}, auth_user={auth_user_id}")
         research_request = ResearchRequest(
             query=request.query,
             report_type=ResearchReportType(request.report_type),
@@ -130,7 +131,13 @@ async def generate_research(
             notebook_id=request.notebook_id,
             model_id=request.model_id,
             use_amalia=request.use_amalia,
-            user_id=user_id,
+            # ``user_id`` on the internal request is used both as the ACL
+            # filter for the navy OpenSearch index and as the owner tag
+            # stored on the ResearchJob so the user can only see their own
+            # reports. Prefer the navy id when available; otherwise fall
+            # back to the platform auth id (e.g. "anonymous") so jobs are
+            # still scoped per user.
+            user_id=user_id or auth_user_id,
         )
 
         if request.run_in_background:
@@ -165,9 +172,22 @@ async def generate_research(
 
 
 @router.get("/research/jobs")
-async def list_jobs():
-    """List all research jobs."""
+async def list_jobs(
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    """List research jobs owned by the authenticated user.
+
+    Admins (``user_id == "__admin__"``) see all jobs; everyone else sees
+    only their own.
+    """
     jobs = list_research_jobs()
+    if user_id != "__admin__":
+        owner = user_id or auth_user_id
+        # Legacy jobs (created before per-user isolation) have user_id=None;
+        # treat them as accessible to any authenticated user, same as the
+        # notebooks pattern.
+        jobs = [j for j in jobs if j.user_id is None or j.user_id == owner]
     return {
         "jobs": [
             {
@@ -189,11 +209,21 @@ async def list_jobs():
 
 
 @router.get("/research/jobs/{job_id}")
-async def get_job(job_id: str):
+async def get_job(
+    job_id: str,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
     """Get a research job by ID, including the result if completed."""
     job = get_research_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")
+    if user_id != "__admin__":
+        owner = user_id or auth_user_id
+        # Legacy jobs (user_id=None) are accessible to any authenticated user.
+        if job.user_id is not None and job.user_id != owner:
+            # Fail-closed: return 404 instead of 403 to avoid leaking job existence.
+            raise HTTPException(status_code=404, detail="Research job not found")
 
     response = {
         "id": job.id,
@@ -224,8 +254,20 @@ async def get_job(job_id: str):
 
 
 @router.delete("/research/jobs/{job_id}")
-async def delete_job(job_id: str):
+async def delete_job(
+    job_id: str,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
     """Delete a research job and its result permanently."""
+    job = get_research_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Research job not found")
+    if user_id != "__admin__":
+        owner = user_id or auth_user_id
+        # Legacy jobs (user_id=None) are accessible to any authenticated user.
+        if job.user_id is not None and job.user_id != owner:
+            raise HTTPException(status_code=404, detail="Research job not found")
     deleted = delete_research_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Research job not found")

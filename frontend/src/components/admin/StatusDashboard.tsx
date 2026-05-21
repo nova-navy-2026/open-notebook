@@ -1,4 +1,5 @@
 "use client";
+import { formatTime } from '@/lib/utils/format-datetime'
 
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api/client";
@@ -196,7 +197,7 @@ export function StatusDashboard() {
                 <p className="font-semibold">Overall Status</p>
                 <p className="text-sm text-muted-foreground">
                   {lastRefresh &&
-                    `Last checked: ${lastRefresh.toLocaleTimeString()}`}
+                    `Last checked: ${formatTime(lastRefresh)}`}
                 </p>
               </div>
             </div>
@@ -271,7 +272,7 @@ export function StatusDashboard() {
                 },
                 {
                   label: "Last Check",
-                  value: health.timestamp.toLocaleTimeString(),
+                  value: formatTime(health.timestamp),
                   status: "neutral",
                 },
               ].map((metric, i) => (

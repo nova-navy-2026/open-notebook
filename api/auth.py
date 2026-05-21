@@ -120,7 +120,17 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Password is correct, proceed with the request
+        # Password is correct, proceed with the request.
+        # Allow callers to supply a navy user identity via X-Navy-User header.
+        # This is only honoured AFTER the password has been validated above, so
+        # it cannot be abused by unauthenticated clients.  JWT-authenticated
+        # requests never reach this point (they bypass the middleware via the
+        # JWTAuthMiddleware that runs first).
+        navy_user_override = request.headers.get("X-Navy-User")
+        if navy_user_override:
+            request.state.navy_user_id = navy_user_override
+
+        # Proceed with the request
         response = await call_next(request)
         return response
 

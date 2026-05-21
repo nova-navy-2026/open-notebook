@@ -1,4 +1,5 @@
 'use client'
+import { formatDateTime } from '@/lib/utils/format-datetime'
 
 import { useState, useEffect, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
@@ -303,9 +304,9 @@ export function RebuildEmbeddings() {
 
             {status.started_at && (
               <div className="text-sm text-muted-foreground space-y-1">
-                <p>{t.common.created.replace('{time}', new Date(status.started_at).toLocaleString())}</p>
+                <p>{t.common.created.replace('{time}', formatDateTime(status.started_at))}</p>
                 {status.completed_at && (
-                  <p>{t.notebooks.updated}: {new Date(status.completed_at).toLocaleString()}</p>
+                  <p>{t.notebooks.updated}: {formatDateTime(status.completed_at)}</p>
                 )}
               </div>
             )}

@@ -10,7 +10,7 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -120,6 +120,9 @@ class ResearchJob(BaseModel):
     tone: Optional[str] = None
     model_id: Optional[str] = None
     notebook_id: Optional[str] = None
+    # Authenticated user id this job belongs to. Used to enforce that users
+    # only see / poll / delete their own research reports.
+    user_id: Optional[str] = None
 
 
 # ── Persistent job store ──────────────────────────────────────────────
@@ -128,12 +131,16 @@ _jobs_file = os.path.join(DATA_FOLDER, "research_jobs.json")
 _jobs: Dict[str, ResearchJob] = {}
 
 
-def _save_jobs() -> None:
+def _save_jobs(_deleted: Optional[set] = None) -> None:
     """Persist all research jobs to disk as JSON (atomic write via temp-file + rename).
 
     Merges this worker's in-memory jobs with whatever is already on disk so we
     never lose jobs owned by other Uvicorn workers when running with multiple
     processes.
+
+    Pass ``_deleted`` (a set of job IDs) to explicitly remove those entries from
+    the disk state before writing.  Without this, a job deleted from ``_jobs``
+    would be re-read from disk during the merge and silently restored.
     """
     try:
         dir_ = os.path.dirname(_jobs_file)
@@ -147,6 +154,12 @@ def _save_jobs() -> None:
                     merged = json.load(f) or {}
             except Exception:
                 merged = {}
+
+        # Remove any explicitly deleted jobs from the on-disk state BEFORE the
+        # in-memory overlay — otherwise they would be resurrected from disk.
+        if _deleted:
+            for jid in _deleted:
+                merged.pop(jid, None)
 
         # … then overlay this worker's view (we own the latest state for our jobs).
         for jid, job in _jobs.items():
@@ -435,7 +448,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
             source_urls=source_urls,
             research_costs=0.0,
             status="completed",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             tone=request.tone.value,
             model_id=request.model_id,
             retrieved_documents=retrieved_docs,
@@ -456,7 +469,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
             report="",
             status="failed",
             error=str(e),
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
 
@@ -575,7 +588,7 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
             research_costs=costs,
             images=images,
             status="completed",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             tone=request.tone.value,
             model_id=request.model_id,
             retrieved_documents=retrieved_docs,
@@ -599,7 +612,7 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
             report="",
             status="failed",
             error=str(e),
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
 
@@ -611,7 +624,7 @@ async def submit_research_job(request: ResearchRequest) -> ResearchJob:
     import asyncio
 
     job_id = str(uuid.uuid4())[:8]
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     job = ResearchJob(
         id=job_id,
@@ -622,6 +635,7 @@ async def submit_research_job(request: ResearchRequest) -> ResearchJob:
         tone=request.tone.value,
         model_id=request.model_id,
         notebook_id=request.notebook_id,
+        user_id=request.user_id,
     )
     _jobs[job_id] = job
     _save_jobs()
@@ -674,7 +688,11 @@ def delete_research_job(job_id: str) -> bool:
     if job_id not in _jobs:
         return False
     del _jobs[job_id]
-    _save_jobs()
+    # Pass the deleted ID so _save_jobs() removes it from the disk state before
+    # writing — without this the merge would read the job back from disk and
+    # restore it, making the deletion appear to succeed but then immediately
+    # reappear in the job list.
+    _save_jobs(_deleted={job_id})
     return True
 
 

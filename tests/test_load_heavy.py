@@ -149,16 +149,22 @@ class StepResult:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _auth_headers(password: str, user_id: int) -> dict:
+def _auth_headers(password: str, user_id: int, navy_user: str = "") -> dict:
     """
     Authentication header (Bearer password) plus a per-user X-Forwarded-For
     so that rate-limit buckets (if any) are isolated per simulated user.
+    When ``navy_user`` is set, also sends X-Navy-User so the server applies
+    the correct OpenSearch clearance filter (same as a JWT-authenticated
+    navy user). Without this the research path falls back to slow web search.
     """
-    return {
+    headers = {
         "Authorization": f"Bearer {password}",
         "X-Forwarded-For": f"10.0.{(user_id - 1) // 256}.{(user_id - 1) % 256}",
         "Content-Type": "application/json",
     }
+    if navy_user:
+        headers["X-Navy-User"] = navy_user
+    return headers
 
 
 def _think(mean_seconds: float):
@@ -171,7 +177,7 @@ def _think(mean_seconds: float):
 # ---------------------------------------------------------------------------
 
 def _do_search(user_id: int, turn: int, query: str,
-               base_url: str, password: str) -> StepResult:
+               base_url: str, password: str, navy_user: str = "") -> StepResult:
     payload = {
         "query": query,
         "type": "text",
@@ -185,7 +191,7 @@ def _do_search(user_id: int, turn: int, query: str,
             f"{base_url}{API_PREFIX}/search",
             json=payload,
             timeout=TIMEOUT_FAST,
-            headers=_auth_headers(password, user_id),
+            headers=_auth_headers(password, user_id, navy_user),
         )
         elapsed = time.monotonic() - t0
         if resp.status_code == 429:
@@ -204,7 +210,7 @@ def _do_search(user_id: int, turn: int, query: str,
 
 
 def _do_create_global_session(user_id: int,
-                               base_url: str, password: str) -> StepResult:
+                               base_url: str, password: str, navy_user: str = "") -> StepResult:
     payload = {"title": f"Load-test session for user {user_id:02d}"}
     t0 = time.monotonic()
     try:
@@ -212,7 +218,7 @@ def _do_create_global_session(user_id: int,
             f"{base_url}{API_PREFIX}/global-chat/sessions",
             json=payload,
             timeout=TIMEOUT_FAST,
-            headers=_auth_headers(password, user_id),
+            headers=_auth_headers(password, user_id, navy_user),
         )
         elapsed = time.monotonic() - t0
         if resp.status_code == 429:
@@ -230,7 +236,7 @@ def _do_create_global_session(user_id: int,
 
 
 def _do_global_chat(user_id: int, turn: int, session_id: str, message: str,
-                    base_url: str, password: str) -> StepResult:
+                    base_url: str, password: str, navy_user: str = "") -> StepResult:
     payload = {"session_id": session_id, "message": message}
     t0 = time.monotonic()
     try:
@@ -238,7 +244,7 @@ def _do_global_chat(user_id: int, turn: int, session_id: str, message: str,
             f"{base_url}{API_PREFIX}/global-chat/execute",
             json=payload,
             timeout=TIMEOUT_CHAT,
-            headers=_auth_headers(password, user_id),
+            headers=_auth_headers(password, user_id, navy_user),
         )
         elapsed = time.monotonic() - t0
         if resp.status_code == 429:
@@ -260,11 +266,11 @@ def _do_global_chat(user_id: int, turn: int, session_id: str, message: str,
 
 
 def _do_submit_research(user_id: int, query: str,
-                         base_url: str, password: str) -> StepResult:
+                         base_url: str, password: str, navy_user: str = "") -> StepResult:
     payload = {
         "query": query,
         "report_type": "research_report",
-        "report_source": "web",
+        "report_source": "hybrid",
         "tone": "Objective",
         "source_urls": [],
         "run_in_background": True,
@@ -275,7 +281,7 @@ def _do_submit_research(user_id: int, query: str,
             f"{base_url}{API_PREFIX}/research/generate",
             json=payload,
             timeout=TIMEOUT_FAST,
-            headers=_auth_headers(password, user_id),
+            headers=_auth_headers(password, user_id, navy_user),
         )
         elapsed = time.monotonic() - t0
         if resp.status_code == 429:
@@ -293,7 +299,7 @@ def _do_submit_research(user_id: int, query: str,
 
 
 def _do_poll_research(user_id: int, job_id: str,
-                       base_url: str, password: str) -> StepResult:
+                       base_url: str, password: str, navy_user: str = "") -> StepResult:
     """Poll GET /research/jobs/{job_id} until status is 'completed' or 'failed'."""
     deadline = time.monotonic() + TIMEOUT_POLL
     t0 = time.monotonic()
@@ -303,7 +309,7 @@ def _do_poll_research(user_id: int, job_id: str,
             resp = requests.get(
                 f"{base_url}{API_PREFIX}/research/jobs/{job_id}",
                 timeout=TIMEOUT_FAST,
-                headers=_auth_headers(password, user_id),
+                headers=_auth_headers(password, user_id, navy_user),
             )
             if resp.status_code != 200:
                 return StepResult("research/jobs/poll", user_id, 0, False,
@@ -344,6 +350,7 @@ def simulate_user(
     do_global_chat: bool,
     do_research: bool,
     print_lock: threading.Lock,
+    navy_user: str = "",
 ) -> list[StepResult]:
     """
     Simulate one user's full interaction with open-notebook:
@@ -358,7 +365,7 @@ def simulate_user(
     for turn_idx, query in enumerate(search_seq, start=1):
         if turn_idx > 1:
             _think(think_time)
-        step = _do_search(user_id, turn_idx, query, base_url, password)
+        step = _do_search(user_id, turn_idx, query, base_url, password, navy_user)
         results.append(step)
         with print_lock:
             _print_step(step)
@@ -366,7 +373,7 @@ def simulate_user(
     # ── Phase 2: global chat ────────────────────────────────────────────────
     if do_global_chat:
         _think(think_time)
-        create_step = _do_create_global_session(user_id, base_url, password)
+        create_step = _do_create_global_session(user_id, base_url, password, navy_user)
         results.append(create_step)
         with print_lock:
             _print_step(create_step)
@@ -377,7 +384,7 @@ def simulate_user(
             for turn_idx, message in enumerate(turns, start=1):
                 _think(think_time)
                 step = _do_global_chat(user_id, turn_idx, session_id,
-                                       message, base_url, password)
+                                       message, base_url, password, navy_user)
                 results.append(step)
                 with print_lock:
                     _print_step(step)
@@ -386,14 +393,14 @@ def simulate_user(
     if do_research:
         _think(think_time)
         query = RESEARCH_QUERIES[(user_id - 1) % len(RESEARCH_QUERIES)]
-        submit_step = _do_submit_research(user_id, query, base_url, password)
+        submit_step = _do_submit_research(user_id, query, base_url, password, navy_user)
         results.append(submit_step)
         with print_lock:
             _print_step(submit_step)
 
         if submit_step.success:
             job_id = submit_step.extra.get("job_id", "")
-            poll_step = _do_poll_research(user_id, job_id, base_url, password)
+            poll_step = _do_poll_research(user_id, job_id, base_url, password, navy_user)
             results.append(poll_step)
             with print_lock:
                 _print_step(poll_step)
@@ -541,6 +548,13 @@ def main():
     parser.add_argument("--think", type=float, default=DEFAULT_THINK_TIME,
                         help=f"Mean think time in seconds between requests "
                              f"(default: {DEFAULT_THINK_TIME})")
+    parser.add_argument("--navy-user", type=str, default="",
+                        metavar="NAVY_ID",
+                        help="Navy user ID (e.g. 'm24409') sent as X-Navy-User header. "
+                             "Required for research jobs to use OpenSearch (navy corpus) "
+                             "instead of slow internet web search. Without this flag the "
+                             "research phase will fall back to web search and is likely "
+                             "to time out.")
     args = parser.parse_args()
 
     random.seed(42)
@@ -566,6 +580,7 @@ def main():
     print(f"  users       : {n}  (all do 3 text searches)")
     print(f"  global chat : {len(chat_users)} users also open a chat session + 2 turns")
     print(f"  research    : {len(research_users)} users also submit a research job")
+    print(f"  navy user   : {args.navy_user or '(none — research falls back to web search!)'}")
     print(f"  think time  : ~{args.think}s mean between requests")
     total_req_min = n * 3 + len(chat_users) * 3 + len(research_users) * 2
     print(f"  minimum total requests: {total_req_min}")
@@ -583,6 +598,7 @@ def main():
                 uid in chat_users,
                 uid in research_users,
                 print_lock,
+                args.navy_user,
             ): uid
             for uid in range(1, n + 1)
         }
