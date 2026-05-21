@@ -5,6 +5,7 @@ Startup script for Open Notebook API server.
 
 import os
 import sys
+import multiprocessing
 from pathlib import Path
 
 import uvicorn
@@ -13,16 +14,32 @@ import uvicorn
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
+def get_allocated_cores() -> int:
+    """
+    Safely determine the number of CPU cores explicitly allocated to this container.
+    Prevents reading the full physical host cores on shared clusters.
+    """
+    try:
+        # Works on Linux and respects Docker/Kubernetes/cgroups CPU limits
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        # Fallback for local development on Windows/macOS
+        return multiprocessing.cpu_count()
+
 if __name__ == "__main__":
     host = os.getenv("API_HOST", "127.0.0.1")
     port = int(os.getenv("API_PORT", "5055"))
     reload = os.getenv("API_RELOAD", "false").lower() == "true"
 
-    # Worker / concurrency settings.
-    # With reload=True only a single process is used (Uvicorn limitation),
-    # so reload is forced off in production.
-    import multiprocessing
-    default_workers = multiprocessing.cpu_count() * 2 + 1
+    # ── Optimized Worker / Concurrency Settings ──────────────────────────────
+    allocated_cores = get_allocated_cores()
+    
+    # Modern ASGI standard: 1 worker per allocated core is highly efficient.
+    # We enforce a hard ceiling of 8 workers for the automatic fallback to 
+    # protect cluster memory. If you need more, explicitly pass API_WORKERS.
+    MAX_AUTOMATIC_WORKERS = 4
+    default_workers = min(max(1, allocated_cores), MAX_AUTOMATIC_WORKERS)
+    
     workers = int(os.getenv("API_WORKERS", default_workers if not reload else 1))
 
     # Each worker keeps up to this many idle keep-alive connections.
@@ -32,6 +49,7 @@ if __name__ == "__main__":
     timeout_keep_alive = int(os.getenv("API_TIMEOUT_KEEP_ALIVE", "75"))
 
     print(f"Starting Open Notebook API server on {host}:{port}")
+    print(f"  detected_allocated_cores={allocated_cores}")
     print(f"  workers={workers}  reload={reload}  backlog={backlog}"
           f"  timeout_keep_alive={timeout_keep_alive}s")
 
