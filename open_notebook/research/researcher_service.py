@@ -129,12 +129,43 @@ _jobs: Dict[str, ResearchJob] = {}
 
 
 def _save_jobs() -> None:
-    """Persist all research jobs to disk as JSON."""
+    """Persist all research jobs to disk as JSON (atomic write via temp-file + rename).
+
+    Merges this worker's in-memory jobs with whatever is already on disk so we
+    never lose jobs owned by other Uvicorn workers when running with multiple
+    processes.
+    """
     try:
-        os.makedirs(os.path.dirname(_jobs_file), exist_ok=True)
-        data = {jid: job.model_dump() for jid, job in _jobs.items()}
-        with open(_jobs_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        dir_ = os.path.dirname(_jobs_file)
+        os.makedirs(dir_, exist_ok=True)
+
+        # Start from what's on disk (jobs owned by other workers) …
+        merged: Dict[str, dict] = {}
+        if os.path.exists(_jobs_file):
+            try:
+                with open(_jobs_file, "r", encoding="utf-8") as f:
+                    merged = json.load(f) or {}
+            except Exception:
+                merged = {}
+
+        # … then overlay this worker's view (we own the latest state for our jobs).
+        for jid, job in _jobs.items():
+            merged[jid] = job.model_dump()
+
+        # Write to a sibling temp file then rename so readers on other workers
+        # never see a truncated / partially-written file.
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(merged, f, ensure_ascii=False, indent=2, default=str)
+            os.replace(tmp_path, _jobs_file)  # atomic on POSIX
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except Exception as exc:
         logger.warning(f"Could not save research jobs to disk: {exc}")
 
@@ -173,10 +204,39 @@ _load_jobs()
 
 
 def _get_job(job_id: str) -> Optional[ResearchJob]:
-    return _jobs.get(job_id)
+    job = _jobs.get(job_id)
+    if job is not None:
+        return job
+    # Job may have been created by a different Uvicorn worker — fall back to disk.
+    # Retry a few times with brief sleeps to survive a concurrent atomic rename.
+    import time
+    for attempt in range(4):
+        try:
+            if os.path.exists(_jobs_file):
+                with open(_jobs_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if job_id in data:
+                    loaded = ResearchJob.model_validate(data[job_id])
+                    _jobs[job_id] = loaded  # cache locally for subsequent polls
+                    return loaded
+        except Exception as exc:
+            logger.debug(f"Could not reload job {job_id} from disk (attempt {attempt+1}): {exc}")
+        if attempt < 3:
+            time.sleep(0.05 * (2 ** attempt))  # 50ms, 100ms, 200ms
+    return None
 
 
 def _list_jobs() -> List[ResearchJob]:
+    # Merge any jobs persisted by other workers that we haven't seen yet.
+    try:
+        if os.path.exists(_jobs_file):
+            with open(_jobs_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for jid, raw in data.items():
+                if jid not in _jobs:
+                    _jobs[jid] = ResearchJob.model_validate(raw)
+    except Exception as exc:
+        logger.debug(f"Could not merge jobs from disk: {exc}")
     return sorted(_jobs.values(), key=lambda j: j.created_at, reverse=True)
 
 

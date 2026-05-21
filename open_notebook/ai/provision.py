@@ -1,10 +1,27 @@
-from esperanto import LanguageModel
+from esperanto import AIFactory, LanguageModel
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
 from open_notebook.ai.models import model_manager
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import token_count
+
+
+def _amalia_from_env(**kwargs) -> LanguageModel:
+    """Build an AMALIA language model directly from env vars (no DB required)."""
+    import os
+
+    base_url = os.environ.get("AMALIA_BASE_URL", "https://api.novasearch.org/amalia-llm/v1")
+    api_key = os.environ.get("AMALIA_API_KEY", "dummy")
+    # AMALIA_SMART_LLM is "openai:carminho/AMALIA-9B-50-DPO" — strip the prefix
+    smart_llm = os.environ.get("AMALIA_SMART_LLM", "openai:carminho/AMALIA-9B-50-DPO")
+    model_name = smart_llm.split(":", 1)[-1]
+
+    return AIFactory.create_language(
+        model_name=model_name,
+        provider="openai-compatible",
+        config={"base_url": base_url, "api_key": api_key, **kwargs},
+    )
 
 
 async def provision_langchain_model(
@@ -36,16 +53,18 @@ async def provision_langchain_model(
     logger.debug(f"Using model: {model}")
 
     if model is None:
-        logger.error(
-            f"Model provisioning failed: No model found. "
-            f"Selection reason: {selection_reason}. "
-            f"model_id={model_id}, default_type={default_type}. "
-            f"Please check Settings → Models and ensure a default model is configured for '{default_type}'."
-        )
-        raise ConfigurationError(
-            f"No model configured for {selection_reason}. "
-            f"Please go to Settings → Models and configure a default model for '{default_type}'."
-        )
+        # No DB model configured — fall back to AMALIA from env vars.
+        try:
+            model = _amalia_from_env(**kwargs)
+            logger.info(
+                f"No DB model for '{selection_reason}' — falling back to AMALIA from env vars"
+            )
+        except Exception as e:
+            logger.error(f"AMALIA env fallback failed: {e}")
+            raise ConfigurationError(
+                f"No model configured for {selection_reason} and AMALIA fallback failed. "
+                f"Check AMALIA_BASE_URL / AMALIA_API_KEY in .env."
+            ) from e
 
     if not isinstance(model, LanguageModel):
         logger.error(

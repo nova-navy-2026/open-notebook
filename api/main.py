@@ -136,6 +136,25 @@ async def lifespan(app: FastAPI):
             cred = create_credential_from_env("amalia")
             await cred.save()
             logger.info(f"Amália credential created (id={cred.id})")
+        else:
+            # Refresh api_key / base_url from env vars if they differ (handles
+            # the case where a previous startup seeded the credential with the
+            # default 'dummy' key before AMALIA_API_KEY was set).
+            env_cred = create_credential_from_env("amalia")
+            env_key = env_cred.api_key.get_secret_value() if env_cred.api_key else None
+            for cred in existing_amalia:
+                current_key = cred.api_key.get_secret_value() if cred.api_key else None
+                if (env_key and current_key != env_key) or (
+                    env_cred.base_url and cred.base_url != env_cred.base_url
+                ):
+                    logger.info(
+                        f"Refreshing Amália credential {cred.id} from env vars "
+                        f"(api_key changed={current_key != env_key}, "
+                        f"base_url changed={cred.base_url != env_cred.base_url})"
+                    )
+                    cred.api_key = env_cred.api_key
+                    cred.base_url = env_cred.base_url
+                    await cred.save()
 
         await provision_provider_keys("amalia")
         discovered, new, existing = await sync_provider_models("amalia", auto_register=True)
@@ -276,6 +295,29 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Background navy docs refresh failed: {e}")
 
     navy_refresh_task = _asyncio.create_task(_refresh_navy_docs_loop())
+
+    # Auto-assign default models if none are configured yet.
+    # This runs after all provider models have been seeded above, so AMALIA
+    # (highest priority) will be selected as the default chat model on a
+    # fresh install — no UI interaction required.
+    try:
+        from open_notebook.ai.models import DefaultModels as _DefaultModels
+
+        _defaults = await _DefaultModels.get_instance()
+        if not _defaults.default_chat_model:
+            logger.info("No default chat model set — running auto-assign…")
+            from api.routers.models import auto_assign_defaults as _auto_assign
+            result = await _auto_assign()
+            assigned = getattr(result, "assigned", {})
+            missing = getattr(result, "missing", [])
+            if assigned:
+                logger.success(f"Auto-assigned default models: {list(assigned.keys())}")
+            if missing:
+                logger.warning(f"No models available for slots: {missing}")
+        else:
+            logger.info(f"Default chat model already set: {_defaults.default_chat_model}")
+    except Exception as e:
+        logger.warning(f"Auto-assign default models failed (non-fatal): {e}")
 
     logger.success("API initialization completed successfully")
 
