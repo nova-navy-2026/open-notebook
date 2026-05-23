@@ -176,18 +176,20 @@ async def list_jobs(
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
     auth_user_id: str = Depends(get_current_user_id),
 ):
-    """List research jobs owned by the authenticated user.
+    """List research jobs visible to the authenticated user.
 
-    Admins (``user_id == "__admin__"``) see all jobs; everyone else sees
-    only their own.
+    Admins (``user_id == "__admin__"``) see unassociated reports (no owner)
+    plus their own.  Regular users see only their own reports.
     """
     jobs = list_research_jobs()
-    if user_id != "__admin__":
+    if user_id == "__admin__":
+        # Admin sees reports without an owner and their own (tagged "__admin__")
+        jobs = [j for j in jobs if j.user_id is None or j.user_id == "__admin__"]
+    else:
         owner = user_id or auth_user_id
-        # Legacy jobs (created before per-user isolation) have user_id=None;
-        # treat them as accessible to any authenticated user, same as the
-        # notebooks pattern.
-        jobs = [j for j in jobs if j.user_id is None or j.user_id == owner]
+        # Regular users see only their own reports; unassociated reports are
+        # not exposed to avoid leaking legacy / orphaned data.
+        jobs = [j for j in jobs if j.user_id == owner]
     return {
         "jobs": [
             {
@@ -218,11 +220,14 @@ async def get_job(
     job = get_research_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")
-    if user_id != "__admin__":
+    if user_id == "__admin__":
+        # Admin can access unassociated jobs and their own
+        if job.user_id is not None and job.user_id != "__admin__":
+            raise HTTPException(status_code=404, detail="Research job not found")
+    else:
         owner = user_id or auth_user_id
-        # Legacy jobs (user_id=None) are accessible to any authenticated user.
-        if job.user_id is not None and job.user_id != owner:
-            # Fail-closed: return 404 instead of 403 to avoid leaking job existence.
+        # Fail-closed: return 404 instead of 403 to avoid leaking job existence.
+        if job.user_id != owner:
             raise HTTPException(status_code=404, detail="Research job not found")
 
     response = {
@@ -263,10 +268,13 @@ async def delete_job(
     job = get_research_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")
-    if user_id != "__admin__":
+    if user_id == "__admin__":
+        # Admin can delete unassociated jobs and their own
+        if job.user_id is not None and job.user_id != "__admin__":
+            raise HTTPException(status_code=404, detail="Research job not found")
+    else:
         owner = user_id or auth_user_id
-        # Legacy jobs (user_id=None) are accessible to any authenticated user.
-        if job.user_id is not None and job.user_id != owner:
+        if job.user_id != owner:
             raise HTTPException(status_code=404, detail="Research job not found")
     deleted = delete_research_job(job_id)
     if not deleted:
