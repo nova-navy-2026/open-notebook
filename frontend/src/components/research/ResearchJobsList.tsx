@@ -1,8 +1,10 @@
 "use client";
 import { formatDateTime } from '@/lib/utils/format-datetime'
 
-import { useState } from "react";
+import { isValidElement, useRef, useState } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components, ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -106,6 +108,184 @@ function ReportTypeLabel({ type }: { type: string }) {
   );
 }
 
+type TocItem = { level: number; text: string; id: string; index: number; line: number };
+type MarkdownHeadingProps = HTMLAttributes<HTMLHeadingElement> & ExtraProps;
+
+function markdownNodeText(node: ReactNode): string {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(markdownNodeText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return markdownNodeText(node.props.children);
+  }
+  return "";
+}
+
+function slugifyHeading(text: string) {
+  return text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+function nextHeadingId(counts: Map<string, number>, text: string) {
+  const base = slugifyHeading(text) || "section";
+  const count = counts.get(base) ?? 0;
+  counts.set(base, count + 1);
+  return count === 0 ? base : `${base}-${count + 1}`;
+}
+
+function isLikelyBareHeading(line: string) {
+  const stripped = line.trim().replace(/^\*+|\*+$/g, "");
+  if (!stripped) return false;
+  if (stripped.length > 100 || /[.!?]\s*$/.test(stripped)) return false;
+  if (/^(?:[-*+>]|\d+[.)]\s+|\|)/.test(stripped)) return false;
+  if (/https?:\/\/|`|\[[^\]]+\]\([^)]+\)/.test(stripped)) return false;
+  if (stripped.includes(":") && !stripped.endsWith(":")) return false;
+  const words = stripped.replace(/:$/, "").split(/\s+/);
+  if (words.length < 1 || words.length > 12) return false;
+  return /^[A-ZÁÉÍÓÚÀÂÊÔÇÃÕ0-9]/.test(stripped);
+}
+
+function normalizeReportMarkdown(markdown: string, fallbackTitle: string) {
+  const source = (markdown || "").trim();
+  if (!source) return source;
+
+  const lines = source.split("\n");
+  const output: string[] = [];
+  let inFence = false;
+  let firstContentSeen = false;
+  let hasH1 = /^#\s+\S/m.test(source);
+
+  lines.forEach((line, index) => {
+    const stripped = line.trim();
+    if (/^```/.test(stripped)) {
+      inFence = !inFence;
+      output.push(line);
+      return;
+    }
+    if (inFence || !stripped) {
+      output.push(line);
+      return;
+    }
+    if (stripped.startsWith("#")) {
+      output.push(line);
+      firstContentSeen = true;
+      return;
+    }
+
+    const prevBlank = index === 0 || !lines[index - 1].trim();
+    const nextBlank = index + 1 >= lines.length || !lines[index + 1].trim();
+    if (!firstContentSeen && !hasH1 && stripped.length <= 140 && !/[.!?]\s*$/.test(stripped)) {
+      output.push(`# ${stripped.replace(/:$/, "")}`);
+      firstContentSeen = true;
+      hasH1 = true;
+      return;
+    }
+    if (firstContentSeen && (prevBlank || nextBlank) && isLikelyBareHeading(stripped)) {
+      output.push(`## ${stripped.replace(/:$/, "")}`);
+      return;
+    }
+
+    output.push(line);
+    firstContentSeen = true;
+  });
+
+  let normalized = output.join("\n").trim();
+  if (!hasH1) {
+    const title = fallbackTitle.trim().replace(/[ ,.;:-]+$/, "") || "Research Report";
+    normalized = `# ${title}\n\n${normalized}`;
+  }
+  if (!/^#{2,3}\s+\S/m.test(normalized)) {
+    normalized = normalized.replace(/^(#\s+.+)\n+/, "$1\n\n## Síntese\n\n");
+  }
+  return normalized;
+}
+
+// Extract a table of contents from report headings. Keep IDs in lock-step
+// with the rendered markdown headings, including duplicate-title suffixes.
+function buildToc(markdown: string): TocItem[] {
+  const lines = markdown.split("\n");
+  const items: TocItem[] = [];
+  const counts = new Map<string, number>();
+  let inFence = false;
+  lines.forEach((raw, lineIndex) => {
+    const line = raw.trimEnd();
+    if (/^```/.test(line)) {
+      inFence = !inFence;
+      return;
+    }
+    if (inFence) return;
+    const m = /^(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!m) return;
+    const level = m[1].length;
+    const text = m[2].replace(/[*_`~]/g, "").trim();
+    const id = nextHeadingId(counts, text);
+    items.push({ level, text, id, index: items.length, line: lineIndex + 1 });
+  });
+  return items;
+}
+
+function scrollReportHeading(container: HTMLElement | null, headingIndex: number) {
+  if (!container) return;
+
+  const heading = container.querySelector<HTMLElement>(
+    `[data-report-heading-index="${headingIndex}"]`,
+  );
+  if (!heading) return;
+
+  const containerRect = container.getBoundingClientRect();
+  const headingRect = heading.getBoundingClientRect();
+  const containerStyle = window.getComputedStyle(container);
+  const paddingTop = Number.parseFloat(containerStyle.paddingTop) || 0;
+  const top =
+    container.scrollTop +
+    headingRect.top -
+    containerRect.top -
+    paddingTop -
+    12;
+
+  container.scrollTo({
+    top: Math.max(0, top),
+    behavior: "smooth",
+  });
+}
+
+function createHeadingComponents(toc: TocItem[]): Components {
+  const tocByLine = new Map(toc.map((item) => [item.line, item]));
+  const counts = new Map<string, number>();
+  const Heading =
+    (Tag: "h1" | "h2" | "h3") =>
+    ({ children, node, ...rest }: MarkdownHeadingProps) => {
+      const fallbackId = nextHeadingId(counts, markdownNodeText(children));
+      const position = (node as { position?: { start?: { line?: number } } } | undefined)?.position;
+      const line = position?.start?.line;
+      const tocItem = typeof line === "number" ? tocByLine.get(line) : undefined;
+      const id = tocItem?.id ?? fallbackId;
+      const className = [rest.className, "scroll-mt-4"].filter(Boolean).join(" ");
+      return (
+        <Tag
+          {...rest}
+          id={id}
+          data-report-heading-id={id}
+          data-report-heading-index={tocItem?.index ?? -1}
+          className={className}
+        >
+          {children}
+        </Tag>
+      );
+    };
+
+  return {
+    h1: Heading("h1"),
+    h2: Heading("h2"),
+    h3: Heading("h3"),
+  };
+}
+
 export function ResearchJobsList() {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -118,6 +298,7 @@ export function ResearchJobsList() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveJobId, setSaveJobId] = useState<string | null>(null);
   const [selectedNotebookId, setSelectedNotebookId] = useState<string>("");
+  const reportScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch the full job with result when selected
   const { data: selectedJob } = useResearchJob(selectedJobId);
@@ -127,34 +308,6 @@ export function ResearchJobsList() {
     if (!modelId) return undefined;
     const found = allModels?.find((m) => m.id === modelId || m.name === modelId);
     return found?.name ?? modelId;
-  };
-
-  // Extract a simple table of contents from the markdown report (h1-h3).
-  const buildToc = (markdown: string) => {
-    const lines = markdown.split("\n");
-    const items: { level: number; text: string; id: string }[] = [];
-    let inFence = false;
-    for (const raw of lines) {
-      const line = raw.trimEnd();
-      if (/^```/.test(line)) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) continue;
-      const m = /^(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
-      if (!m) continue;
-      const level = m[1].length;
-      const text = m[2].replace(/[*_`~]/g, "").trim();
-      const id = text
-        .toLowerCase()
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9\s-]/g, "")
-        .trim()
-        .replace(/\s+/g, "-");
-      if (id) items.push({ level, text, id });
-    }
-    return items;
   };
 
   // Fetch notebooks for the save dialog
@@ -333,9 +486,15 @@ export function ResearchJobsList() {
             <div className="flex-1 min-h-0 overflow-hidden grid grid-cols-[200px_1fr] gap-0">
               {/* Table of contents */}
               {(() => {
-                const toc = buildToc(selectedJob.result.report);
+                const reportMarkdown = normalizeReportMarkdown(
+                  selectedJob.result.report,
+                  selectedJob.query,
+                );
+                const toc = buildToc(reportMarkdown);
+                const headingComponents = createHeadingComponents(toc);
                 return (
-                  <aside className="border-r bg-muted/30 overflow-y-auto px-3 py-4">
+                  <>
+                  <aside className="min-h-0 border-r bg-muted/30 overflow-y-auto px-3 py-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                       {t.research?.tableOfContents ?? "Table of Contents"}
                     </p>
@@ -348,89 +507,27 @@ export function ResearchJobsList() {
                             key={`${item.id}-${i}`}
                             style={{ paddingLeft: `${(item.level - 1) * 8}px` }}
                           >
-                            <a
-                              href={`#${item.id}`}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                const el = document.getElementById(item.id);
-                                if (el)
-                                  el.scrollIntoView({
-                                    behavior: "smooth",
-                                    block: "start",
-                                  });
-                              }}
-                              className="text-muted-foreground hover:text-foreground hover:underline line-clamp-2"
+                            <button
+                              type="button"
+                              onClick={() => scrollReportHeading(reportScrollRef.current, item.index)}
+                              className="block w-full text-left text-muted-foreground hover:text-foreground hover:underline line-clamp-2"
                             >
                               {item.text}
-                            </a>
+                            </button>
                           </li>
                         ))}
                       </ul>
                     )}
                   </aside>
-                );
-              })()}
 
-              <div className="overflow-y-auto px-6 pb-6 space-y-4">
+              <div ref={reportScrollRef} className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-6 space-y-4">
               {/* Report Content */}
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
-                  components={{
-                    h1: ({ children, ...rest }) => {
-                      const text = String(
-                        Array.isArray(children) ? children.join("") : children,
-                      );
-                      const id = text
-                        .toLowerCase()
-                        .normalize("NFKD")
-                        .replace(/[\u0300-\u036f]/g, "")
-                        .replace(/[^a-z0-9\s-]/g, "")
-                        .trim()
-                        .replace(/\s+/g, "-");
-                      return (
-                        <h1 id={id} {...rest}>
-                          {children}
-                        </h1>
-                      );
-                    },
-                    h2: ({ children, ...rest }) => {
-                      const text = String(
-                        Array.isArray(children) ? children.join("") : children,
-                      );
-                      const id = text
-                        .toLowerCase()
-                        .normalize("NFKD")
-                        .replace(/[\u0300-\u036f]/g, "")
-                        .replace(/[^a-z0-9\s-]/g, "")
-                        .trim()
-                        .replace(/\s+/g, "-");
-                      return (
-                        <h2 id={id} {...rest}>
-                          {children}
-                        </h2>
-                      );
-                    },
-                    h3: ({ children, ...rest }) => {
-                      const text = String(
-                        Array.isArray(children) ? children.join("") : children,
-                      );
-                      const id = text
-                        .toLowerCase()
-                        .normalize("NFKD")
-                        .replace(/[\u0300-\u036f]/g, "")
-                        .replace(/[^a-z0-9\s-]/g, "")
-                        .trim()
-                        .replace(/\s+/g, "-");
-                      return (
-                        <h3 id={id} {...rest}>
-                          {children}
-                        </h3>
-                      );
-                    },
-                  }}
+                  components={headingComponents}
                 >
-                  {selectedJob.result.report}
+                  {reportMarkdown}
                 </ReactMarkdown>
               </div>
 
@@ -493,7 +590,11 @@ export function ResearchJobsList() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleCopyReport(selectedJob.result!.report)}
+                  onClick={() =>
+                    handleCopyReport(
+                      normalizeReportMarkdown(selectedJob.result!.report, selectedJob.query),
+                    )
+                  }
                 >
                   <Copy className="mr-1 h-3 w-3" />
                   {t.research?.copyReport ?? "Copy Report"}
@@ -511,6 +612,9 @@ export function ResearchJobsList() {
                 </Button>
               </div>
             </div>
+                  </>
+                );
+              })()}
             </div>
           ) : (
             <div className="flex items-center justify-center py-8">

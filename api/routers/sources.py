@@ -41,6 +41,19 @@ from open_notebook.exceptions import InvalidInputError, NotFoundError
 router = APIRouter()
 
 
+def _normalize_source_id(source_id: str) -> str:
+    """Return a SurrealDB source record id or raise 404 for malformed ids."""
+    if not source_id:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    normalized = source_id if source_id.startswith("source:") else f"source:{source_id}"
+    try:
+        ensure_record_id(normalized)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return normalized
+
+
 def _is_admin_request(request: Request) -> bool:
     """Return True if the authenticated request belongs to an admin user."""
     user = getattr(request.state, "user", None)
@@ -66,7 +79,14 @@ async def _authorize_source_access(source_id: str, request: Request) -> Source:
     Raises 404 if the source does not exist, 403 if it exists but the user is
     not allowed to see it.
     """
-    source = await Source.get(source_id)
+    normalized_source_id = _normalize_source_id(source_id)
+    try:
+        source = await Source.get(normalized_source_id)
+    except (NotFoundError, InvalidInputError):
+        raise HTTPException(status_code=404, detail="Source not found")
+    except Exception as exc:
+        logger.warning(f"Failed to fetch source {source_id}: {exc}")
+        raise HTTPException(status_code=404, detail="Source not found")
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 

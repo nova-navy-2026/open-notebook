@@ -23,6 +23,10 @@ from open_notebook.access_control import build_opensearch_filter
 
 # NOVA-Researcher API base URL
 NOVA_RESEARCHER_URL = os.environ.get("NOVA_RESEARCHER_URL", "http://localhost:3800").rstrip("/")
+RESPONSE_LANGUAGE_POLICY = (
+    "português europeu (pt-PT) por defeito; se o utilizador escrever claramente "
+    "noutro idioma, responde nesse idioma"
+)
 
 
 # ── Enums mirroring GPTResearcher's types ──────────────────────────────
@@ -276,6 +280,13 @@ async def _resolve_model_provider(model_id: Optional[str]) -> Optional[str]:
         return None
 
 
+def _provider_for_request(request: ResearchRequest) -> Optional[str]:
+    """Resolve the NOVA provider while preserving the legacy use_amalia flag."""
+    # model_id resolution is async, so callers pass through _resolve_model_provider
+    # first and use this only for the legacy fallback.
+    return "amalia" if request.use_amalia else None
+
+
 # ── OpenSearch Pre-fetch via NOVA-Researcher API ──────────────────────
 
 
@@ -347,18 +358,100 @@ def _strip_references(report: str) -> str:
     return report
 
 
+_BARE_SECTION_RE = re.compile(
+    r"^\s*(?:\*\*)?\s*("
+    r"resumo\s+executivo|sum[aá]rio\s+executivo|introdu[cç][aã]o|enquadramento|contexto|metodologia|"
+    r"evid[eê]ncia(?:\s+e\s+an[aá]lise)?|desenvolvimento|an[aá]lise|discuss[aã]o|resultados|"
+    r"principais\s+conclus[oõ]es|conclus[aã]o|recomenda[cç][oõ]es|implica[cç][oõ]es|"
+    r"limita[cç][oõ]es|s[ií]ntese|procedimentos(?:\s+de\s+.+)?|promo[cç][aã]o(?:\s+de\s+.+)?|"
+    r"executive\s+summary|introduction|background|context|methodology|evidence(?:\s+and\s+analysis)?|"
+    r"analysis|discussion|findings|results|recommendations|implications|limitations|conclusion|summary"
+    r")\s*(?:\*\*)?\s*:?\s*$",
+    flags=re.IGNORECASE,
+)
+
+
+def _is_likely_bare_heading(line: str) -> bool:
+    stripped = line.strip().strip("*")
+    if not stripped:
+        return False
+    if _BARE_SECTION_RE.match(stripped):
+        return True
+    if len(stripped) > 100 or re.search(r"[.!?]\s*$", stripped):
+        return False
+    if re.match(r"^(?:[-*+>]|\d+[.)]\s+|\|)", stripped):
+        return False
+    if re.search(r"https?://|`|\[[^\]]+\]\([^)]+\)", stripped):
+        return False
+    if ":" in stripped and not stripped.endswith(":"):
+        return False
+    words = stripped.rstrip(":").split()
+    if not 1 <= len(words) <= 12:
+        return False
+    return stripped[0].isupper() or stripped[0].isdigit()
+
+
+def _normalize_report_headings(report: str, fallback_title: str = "") -> str:
+    """Ensure plain-text report section titles become Markdown headings."""
+    report = (report or "").strip()
+    if not report:
+        return report
+
+    lines = report.splitlines()
+    output: List[str] = []
+    in_fence = False
+    first_content_seen = False
+    has_h1 = bool(re.search(r"(?m)^#\s+\S", report))
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            output.append(line)
+            continue
+        if in_fence or not stripped:
+            output.append(line)
+            continue
+        if stripped.startswith("#"):
+            output.append(line)
+            first_content_seen = True
+            continue
+
+        prev_blank = index == 0 or not lines[index - 1].strip()
+        next_blank = index + 1 >= len(lines) or not lines[index + 1].strip()
+        if not first_content_seen and not has_h1 and len(stripped) <= 140 and not re.search(r"[.!?]\s*$", stripped):
+            output.append(f"# {stripped.rstrip(':')}")
+            first_content_seen = True
+            has_h1 = True
+            continue
+        if first_content_seen and (prev_blank or next_blank) and _is_likely_bare_heading(stripped):
+            output.append(f"## {stripped.rstrip(':')}")
+            continue
+
+        output.append(line)
+        first_content_seen = True
+
+    normalized = "\n".join(output).strip()
+    if not has_h1:
+        title = (fallback_title or "Relatório de investigação").strip().rstrip(" ,.;:-")
+        normalized = f"# {title}\n\n{normalized}"
+    if not re.search(r"(?m)^#{2,3}\s+\S", normalized):
+        normalized = re.sub(r"(?m)^(#\s+.+)\n+", r"\1\n\n## Síntese\n\n", normalized, count=1)
+    return normalized
+
+
 # ── Core Research Execution (via NOVA-Researcher API) ─────────────────
 
 
 async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=None) -> ResearchResult:
     """Execute research using the TTD-DR flow via the NOVA-Researcher API."""
 
-    provider = await _resolve_model_provider(request.model_id)
+    provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
 
     try:
         logger.info(
             f"Starting TTD-DR research job {job_id}: "
-            f"query='{request.query[:80]}...', provider={provider or 'amalia(default)'}"
+            f"query='{request.query[:80]}...', provider={provider or 'gemma(default)'}"
         )
 
         if progress_callback:
@@ -379,6 +472,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
         payload = {
             "query": request.query,
             "source_urls": request.source_urls,
+            "language": RESPONSE_LANGUAGE_POLICY,
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
             "retriever_filter": build_opensearch_filter(request.user_id),
         }
@@ -419,7 +513,10 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
                             str(event.get("message", "")),
                         )
                 elif etype == "done":
-                    report = _strip_references(event.get("report", ""))
+                    report = _normalize_report_headings(
+                        _strip_references(event.get("report", "")),
+                        fallback_title=request.query,
+                    )
                     source_urls = event.get("source_urls", []) or []
                 elif etype == "error":
                     stream_error = str(event.get("detail", "Unknown TTD-DR error"))
@@ -489,14 +586,14 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
     if request.report_type == ResearchReportType.TTD_DR:
         return await _run_ttd_dr(request, job_id, progress_callback=progress_callback)
 
-    provider = await _resolve_model_provider(request.model_id)
+    provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
 
     try:
         logger.info(
             f"Starting research job {job_id}: "
             f"query='{request.query[:80]}...', "
             f"type={request.report_type.value}, "
-            f"provider={provider or 'amalia(default)'}"
+            f"provider={provider or 'gemma(default)'}"
         )
 
         if progress_callback:
@@ -524,6 +621,7 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
             "report_type": request.report_type.value,
             "report_source": "langchain_documents" if os_docs else request.report_source.value,
             "tone": request.tone.value,
+            "language": RESPONSE_LANGUAGE_POLICY,
             "source_urls": request.source_urls,
             "documents": os_docs,
             # Tell NOVA-Researcher which OpenSearch index this app uses so
@@ -547,7 +645,10 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
         if progress_callback:
             await progress_callback(90, "Fase 3: A processar e finalizar relatório...")
 
-        report = _strip_references(data.get("report", ""))
+        report = _normalize_report_headings(
+            _strip_references(data.get("report", "")),
+            fallback_title=request.query,
+        )
         source_urls = data.get("source_urls", [])
         costs = data.get("costs", 0.0)
         images = data.get("images", [])

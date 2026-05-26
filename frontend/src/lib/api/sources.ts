@@ -23,7 +23,9 @@ export const sourcesApi = {
   },
 
   get: async (id: string) => {
-    const response = await apiClient.get<SourceDetailResponse>(`/sources/${id}`)
+    const response = await apiClient.get<SourceDetailResponse>(
+      `/sources/${encodeURIComponent(id)}`
+    )
     return response.data
   },
 
@@ -67,16 +69,21 @@ export const sourcesApi = {
   },
 
   update: async (id: string, data: UpdateSourceRequest) => {
-    const response = await apiClient.put<SourceListResponse>(`/sources/${id}`, data)
+    const response = await apiClient.put<SourceListResponse>(
+      `/sources/${encodeURIComponent(id)}`,
+      data
+    )
     return response.data
   },
 
   delete: async (id: string) => {
-    await apiClient.delete(`/sources/${id}`)
+    await apiClient.delete(`/sources/${encodeURIComponent(id)}`)
   },
 
   status: async (id: string) => {
-    const response = await apiClient.get<SourceStatusResponse>(`/sources/${id}/status`)
+    const response = await apiClient.get<SourceStatusResponse>(
+      `/sources/${encodeURIComponent(id)}/status`
+    )
     return response.data
   },
 
@@ -96,12 +103,14 @@ export const sourcesApi = {
   },
 
   retry: async (id: string) => {
-    const response = await apiClient.post<SourceResponse>(`/sources/${id}/retry`)
+    const response = await apiClient.post<SourceResponse>(
+      `/sources/${encodeURIComponent(id)}/retry`
+    )
     return response.data
   },
 
   downloadFile: async (id: string): Promise<AxiosResponse<Blob>> => {
-    return apiClient.get(`/sources/${id}/download`, {
+    return apiClient.get(`/sources/${encodeURIComponent(id)}/download`, {
       responseType: 'blob',
     })
   },

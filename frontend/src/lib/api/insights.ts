@@ -30,25 +30,29 @@ export interface CommandJobStatusResponse {
 
 export const insightsApi = {
   listForSource: async (sourceId: string) => {
-    const response = await apiClient.get<SourceInsightResponse[]>(`/sources/${sourceId}/insights`)
+    const response = await apiClient.get<SourceInsightResponse[]>(
+      `/sources/${encodeURIComponent(sourceId)}/insights`
+    )
     return response.data
   },
 
   get: async (insightId: string) => {
-    const response = await apiClient.get<SourceInsightResponse>(`/insights/${insightId}`)
+    const response = await apiClient.get<SourceInsightResponse>(
+      `/insights/${encodeURIComponent(insightId)}`
+    )
     return response.data
   },
 
   create: async (sourceId: string, data: CreateSourceInsightRequest) => {
     const response = await apiClient.post<InsightCreationResponse>(
-      `/sources/${sourceId}/insights`,
+      `/sources/${encodeURIComponent(sourceId)}/insights`,
       data
     )
     return response.data
   },
 
   delete: async (insightId: string) => {
-    await apiClient.delete(`/insights/${insightId}`)
+    await apiClient.delete(`/insights/${encodeURIComponent(insightId)}`)
   },
 
   getCommandStatus: async (commandId: string) => {
