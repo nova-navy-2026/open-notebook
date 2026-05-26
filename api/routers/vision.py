@@ -10,8 +10,10 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
+import cv2
+import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from loguru import logger
@@ -19,6 +21,115 @@ from pydantic import BaseModel
 
 from open_notebook.research.vision_service import run_vision_analysis
 from open_notebook.research.video_service import run_video_tracking
+
+# Matches /api/vision/note-asset/<filename> paths embedded in markdown context.
+_NOTE_ASSET_RE = re.compile(r"/api/vision/note-asset/([A-Za-z0-9_-]+\.[A-Za-z0-9]+)")
+
+_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi"}
+
+
+def _gemma_base_url() -> str:
+    url = os.environ.get("GEMMA_BASE_URL", "").rstrip("/")
+    if not url:
+        raise RuntimeError("GEMMA_BASE_URL is not set in the environment.")
+    return url
+
+
+def _gemma_api_key() -> str:
+    return os.environ.get("GEMMA_API_KEY", "")
+
+
+def _gemma_model() -> str:
+    raw = os.environ.get("GEMMA_SMART_LLM", "")
+    return raw.split(":")[-1] if raw else "google/gemma-4-31B-it"
+
+
+def _first_frame_as_jpeg(video_path: str) -> Optional[bytes]:
+    """Extract the first frame of a video and return it as JPEG bytes."""
+    cap = cv2.VideoCapture(video_path)
+    try:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return None
+        ok, buf = cv2.imencode(".jpg", frame)
+        return bytes(buf) if ok else None
+    finally:
+        cap.release()
+
+
+def _extract_context_images(context: str, assets_dir: str) -> List[Tuple[bytes, str]]:
+    """
+    Scan context text for embedded /api/vision/note-asset/<filename> URLs.
+    Returns a list of (image_bytes, mime_type) for each found asset:
+    - images: read bytes directly
+    - videos: extract first frame as JPEG
+    """
+    results: List[Tuple[bytes, str]] = []
+    seen: set = set()
+
+    for match in _NOTE_ASSET_RE.finditer(context):
+        filename = match.group(1)
+        if filename in seen:
+            continue
+        seen.add(filename)
+
+        asset_path = os.path.abspath(os.path.join(assets_dir, filename))
+        base = os.path.abspath(assets_dir)
+        if not asset_path.startswith(base + os.sep):
+            continue
+        if not os.path.isfile(asset_path):
+            logger.warning(f"Note asset not found on disk: {asset_path}")
+            continue
+
+        ext = Path(filename).suffix.lower()
+        if ext in _VIDEO_EXTENSIONS:
+            frame = _first_frame_as_jpeg(asset_path)
+            if frame:
+                results.append((frame, "image/jpeg"))
+                logger.info(f"Extracted first frame from video asset: {filename}")
+            else:
+                logger.warning(f"Could not extract first frame from: {filename}")
+        else:
+            with open(asset_path, "rb") as f:
+                img_bytes = f.read()
+            mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
+            mime = mime_map.get(ext, "image/jpeg")
+            results.append((img_bytes, mime))
+            logger.info(f"Loaded image asset: {filename}")
+
+    return results
+
+
+async def _call_gemma(
+    prompt: str,
+    images: Optional[List[Tuple[bytes, str]]] = None,
+) -> str:
+    """
+    Call Gemma via OpenAI-compatible API with an optional list of images.
+    Each image is (bytes, mime_type).
+    """
+    if images:
+        content: list = [{"type": "text", "text": prompt}]
+        for img_bytes, mime in images:
+            b64 = base64.b64encode(img_bytes).decode()
+            content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+    else:
+        content = prompt  # type: ignore[assignment]
+
+    payload = {
+        "model": _gemma_model(),
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": 4096,
+    }
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        resp = await client.post(
+            f"{_gemma_base_url()}/chat/completions",
+            json=payload,
+            headers={"Authorization": f"Bearer {_gemma_api_key()}"},
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
 
 router = APIRouter()
 
@@ -51,6 +162,70 @@ NOTE_ASSET_MIME_TO_EXT = {
 MAX_NOTE_ASSET_SIZE = 50 * 1024 * 1024
 
 DATA_URL_RE = re.compile(r"^data:([^;,]+);base64,(.+)$", re.DOTALL)
+
+
+@router.post("/vision/multimodal")
+async def multimodal_chat(
+    query: str = Form(...),
+    context: Optional[str] = Form(None),
+    mode: str = Form("chat"),
+    file: Optional[UploadFile] = File(None),
+):
+    """
+    Chat with notebook context using Gemma (vision-capable LLM).
+
+    Accepts a multipart form with:
+    - query: the user's question
+    - context: pre-built context string sent from the client (optional)
+    - mode: "chat" (default)
+    - file: optional image for vision queries (PNG, JPG, JPEG, WEBP)
+
+    Context is built client-side via /chat/context and passed as a plain
+    text string; this endpoint just forwards it to Gemma.
+
+    Returns JSON with:
+    - text: the model's response
+    """
+    prompt = query
+    if context and context.strip():
+        prompt = f"{query}\n\n---\nContext:\n\n{context.strip()}"
+
+    # Collect images: user-uploaded file first, then assets embedded in context
+    images: List[Tuple[bytes, str]] = []
+
+    if file and file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_IMAGE_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported image type '{ext}'. Allowed: {', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+            )
+        file_bytes = await file.read()
+        if len(file_bytes) > MAX_IMAGE_SIZE:
+            raise HTTPException(status_code=413, detail="Image exceeds 20 MB limit.")
+        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+        images.append((file_bytes, mime_map.get(ext, "image/jpeg")))
+
+    if context:
+        context_images = _extract_context_images(context, VISION_NOTE_ASSETS_DIR)
+        images.extend(context_images)
+
+    logger.info(
+        f"Multimodal chat: mode={mode}, images={len(images)}, "
+        f"context_len={len(context) if context else 0}, query={repr(query[:80])}"
+    )
+
+    try:
+        text = await _call_gemma(prompt, images or None)
+        return {"text": text}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Gemma API error: {e.response.status_code} {e.response.text[:200]}")
+        raise HTTPException(status_code=502, detail=f"Gemma API returned {e.response.status_code}")
+    except Exception as e:
+        logger.error(f"Multimodal chat failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Multimodal chat failed: {e}")
 
 
 @router.post("/vision/image-analysis")
