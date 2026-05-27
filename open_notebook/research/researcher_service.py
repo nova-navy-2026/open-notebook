@@ -27,6 +27,7 @@ RESPONSE_LANGUAGE_POLICY = (
     "português europeu (pt-PT) por defeito; se o utilizador escrever claramente "
     "noutro idioma, responde nesse idioma"
 )
+# RESPONSE_LANGUAGE_POLICY = "português europeu (pt-PT)"
 
 
 # ── Enums mirroring GPTResearcher's types ──────────────────────────────
