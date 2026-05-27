@@ -16,7 +16,7 @@ export default function GlobalChatPage() {
   const documents = chat.contextStats?.documents ?? [];
 
   return (
-    <div className="flex flex-col h-full p-4 md:p-6">
+    <div className="app-page-wide flex h-full flex-col">
       <div className="mb-4">
         <h1 className="text-2xl font-bold">{t.common.chat ?? "Chat"}</h1>
         <p className="text-sm text-muted-foreground mt-1">

@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -20,7 +18,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Loader2, Search, Sparkles } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import {
   useReportTypes,
   useResearchTones,
@@ -92,7 +89,7 @@ export function ResearchGeneratePanel({
     if (!modelId && modelDefaults?.default_chat_model) {
       setModelId(modelDefaults.default_chat_model);
     }
-  }, [modelDefaults?.default_chat_model]);
+  }, [modelDefaults?.default_chat_model, modelId]);
 
   const isLoading = typesLoading || tonesLoading;
   const isSubmitting = generateMutation.isPending;
@@ -119,7 +116,7 @@ export function ResearchGeneratePanel({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="app-form space-y-6">
       {/* Research Query */}
       <Card>
         <CardHeader>
@@ -154,7 +151,7 @@ export function ResearchGeneratePanel({
       </Card>
 
       {/* Report Configuration */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* Report Type */}
         <Card>
           <CardHeader>

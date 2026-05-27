@@ -284,7 +284,7 @@ export default function SourcesPage() {
 
   return (
     <>
-      <div className="flex flex-col h-full w-full max-w-none px-6 py-6">
+      <div className="app-page-wide flex h-full flex-col">
         <div className="mb-6 flex-shrink-0">
           <h1 className="text-3xl font-bold">{t.sources.allSources}</h1>
         </div>

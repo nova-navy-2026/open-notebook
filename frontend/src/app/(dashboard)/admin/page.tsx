@@ -106,7 +106,7 @@ export default function AdminDashboardPage() {
     <ProtectedRouteGuard requiredRole="admin">
       <div className="w-full h-full flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">
-          <div className="container mx-auto py-6 px-4 sm:py-8 sm:px-6 lg:px-8 max-w-full">
+          <div className="app-page-wide py-6 sm:py-8">
             <div className="mb-8">
               <h1 className="text-4xl font-bold">Admin Dashboard</h1>
               <p className="text-muted-foreground mt-2">

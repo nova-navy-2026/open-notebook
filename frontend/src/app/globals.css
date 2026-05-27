@@ -260,12 +260,68 @@
      Use:  <div class="responsive-page"> ... </div>                */
   .responsive-page {
     width: 100%;
-    max-width: 1800px;
+    max-width: 1440px;
     margin-inline: auto;
     padding: 1rem;
   }
   @media (min-width: 640px) {
     .responsive-page { padding: 1.5rem; }
+  }
+
+  .app-page,
+  .app-page-wide,
+  .app-page-readable {
+    width: 100%;
+    margin-inline: auto;
+    padding: 1rem;
+  }
+
+  .app-page {
+    max-width: 1280px;
+  }
+
+  .app-page-wide {
+    max-width: 1440px;
+  }
+
+  .app-page-readable {
+    max-width: 960px;
+  }
+
+  .app-section {
+    width: 100%;
+    max-width: 1120px;
+  }
+
+  .app-form {
+    width: 100%;
+    max-width: 896px;
+  }
+
+  .app-form-narrow {
+    width: 100%;
+    max-width: 720px;
+  }
+
+  .app-control-row {
+    width: 100%;
+    max-width: 880px;
+  }
+
+  @media (min-width: 640px) {
+    .app-page,
+    .app-page-wide,
+    .app-page-readable {
+      padding: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .app-page,
+    .app-page-wide,
+    .app-page-readable {
+      padding-inline: 2rem;
+    }
   }
 
   /* Truncate long single-line text safely (works inside flex/grid). */

@@ -77,7 +77,8 @@ export default function VideoTrackingPage() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      <div className="app-page space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
         <p className="text-muted-foreground">
@@ -85,7 +86,7 @@ export default function VideoTrackingPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl">
+      <form onSubmit={handleSubmit} className="app-form space-y-6">
         {/* Video Upload */}
         <div className="space-y-2">
           <Label>{tp.uploadLabel}</Label>
@@ -223,7 +224,7 @@ export default function VideoTrackingPage() {
 
       {/* Progress indicator */}
       {isLoading && (
-        <Card className="max-w-4xl">
+        <Card className="app-section">
           <CardContent className="flex items-center gap-4 py-6">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <div>
@@ -238,7 +239,7 @@ export default function VideoTrackingPage() {
 
       {/* Result */}
       {(resultVideo || resultText) && !isLoading && (
-        <div className="space-y-4 max-w-4xl">
+        <div className="app-section space-y-4">
           <h2 className="text-xl font-semibold tracking-tight">{tp.result}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {resultVideo && (
@@ -295,6 +296,7 @@ export default function VideoTrackingPage() {
         </div>
       )}
 
+      </div>
     </div>
   );
 }

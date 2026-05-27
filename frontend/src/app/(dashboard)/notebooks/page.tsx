@@ -49,7 +49,7 @@ export default function NotebooksPage() {
   return (
     <>
       <div className="flex-1 overflow-y-auto h-full">
-        <div className="p-4 sm:p-6 space-y-6 w-full">
+        <div className="app-page-wide space-y-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 sm:gap-4">
             <h1 className="text-xl sm:text-2xl font-bold">{t.notebooks.title}</h1>
@@ -66,7 +66,7 @@ export default function NotebooksPage() {
               placeholder={t.notebooks.searchPlaceholder}
               autoComplete="off"
               aria-label={t.common.accessibility?.searchNotebooks || "Search notebooks"}
-              className="w-full sm:w-64"
+              className="w-full sm:w-72"
             />
             <Button onClick={() => setCreateDialogOpen(true)} className="w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />

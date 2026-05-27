@@ -34,7 +34,7 @@ export default function SearchPage() {
   // Hooks
   const searchMutation = useSearch();
   const { data: settings } = useSettings();
-  const { data: modelDefaults, isLoading: modelsLoading } = useModelDefaults();
+  const { data: modelDefaults } = useModelDefaults();
   const { openModal } = useModalManager();
 
   const hasEmbeddingModel = !!modelDefaults?.default_embedding_model;
@@ -81,12 +81,13 @@ export default function SearchPage() {
   }, [urlQuery, handleSearch]);
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-4 md:p-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      <div className="app-page space-y-6">
       <h1 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">
         {t.searchPage.search}
       </h1>
 
-      <Card>
+      <Card className="app-section">
         <CardHeader>
           <CardTitle className="text-lg">{t.searchPage.search}</CardTitle>
           <p className="text-sm text-muted-foreground">
@@ -99,7 +100,7 @@ export default function SearchPage() {
             <Label htmlFor="search-query" className="sr-only">
               {t.searchPage.search}
             </Label>
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="app-control-row flex flex-col sm:flex-row gap-2">
               <Input
                 id="search-query"
                 name="search-query"
@@ -312,6 +313,7 @@ export default function SearchPage() {
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

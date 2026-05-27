@@ -12,7 +12,6 @@ import { Progress } from "@/components/ui/progress";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -51,7 +50,6 @@ import { useModels } from "@/lib/hooks/use-models";
 import { useQuery } from "@tanstack/react-query";
 import { QUERY_KEYS } from "@/lib/api/query-client";
 import { useTranslation } from "@/lib/hooks/use-translation";
-import { ResearchJob } from "@/lib/types/research";
 import { useToast } from "@/lib/hooks/use-toast";
 import apiClient from "@/lib/api/client";
 
@@ -257,9 +255,8 @@ function scrollReportHeading(container: HTMLElement | null, headingIndex: number
 function createHeadingComponents(toc: TocItem[]): Components {
   const tocByLine = new Map(toc.map((item) => [item.line, item]));
   const counts = new Map<string, number>();
-  const Heading =
-    (Tag: "h1" | "h2" | "h3") =>
-    ({ children, node, ...rest }: MarkdownHeadingProps) => {
+  const Heading = (Tag: "h1" | "h2" | "h3") => {
+    const MarkdownHeading = ({ children, node, ...rest }: MarkdownHeadingProps) => {
       const fallbackId = nextHeadingId(counts, markdownNodeText(children));
       const position = (node as { position?: { start?: { line?: number } } } | undefined)?.position;
       const line = position?.start?.line;
@@ -278,6 +275,9 @@ function createHeadingComponents(toc: TocItem[]): Components {
         </Tag>
       );
     };
+    MarkdownHeading.displayName = `Markdown${Tag.toUpperCase()}`;
+    return MarkdownHeading;
+  };
 
   return {
     h1: Heading("h1"),

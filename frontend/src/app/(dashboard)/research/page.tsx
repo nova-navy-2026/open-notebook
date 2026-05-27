@@ -11,7 +11,8 @@ export default function ResearchPage() {
   const [activeTab, setActiveTab] = useState("generate");
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      <div className="app-page space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">
           {t.research?.title ?? "Research"}
@@ -42,6 +43,7 @@ export default function ResearchPage() {
           <ResearchJobsList />
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }

@@ -82,7 +82,8 @@ export default function NavigationPage() {
     : null;
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      <div className="app-page-readable space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
         <p className="text-muted-foreground">
@@ -90,7 +91,7 @@ export default function NavigationPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+      <form onSubmit={handleSubmit} className="app-form-narrow space-y-6">
         <div className="space-y-2">
           <Label htmlFor="locA">{tp.origin}</Label>
           <Input
@@ -138,7 +139,7 @@ export default function NavigationPage() {
       </form>
 
       {result && (
-        <div className="space-y-4 max-w-3xl">
+        <div className="space-y-4">
           <h2 className="text-xl font-semibold tracking-tight">Result</h2>
 
           <Card>
@@ -199,6 +200,7 @@ export default function NavigationPage() {
           </Card>
         </div>
       )}
+      </div>
     </div>
   );
 }

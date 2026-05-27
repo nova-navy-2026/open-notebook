@@ -185,7 +185,8 @@ export default function TranscriptionPage() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      <div className="app-page space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
         <p className="text-muted-foreground">{tp.subtitle}</p>
@@ -202,7 +203,7 @@ export default function TranscriptionPage() {
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl">
+      <form onSubmit={handleSubmit} className="app-form space-y-6">
         {/* Audio Upload */}
         <div className="space-y-2">
           <Label>{tp.uploadLabel}</Label>
@@ -343,7 +344,7 @@ export default function TranscriptionPage() {
 
       {/* Results */}
       {result && (
-        <div className="space-y-4 max-w-4xl">
+        <div className="app-section space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-xl font-semibold tracking-tight">
               {tp.results}
@@ -475,6 +476,7 @@ export default function TranscriptionPage() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

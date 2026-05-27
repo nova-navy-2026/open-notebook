@@ -28,7 +28,7 @@ export default function PodcastsPage() {
   return (
     <ProtectedRouteGuard requiredRole="admin">
     <div className="flex-1 overflow-y-auto">
-        <div className="px-6 py-6 space-y-6">
+        <div className="app-page-wide space-y-6">
           <header className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">{t.podcasts.listTitle}</h1>
             <p className="text-muted-foreground">

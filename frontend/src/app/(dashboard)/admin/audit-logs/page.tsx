@@ -11,7 +11,7 @@ export default function AuditLogsAdminPage() {
 
   return (
     <ProtectedRouteGuard requiredRole="admin">
-      <div className="container mx-auto py-8">
+      <div className="app-page-wide py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Audit Logs</h1>

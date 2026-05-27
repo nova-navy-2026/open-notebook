@@ -1342,7 +1342,7 @@ export default function ApiKeysPage() {
   return (
     <ProtectedRouteGuard requiredRole="admin">
       <div className="flex-1 overflow-y-auto">
-        <div className="p-6 space-y-6">
+        <div className="app-page-wide space-y-6">
           {/* Header */}
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">

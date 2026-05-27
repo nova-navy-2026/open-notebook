@@ -15,8 +15,8 @@ export default function SettingsPage() {
     <ProtectedRouteGuard requiredRole="admin">
       <div className="w-full h-full flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto">
-          <div className="p-4 sm:p-6 lg:p-8">
-              <div className="max-w-6xl mx-auto">
+          <div className="app-page">
+              <div className="space-y-6">
               <div className="flex items-center gap-4 mb-6">
                 <h1 className="text-2xl sm:text-3xl font-bold">{t.navigation.settings}</h1>
                 <Button variant="outline" size="sm" onClick={() => refetch()}>

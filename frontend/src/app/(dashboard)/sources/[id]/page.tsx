@@ -27,7 +27,7 @@ export default function SourceDetailPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Back button */}
-      <div className="pt-6 pb-4 px-6">
+      <div className="app-page-wide pb-4">
         <Button
           variant="ghost"
           size="sm"
@@ -40,7 +40,7 @@ export default function SourceDetailPage() {
       </div>
 
       {/* Main content: Source detail + Chat */}
-      <div className="flex-1 grid gap-6 lg:grid-cols-[2fr_1fr] overflow-hidden px-6">
+      <div className="app-page-wide flex-1 grid gap-6 overflow-hidden pt-0 lg:grid-cols-[2fr_1fr]">
         {/* Left column - Source detail */}
         <div className="overflow-y-auto px-4 pb-6">
           <SourceDetailContent
