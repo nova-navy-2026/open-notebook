@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { useNotebookChat } from '@/lib/hooks/useNotebookChat'
+import { useMultimodalChat } from '@/lib/hooks/use-multimodal'
 import { useNotes } from '@/lib/hooks/use-notes'
 import { ChatPanel } from '@/components/source/ChatPanel'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
@@ -25,8 +25,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
   // Fetch notes for this notebook
   const { data: notes = [], isLoading: notesLoading } = useNotes(notebookId)
 
-  // Initialize notebook chat hook
-  const chat = useNotebookChat({
+  // Initialize multimodal chat hook
+  const chat = useMultimodalChat({
     notebookId,
     sources,
     notes,
@@ -100,16 +100,7 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       messages={chat.messages}
       isStreaming={chat.isSending}
       contextIndicators={null}
-      onSendMessage={(message, modelOverride) => chat.sendMessage(message, modelOverride)}
-      modelOverride={chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined}
-      onModelChange={(model) => chat.setModelOverride(model ?? null)}
-      sessions={chat.sessions}
-      currentSessionId={chat.currentSessionId}
-      onCreateSession={(title) => chat.createSession(title)}
-      onSelectSession={chat.switchSession}
-      onUpdateSession={(sessionId, title) => chat.updateSession(sessionId, { title })}
-      onDeleteSession={chat.deleteSession}
-      loadingSessions={chat.loadingSessions}
+      onSendMessage={(message) => chat.sendMessage(message)}
       notebookContextStats={contextStats}
       notebookId={notebookId}
     />

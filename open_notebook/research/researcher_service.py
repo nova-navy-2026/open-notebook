@@ -27,6 +27,7 @@ RESPONSE_LANGUAGE_POLICY = (
     "português europeu (pt-PT) por defeito; se o utilizador escrever claramente "
     "noutro idioma, responde nesse idioma"
 )
+# RESPONSE_LANGUAGE_POLICY = "português europeu (pt-PT)"
 
 
 # ── Enums mirroring GPTResearcher's types ──────────────────────────────
@@ -41,6 +42,7 @@ class ResearchReportType(str, Enum):
     SUBTOPIC_REPORT = "subtopic_report"
     DEEP_RESEARCH = "deep"
     TTD_DR = "ttd_dr"
+    REACT_DEEP = "react_deep"
 
 
 class ResearchReportSource(str, Enum):
@@ -570,6 +572,218 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
         )
 
 
+async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback=None) -> ResearchResult:
+    """Execute research using the ReAct-DR flow via the NOVA-Researcher API."""
+
+    provider = await _resolve_model_provider(request.model_id)
+
+    try:
+        logger.info(
+            f"Starting ReAct-DR research job {job_id}: "
+            f"query='{request.query[:80]}...', provider={provider or 'amalia(default)'}"
+        )
+
+        if progress_callback:
+            await progress_callback(5, "A iniciar ReAct-DR...")
+
+        if progress_callback:
+            await progress_callback(15, "A executar ReAct-DR...")
+
+        payload = {
+            "query": request.query,
+            "source_urls": request.source_urls,
+            "opensearch_index": NAVY_OPENSEARCH_INDEX,
+        }
+        params: Dict[str, Any] = {"stream": "true"}
+        if provider:
+            params["provider"] = provider
+
+        report = ""
+        source_urls: List[str] = []
+        stream_error: Optional[str] = None
+
+        async with _http_client.stream(
+            "POST",
+            f"{NOVA_RESEARCHER_URL}/research/react-dr",
+            json=payload,
+            params=params,
+            headers={"Accept": "text/event-stream"},
+        ) as resp:
+            resp.raise_for_status()
+            async for raw_line in resp.aiter_lines():
+                if not raw_line or not raw_line.startswith("data:"):
+                    continue
+                try:
+                    event = json.loads(raw_line[5:].strip())
+                except json.JSONDecodeError:
+                    continue
+
+                etype = event.get("type")
+                if etype == "progress":
+                    if progress_callback:
+                        server_pct = int(event.get("pct", 0))
+                        mapped = 15 + int(server_pct * 0.80)
+                        await progress_callback(
+                            min(mapped, 95),
+                            str(event.get("message", "")),
+                        )
+                elif etype == "done":
+                    report = _strip_references(event.get("report", ""))
+                    source_urls = event.get("source_urls", []) or []
+                elif etype == "error":
+                    stream_error = str(event.get("detail", "Unknown ReAct-DR error"))
+
+        if stream_error:
+            raise RuntimeError(stream_error)
+
+        if progress_callback:
+            await progress_callback(95, "A finalizar...")
+
+        retrieved_docs = [
+            RetrievedDocument(title=s, source=s, snippet="")
+            for s in source_urls
+            if s
+        ]
+
+        result = ResearchResult(
+            id=job_id,
+            query=request.query,
+            report_type="react_deep",
+            report=report,
+            source_urls=source_urls,
+            research_costs=0.0,
+            status="completed",
+            created_at=datetime.utcnow().isoformat(),
+            tone=request.tone.value,
+            model_id=request.model_id,
+            retrieved_documents=retrieved_docs,
+        )
+
+        logger.success(
+            f"Job {job_id}: ReAct-DR research completed. "
+            f"Report length: {len(report)} chars, Sources: {len(source_urls)}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: ReAct-DR research failed: {e}")
+        return ResearchResult(
+            id=job_id,
+            query=request.query,
+            report_type="react_deep",
+            report="",
+            status="failed",
+            error=str(e),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback=None) -> ResearchResult:
+    """Execute research using the ReAct-DR flow via the NOVA-Researcher API."""
+
+    provider = await _resolve_model_provider(request.model_id)
+
+    try:
+        logger.info(
+            f"Starting ReAct-DR research job {job_id}: "
+            f"query='{request.query[:80]}...', provider={provider or 'amalia(default)'}"
+        )
+
+        if progress_callback:
+            await progress_callback(5, "A iniciar ReAct-DR...")
+
+        if progress_callback:
+            await progress_callback(15, "A executar ReAct-DR...")
+
+        payload = {
+            "query": request.query,
+            "source_urls": request.source_urls,
+            "opensearch_index": NAVY_OPENSEARCH_INDEX,
+        }
+        params: Dict[str, Any] = {"stream": "true"}
+        if provider:
+            params["provider"] = provider
+
+        report = ""
+        source_urls: List[str] = []
+        stream_error: Optional[str] = None
+
+        async with _http_client.stream(
+            "POST",
+            f"{NOVA_RESEARCHER_URL}/research/react-dr",
+            json=payload,
+            params=params,
+            headers={"Accept": "text/event-stream"},
+        ) as resp:
+            resp.raise_for_status()
+            async for raw_line in resp.aiter_lines():
+                if not raw_line or not raw_line.startswith("data:"):
+                    continue
+                try:
+                    event = json.loads(raw_line[5:].strip())
+                except json.JSONDecodeError:
+                    continue
+
+                etype = event.get("type")
+                if etype == "progress":
+                    if progress_callback:
+                        server_pct = int(event.get("pct", 0))
+                        mapped = 15 + int(server_pct * 0.80)
+                        await progress_callback(
+                            min(mapped, 95),
+                            str(event.get("message", "")),
+                        )
+                elif etype == "done":
+                    report = _strip_references(event.get("report", ""))
+                    source_urls = event.get("source_urls", []) or []
+                elif etype == "error":
+                    stream_error = str(event.get("detail", "Unknown ReAct-DR error"))
+
+        if stream_error:
+            raise RuntimeError(stream_error)
+
+        if progress_callback:
+            await progress_callback(95, "A finalizar...")
+
+        retrieved_docs = [
+            RetrievedDocument(title=s, source=s, snippet="")
+            for s in source_urls
+            if s
+        ]
+
+        result = ResearchResult(
+            id=job_id,
+            query=request.query,
+            report_type="react_deep",
+            report=report,
+            source_urls=source_urls,
+            research_costs=0.0,
+            status="completed",
+            created_at=datetime.utcnow().isoformat(),
+            tone=request.tone.value,
+            model_id=request.model_id,
+            retrieved_documents=retrieved_docs,
+        )
+
+        logger.success(
+            f"Job {job_id}: ReAct-DR research completed. "
+            f"Report length: {len(report)} chars, Sources: {len(source_urls)}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: ReAct-DR research failed: {e}")
+        return ResearchResult(
+            id=job_id,
+            query=request.query,
+            report_type="react_deep",
+            report="",
+            status="failed",
+            error=str(e),
+            created_at=datetime.utcnow().isoformat(),
+        )
+
+
 async def run_research(request: ResearchRequest, progress_callback=None) -> ResearchResult:
     """
     Execute a research query via the NOVA-Researcher API.
@@ -582,10 +796,14 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
     """
     job_id = str(uuid.uuid4())[:8]
 
-    # ── TTD-DR uses its own endpoint ──────────────────────────────────
+    # ── TTD-DR and ReAct-DR use their own endpoints ───────────────────
     if request.report_type == ResearchReportType.TTD_DR:
         return await _run_ttd_dr(request, job_id, progress_callback=progress_callback)
 
+    if request.report_type == ResearchReportType.REACT_DEEP:
+        return await _run_react_dr(request, job_id, progress_callback=progress_callback)
+
+    provider = await _resolve_model_provider(request.model_id)
     provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
 
     try:
@@ -846,6 +1064,12 @@ def get_report_type_info() -> List[Dict[str, str]]:
             "value": "ttd_dr",
             "label": "TTD-DR Deep Research",
             "description": "Iterative Draft Denoising — generates, reviews and expands a structured report (~2500+ words, pt-PT)",
+            "speed": "slow",
+        },
+        {
+            "value": "react_deep",
+            "label": "ReAct Deep Research",
+            "description": "ReAct (Reason + Act) loop — interleaved thought/retrieval/observation cycles before writing the final report",
             "speed": "slow",
         },
     ]

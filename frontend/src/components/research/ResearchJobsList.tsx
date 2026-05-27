@@ -98,6 +98,7 @@ function ReportTypeLabel({ type }: { type: string }) {
     subtopic_report: "Subtopic Report",
     deep: "Deep Research",
     ttd_dr: "TTD-DR Deep Research",
+    react_deep: "ReAct Deep Research",
   };
   return (
     <span className="text-xs text-muted-foreground">
