@@ -85,6 +85,8 @@ export default function GlobalChatPage() {
           loadingSessions={chat.loadingSessions}
           title={t.common.chat ?? "Chat"}
           contextType="notebook"
+          enableAttachments
+          visualModelLocked={chat.isVisualModelLocked}
         />
       </div>
     </div>

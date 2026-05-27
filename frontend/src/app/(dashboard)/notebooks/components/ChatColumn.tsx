@@ -100,9 +100,10 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       messages={chat.messages}
       isStreaming={chat.isSending}
       contextIndicators={null}
-      onSendMessage={(message) => chat.sendMessage(message)}
+      onSendMessage={(message, _modelOverride, file) => chat.sendMessage(message, file)}
       notebookContextStats={contextStats}
       notebookId={notebookId}
+      enableAttachments
     />
   )
 }

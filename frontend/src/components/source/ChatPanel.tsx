@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -32,11 +32,17 @@ interface NotebookContextStats {
   charCount?: number
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 interface ChatPanelProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
   contextIndicators: SourceChatContextIndicator | null
-  onSendMessage: (message: string, modelOverride?: string) => void
+  onSendMessage: (message: string, modelOverride?: string, file?: File) => void
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -54,6 +60,8 @@ interface ChatPanelProps {
   notebookContextStats?: NotebookContextStats
   // Notebook ID for saving notes
   notebookId?: string
+  enableAttachments?: boolean
+  visualModelLocked?: boolean
 }
 
 export function ChatPanel({
@@ -73,15 +81,20 @@ export function ChatPanel({
   title,
   contextType = 'source',
   notebookContextStats,
-  notebookId
+  notebookId,
+  enableAttachments = false,
+  visualModelLocked = false
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
   const [input, setInput] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [activeTab, setActiveTab] = useState<'chat' | 'sessions'>('chat')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { openModal } = useModalManager()
+  const isVisualModelLocked = enableAttachments && (visualModelLocked || !!selectedFile)
 
   const handleReferenceClick = (type: string, id: string) => {
     const modalType = type === 'source_insight' ? 'insight' : type as 'source' | 'note' | 'insight'
@@ -102,9 +115,20 @@ export function ChatPanel({
   }, [messages])
 
   const handleSend = () => {
-    if (input.trim() && !isStreaming) {
-      onSendMessage(input.trim(), modelOverride)
+    if ((input.trim() || selectedFile) && !isStreaming) {
+      onSendMessage(input.trim() || 'Analisa este ficheiro.', modelOverride, selectedFile ?? undefined)
       setInput('')
+      setSelectedFile(null)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+    if (file) {
+      setSelectedFile(file)
     }
   }
 
@@ -194,6 +218,30 @@ export function ChatPanel({
                     </div>
                   )}
                   <div className="flex flex-col gap-2 max-w-[80%]">
+                    {message.type === 'human' && message.attachments?.length ? (
+                      <div className="flex justify-end">
+                        {message.attachments.map((attachment) => (
+                          <div key={attachment.url} className="max-w-48 overflow-hidden rounded-md border bg-background">
+                            {attachment.kind === 'image' ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={attachment.url}
+                                alt={attachment.name}
+                                className="max-h-36 w-full object-contain"
+                              />
+                            ) : attachment.kind === 'video' ? (
+                              <video
+                                src={attachment.url}
+                                controls
+                                className="max-h-36 w-full bg-black"
+                              />
+                            ) : (
+                              <div className="px-3 py-2 text-xs">{attachment.name}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <div
                       className={`rounded-lg px-4 py-2 ${
                         message.type === 'human'
@@ -289,12 +337,71 @@ export function ChatPanel({
               <ModelSelector
                 currentModel={modelOverride}
                 onModelChange={onModelChange}
-                disabled={isStreaming}
+                disabled={isStreaming || isVisualModelLocked}
+                displayNameOverride={isVisualModelLocked ? 'Gemma' : undefined}
+                locked={isVisualModelLocked}
+                lockedReason={
+                  isVisualModelLocked
+                    ? 'Os pedidos com imagem ou vídeo usam automaticamente a Gemma multimodal.'
+                    : undefined
+                }
               />
             </div>
           )}
 
+          {selectedFile && (
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+              <div className="flex min-w-0 items-center gap-2">
+                {selectedFile.type.startsWith('video/') ? (
+                  <Video className="h-4 w-4 flex-shrink-0" />
+                ) : (
+                  <ImageIcon className="h-4 w-4 flex-shrink-0" />
+                )}
+                <span className="truncate">{selectedFile.name}</span>
+                <span className="flex-shrink-0 text-muted-foreground">
+                  {formatFileSize(selectedFile.size)}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 flex-shrink-0"
+                onClick={() => {
+                  setSelectedFile(null)
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = ''
+                  }
+                }}
+                disabled={isStreaming}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
           <div className="flex gap-2 items-end min-w-0">
+            {enableAttachments && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-[40px] w-[40px] flex-shrink-0"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStreaming}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </>
+            )}
             <Textarea
               id={chatInputId}
               name="chat-message"
@@ -309,7 +416,7 @@ export function ChatPanel({
             />
             <Button
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming}
+              disabled={(!input.trim() && !selectedFile) || isStreaming}
               size="icon"
               className="h-[40px] w-[40px] flex-shrink-0"
             >
@@ -342,7 +449,32 @@ function AIMessageContent({
   const markdownWithCompactRefs = convertReferencesToCompactMarkdown(content, t.common.references)
 
   // Create custom link component for compact references
-  const LinkComponent = createCompactReferenceLinkComponent(onReferenceClick)
+  const ReferenceLinkComponent = createCompactReferenceLinkComponent(onReferenceClick)
+  const LinkComponent = ({
+    href,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+    href?: string
+    children?: React.ReactNode
+  }) => {
+    const isVideoAsset =
+      !!href && (href.startsWith('data:video/') || /\/api\/vision\/note-asset\/[^)\s]+\.(mp4|webm|mov)$/i.test(href))
+
+    if (isVideoAsset) {
+      return (
+        <video
+          src={href}
+          controls
+          className="my-3 max-h-80 w-full rounded-md border bg-black"
+        >
+          {children}
+        </video>
+      )
+    }
+
+    return <ReferenceLinkComponent href={href} {...props}>{children}</ReferenceLinkComponent>
+  }
 
   return (
     <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-a:text-blue-600 prose-a:break-all prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
@@ -350,6 +482,14 @@ function AIMessageContent({
         remarkPlugins={[remarkGfm]}
         components={{
           a: LinkComponent,
+          img: ({ src, alt }) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={typeof src === 'string' ? src : undefined}
+              alt={alt ?? ''}
+              className="my-3 max-h-80 rounded-md border object-contain"
+            />
+          ),
           p: ({ children }) => <p className="mb-4">{children}</p>,
           h1: ({ children }) => <h1 className="mb-4 mt-6">{children}</h1>,
           h2: ({ children }) => <h2 className="mb-3 mt-5">{children}</h2>,

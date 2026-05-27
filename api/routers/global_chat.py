@@ -103,6 +103,11 @@ class ExecuteGlobalChatRequest(BaseModel):
     )
 
 
+class PersistGlobalChatExchangeRequest(BaseModel):
+    user_message: str = Field(..., description="User message to persist")
+    assistant_message: str = Field(..., description="Assistant message to persist")
+
+
 class ExecuteGlobalChatResponse(BaseModel):
     session_id: str
     messages: List[ChatMessage]
@@ -451,6 +456,76 @@ async def update_global_session(
         raise
     except Exception as e:
         logger.error(f"Error updating global session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/global-chat/sessions/{session_id}/messages",
+    response_model=GlobalChatSessionWithMessagesResponse,
+)
+async def persist_global_chat_exchange(
+    session_id: str,
+    request: PersistGlobalChatExchangeRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Persist a user/assistant exchange produced outside the normal chat graph."""
+    try:
+        full_id = (
+            session_id
+            if session_id.startswith("chat_session:")
+            else f"chat_session:{session_id}"
+        )
+        session = await ChatSession.get(full_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        await asyncio.to_thread(
+            chat_graph.update_state,
+            RunnableConfig(configurable={"thread_id": full_id}),
+            {
+                "messages": [
+                    HumanMessage(content=request.user_message),
+                    AIMessage(content=request.assistant_message),
+                ]
+            },
+        )
+        await session.save()
+
+        thread_state = await asyncio.to_thread(
+            chat_graph.get_state,
+            config=RunnableConfig(configurable={"thread_id": full_id}),
+        )
+
+        messages: List[ChatMessage] = []
+        if thread_state and thread_state.values and "messages" in thread_state.values:
+            for msg in thread_state.values["messages"]:
+                messages.append(
+                    ChatMessage(
+                        id=getattr(msg, "id", f"msg_{len(messages)}"),
+                        type=msg.type if hasattr(msg, "type") else "unknown",
+                        content=msg.content if hasattr(msg, "content") else str(msg),
+                    )
+                )
+
+        return GlobalChatSessionWithMessagesResponse(
+            id=session.id or "",
+            title=session.title or "Untitled Session",
+            created=str(session.created),
+            updated=str(session.updated),
+            message_count=len(messages),
+            messages=messages,
+            model_override=getattr(session, "model_override", None),
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error persisting global chat exchange: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

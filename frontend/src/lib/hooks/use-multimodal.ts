@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { chatApi } from '@/lib/api/chat'
 import { multimodalApi } from '@/lib/api/multimodal'
 import { SourceListResponse, NoteResponse } from '@/lib/types/api'
 import { ContextSelections } from '@/app/(dashboard)/notebooks/[id]/page'
 import { NotebookChatMessage } from '@/lib/types/api'
+import type { MultimodalResponse } from '@/lib/api/multimodal'
 
 interface UseMultimodalChatParams {
   notebookId: string
@@ -14,6 +15,14 @@ interface UseMultimodalChatParams {
   notes: NoteResponse[]
   contextSelections: ContextSelections
   selectedNavyDocIds?: Set<string>
+}
+
+function storageKeyForNotebook(notebookId: string): string {
+  return `open-notebook:notebook:${notebookId}:multimodal-chat`
+}
+
+function serialisableMessages(messages: NotebookChatMessage[]): NotebookChatMessage[] {
+  return messages.map((message) => ({ ...message, attachments: undefined }))
 }
 
 function formatContext(context: {
@@ -52,6 +61,63 @@ function formatContext(context: {
   return parts.join('\n\n')
 }
 
+function createAttachment(file?: File): NotebookChatMessage['attachments'] {
+  if (!file) return undefined
+  const kind = file.type.startsWith('image/')
+    ? 'image'
+    : file.type.startsWith('video/')
+      ? 'video'
+      : 'file'
+  return [{ name: file.name, url: URL.createObjectURL(file), kind }]
+}
+
+function isVisualFile(file?: File | null): file is File {
+  return !!file && (file.type.startsWith('image/') || file.type.startsWith('video/'))
+}
+
+function normaliseForMatching(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function looksLikeVisualFollowUp(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(image|picture|photo|foto|imagem|video|frame|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
+}
+
+function looksLikeVisualToolRequest(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(detetar|detectar|detect|deteccao|identifica|identificar|identify|conta|contar|count|quantos|numero|number|how many|segment|segmenta|segmentar|localiza|localizar|locate|track|seguir|rastrear|sam-?3|rf-?\s?detr|rfdetr)\b/.test(text)
+}
+
+function buildVisualFollowUpQuery(message: string, previousQuery: string): string {
+  if (!previousQuery.trim()) return message
+  return `Pedido visual anterior:\n${previousQuery.trim()}\n\nPedido atual:\n${message}`
+}
+
+function buildVisualContext(previousResponse: string): string | undefined {
+  if (!previousResponse.trim()) return undefined
+  return `Última análise visual:\n${previousResponse.trim()}`
+}
+
+async function formatMultimodalResponse(result: MultimodalResponse): Promise<string> {
+  const parts = [result.text]
+
+  if (result.image_base64) {
+    const imageUrl = await multimodalApi.saveNoteAsset(result.image_base64).catch(() => result.image_base64)
+    parts.push(`![Resultado da análise visual](${imageUrl})`)
+  }
+
+  if (result.video_base64) {
+    const videoUrl = await multimodalApi.saveNoteAsset(result.video_base64).catch(() => result.video_base64)
+    parts.push(`[Vídeo anotado](${videoUrl})`)
+  }
+
+  return parts.filter((part) => part && part.trim()).join('\n\n')
+}
+
 export function useMultimodalChat({
   notebookId,
   sources,
@@ -63,6 +129,48 @@ export function useMultimodalChat({
   const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
+  const lastVisualFileRef = useRef<File | null>(null)
+  const lastVisualQueryRef = useRef('')
+  const lastVisualContextRef = useRef('')
+  const storageReadyRef = useRef(false)
+
+  useEffect(() => {
+    storageReadyRef.current = false
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
+
+    if (typeof window === 'undefined') {
+      storageReadyRef.current = true
+      return
+    }
+
+    const stored = window.localStorage.getItem(storageKeyForNotebook(notebookId))
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as NotebookChatMessage[]
+        setMessages(Array.isArray(parsed) ? parsed : [])
+      } catch (error) {
+        console.error('Failed to restore multimodal notebook chat:', error)
+        setMessages([])
+      }
+    } else {
+      setMessages([])
+    }
+    window.setTimeout(() => {
+      storageReadyRef.current = true
+    }, 0)
+  }, [notebookId])
+
+  useEffect(() => {
+    if (!storageReadyRef.current || typeof window === 'undefined') return
+    const key = storageKeyForNotebook(notebookId)
+    if (messages.length === 0) {
+      window.localStorage.removeItem(key)
+      return
+    }
+    window.localStorage.setItem(key, JSON.stringify(serialisableMessages(messages)))
+  }, [messages, notebookId])
 
   const buildContext = useCallback(
     async (query?: string) => {
@@ -112,40 +220,63 @@ export function useMultimodalChat({
 
   const sendMessage = useCallback(
     async (message: string, file?: File) => {
+      const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
+      const visualFile = file ?? (isVisualFollowUp ? lastVisualFileRef.current ?? undefined : undefined)
+      const visualQuery = isVisualFollowUp
+        && looksLikeVisualToolRequest(message)
+        ? buildVisualFollowUpQuery(message, lastVisualQueryRef.current)
+        : message
+
       const userMessage: NotebookChatMessage = {
         id: `temp-${Date.now()}`,
         type: 'human',
-        content: message,
+        content: file ? `${message}\n\n[Anexo: ${file.name}]` : message,
+        attachments: createAttachment(file),
         timestamp: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, userMessage])
       setIsSending(true)
 
       try {
-        const rawContext = await buildContext(message)
-        const contextText = formatContext(rawContext)
+        const rawContext = await buildContext(visualQuery)
+        const contextText = [
+          formatContext(rawContext),
+          isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
+        ].filter(Boolean).join('\n\n')
 
         const result = await multimodalApi.chat({
-          query: message,
+          query: visualQuery,
           context: contextText || undefined,
           mode: 'chat',
-          file,
+          file: visualFile,
         })
 
+        const content = await formatMultimodalResponse(result)
+        if (isVisualFile(visualFile)) {
+          lastVisualFileRef.current = visualFile
+          lastVisualQueryRef.current = visualQuery
+          lastVisualContextRef.current = content
+        }
         const aiMessage: NotebookChatMessage = {
           id: `ai-${Date.now()}`,
           type: 'ai',
-          content: result.text,
+          content,
           timestamp: new Date().toISOString(),
         }
         setMessages((prev) => [...prev, aiMessage])
       } catch (err: unknown) {
         const error = err as { response?: { data?: { detail?: string } }; message?: string }
         console.error('Multimodal chat error:', error)
-        toast.error(error.response?.data?.detail || error.message || 'Failed to send message')
-        setMessages((prev) =>
-          prev.filter((m) => !m.id.startsWith('temp-') && !m.id.startsWith('ai-')),
-        )
+        const messageText =
+          error.response?.data?.detail || error.message || 'Failed to send message'
+        toast.error(messageText)
+        const aiMessage: NotebookChatMessage = {
+          id: `ai-error-${Date.now()}`,
+          type: 'ai',
+          content: `Não consegui analisar o pedido. Detalhe técnico: ${messageText}`,
+          timestamp: new Date().toISOString(),
+        }
+        setMessages((prev) => [...prev, aiMessage])
       } finally {
         setIsSending(false)
       }
@@ -154,8 +285,14 @@ export function useMultimodalChat({
   )
 
   const clearMessages = useCallback(() => {
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(storageKeyForNotebook(notebookId))
+    }
     setMessages([])
-  }, [])
+  }, [notebookId])
 
   return {
     messages,

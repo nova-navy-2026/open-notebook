@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { globalChatApi } from '@/lib/api/global-chat'
+import { multimodalApi, type MultimodalResponse } from '@/lib/api/multimodal'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import {
   NotebookChatMessage,
@@ -13,18 +14,80 @@ import {
   GlobalChatContextStats,
 } from '@/lib/types/api'
 
+function createAttachment(file?: File): NotebookChatMessage['attachments'] {
+  if (!file) return undefined
+  const kind = file.type.startsWith('image/')
+    ? 'image'
+    : file.type.startsWith('video/')
+      ? 'video'
+      : 'file'
+  return [{ name: file.name, url: URL.createObjectURL(file), kind }]
+}
+
+function isVisualFile(file?: File | null): file is File {
+  return !!file && (file.type.startsWith('image/') || file.type.startsWith('video/'))
+}
+
+function normaliseForMatching(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function looksLikeVisualFollowUp(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(image|picture|photo|foto|imagem|video|frame|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
+}
+
+function looksLikeVisualToolRequest(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(detetar|detectar|detect|deteccao|identifica|identificar|identify|conta|contar|count|quantos|numero|number|how many|segment|segmenta|segmentar|localiza|localizar|locate|track|seguir|rastrear|sam-?3|rf-?\s?detr|rfdetr)\b/.test(text)
+}
+
+function buildVisualFollowUpQuery(message: string, previousQuery: string): string {
+  if (!previousQuery.trim()) return message
+  return `Pedido visual anterior:\n${previousQuery.trim()}\n\nPedido atual:\n${message}`
+}
+
+function buildVisualContext(previousResponse: string): string | undefined {
+  if (!previousResponse.trim()) return undefined
+  return `Última análise visual:\n${previousResponse.trim()}`
+}
+
+async function formatMultimodalResponse(result: MultimodalResponse): Promise<string> {
+  const parts = [result.text]
+
+  if (result.image_base64) {
+    const imageUrl = await multimodalApi.saveNoteAsset(result.image_base64).catch(() => result.image_base64)
+    parts.push(`![Resultado da análise visual](${imageUrl})`)
+  }
+
+  if (result.video_base64) {
+    const videoUrl = await multimodalApi.saveNoteAsset(result.video_base64).catch(() => result.video_base64)
+    parts.push(`[Vídeo anotado](${videoUrl})`)
+  }
+
+  return parts.filter((part) => part && part.trim()).join('\n\n')
+}
+
 export function useGlobalChat() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<NotebookChatMessage[]>([])
   const [isSending, setIsSending] = useState(false)
+  const [isVisualModelLocked, setIsVisualModelLocked] = useState(false)
   const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
   const [contextStats, setContextStats] = useState<GlobalChatContextStats | null>(null)
   // Whether auto-select-most-recent has already run. After the user
   // explicitly deletes the active session we keep the conversation cleared
   // and do NOT pick another session for them.
   const autoSelectedRef = useRef(false)
+  const hasLocalMultimodalMessagesRef = useRef(false)
+  const lastVisualFileRef = useRef<File | null>(null)
+  const lastVisualQueryRef = useRef('')
+  const lastVisualContextRef = useRef('')
 
   // Fetch all global chat sessions
   const {
@@ -50,7 +113,7 @@ export function useGlobalChat() {
   // Skip while a message is being sent so that the optimistic user message
   // isn't wiped out by a stale fetch of the freshly-created session.
   useEffect(() => {
-    if (currentSession?.messages && !isSending) {
+    if (currentSession?.messages && !isSending && !hasLocalMultimodalMessagesRef.current) {
       setMessages(currentSession.messages)
     }
   }, [currentSession, isSending])
@@ -120,6 +183,10 @@ export function useGlobalChat() {
         // Mark auto-select as already done so we don't immediately
         // jump into another session — the user wants the panel cleared.
         autoSelectedRef.current = true
+        hasLocalMultimodalMessagesRef.current = false
+        lastVisualFileRef.current = null
+        lastVisualQueryRef.current = ''
+        lastVisualContextRef.current = ''
         setCurrentSessionId(null)
         setMessages([])
       }
@@ -132,7 +199,7 @@ export function useGlobalChat() {
   })
 
   // Send message
-  const sendMessage = useCallback(async (message: string, modelOverride?: string) => {
+  const sendMessage = useCallback(async (message: string, modelOverride?: string, file?: File) => {
     let sessionId = currentSessionId
 
     // Auto-create session if none exists
@@ -158,17 +225,62 @@ export function useGlobalChat() {
       }
     }
 
+    const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
+    const visualFile = file ?? (isVisualFollowUp ? lastVisualFileRef.current ?? undefined : undefined)
+
     // Add user message optimistically
     const userMessage: NotebookChatMessage = {
       id: `temp-${Date.now()}`,
       type: 'human',
-      content: message,
+      content: file ? `${message}\n\n[Anexo: ${file.name}]` : message,
+      attachments: createAttachment(file),
       timestamp: new Date().toISOString()
     }
     setMessages(prev => [...prev, userMessage])
     setIsSending(true)
 
     try {
+      if (isVisualFile(visualFile)) {
+        hasLocalMultimodalMessagesRef.current = true
+        setIsVisualModelLocked(true)
+        const visualQuery = isVisualFollowUp
+          && looksLikeVisualToolRequest(message)
+          ? buildVisualFollowUpQuery(message, lastVisualQueryRef.current)
+          : message
+        const result = await multimodalApi.chat({
+          query: visualQuery,
+          context: isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
+          mode: 'chat',
+          file: visualFile,
+        })
+        const content = await formatMultimodalResponse(result)
+        lastVisualFileRef.current = visualFile
+        lastVisualQueryRef.current = visualQuery
+        lastVisualContextRef.current = content
+        const aiMessage: NotebookChatMessage = {
+          id: `ai-${Date.now()}`,
+          type: 'ai',
+          content,
+          timestamp: new Date().toISOString()
+        }
+        setMessages(prev => [...prev, aiMessage])
+        void globalChatApi.persistExchange(sessionId, {
+          user_message: userMessage.content,
+          assistant_message: content,
+        }).then(() => {
+          queryClient.invalidateQueries({
+            queryKey: QUERY_KEYS.globalChatSessions
+          })
+          queryClient.invalidateQueries({
+            queryKey: QUERY_KEYS.globalChatSession(sessionId)
+          })
+        }).catch((persistError) => {
+          console.error('Failed to persist multimodal exchange:', persistError)
+          toast.error('A resposta foi gerada, mas não consegui guardar esta troca na conversa.')
+        })
+        return
+      }
+
       const body = await globalChatApi.sendMessageStream({
         session_id: sessionId,
         message,
@@ -234,21 +346,42 @@ export function useGlobalChat() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } }, message?: string }
       console.error('Error sending message:', error)
-      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToSendMessage'))
-      setMessages(prev => prev.filter(msg => !msg.id.startsWith('temp-') && !msg.id.startsWith('ai-')))
+      const rawMessage = error.response?.data?.detail || error.message
+      const messageText = getApiErrorMessage(
+        rawMessage,
+        (key) => t(key),
+        'apiErrors.failedToSendMessage'
+      )
+      toast.error(messageText)
+      const aiMessage: NotebookChatMessage = {
+        id: `ai-error-${Date.now()}`,
+        type: 'ai',
+        content: `Não consegui analisar o pedido. Detalhe técnico: ${messageText}`,
+        timestamp: new Date().toISOString()
+      }
+      setMessages(prev => [...prev, aiMessage])
     } finally {
+      setIsVisualModelLocked(false)
       setIsSending(false)
     }
   }, [currentSessionId, currentSession, pendingModelOverride, refetchCurrentSession, queryClient, t])
 
   // Switch session
   const switchSession = useCallback((sessionId: string) => {
+    hasLocalMultimodalMessagesRef.current = false
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
     setCurrentSessionId(sessionId)
     setContextStats(null)
   }, [])
 
   // Create session
   const createSession = useCallback((title?: string) => {
+    hasLocalMultimodalMessagesRef.current = false
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
     return createSessionMutation.mutate({ title })
   }, [createSessionMutation])
 
@@ -280,6 +413,7 @@ export function useGlobalChat() {
     currentSessionId,
     messages,
     isSending,
+    isVisualModelLocked,
     loadingSessions,
     pendingModelOverride,
     contextStats,

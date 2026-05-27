@@ -44,6 +44,20 @@ def _gemma_model() -> str:
     return raw.split(":")[-1] if raw else "google/gemma-4-31B-it"
 
 
+def _gemma_multimodal_timeout() -> float:
+    try:
+        return float(os.environ.get("GEMMA_MULTIMODAL_TIMEOUT", "75"))
+    except ValueError:
+        return 75.0
+
+
+def _gemma_multimodal_max_tokens() -> int:
+    try:
+        return int(os.environ.get("GEMMA_MULTIMODAL_MAX_TOKENS", "1024"))
+    except ValueError:
+        return 1024
+
+
 def _first_frame_as_jpeg(video_path: str) -> Optional[bytes]:
     """Extract the first frame of a video and return it as JPEG bytes."""
     cap = cv2.VideoCapture(video_path)
@@ -119,9 +133,9 @@ async def _call_gemma(
     payload = {
         "model": _gemma_model(),
         "messages": [{"role": "user", "content": content}],
-        "max_tokens": 4096,
+        "max_tokens": _gemma_multimodal_max_tokens(),
     }
-    async with httpx.AsyncClient(timeout=180.0) as client:
+    async with httpx.AsyncClient(timeout=_gemma_multimodal_timeout()) as client:
         resp = await client.post(
             f"{_gemma_base_url()}/chat/completions",
             json=payload,
@@ -163,6 +177,194 @@ MAX_NOTE_ASSET_SIZE = 50 * 1024 * 1024
 
 DATA_URL_RE = re.compile(r"^data:([^;,]+);base64,(.+)$", re.DOTALL)
 
+_DETECTION_WORDS = {
+    "detect", "detecta", "detetar", "detectar", "detection",
+    "identify", "identifica", "identificar", "identification",
+    "find", "encontra", "encontrar", "locate", "localiza", "localizar",
+    "count", "conta", "contar", "segment", "segmenta", "segmentar",
+    "track", "segue", "seguir", "rastreia", "rastrear",
+}
+
+_COMMON_OBJECT_ALIASES = {
+    "plane": "airplane",
+    "planes": "airplane",
+    "aircraft": "airplane",
+    "airplane": "airplane",
+    "airplanes": "airplane",
+    "aeroplane": "airplane",
+    "aeroplanes": "airplane",
+    "aviao": "airplane",
+    "avioes": "airplane",
+    "avião": "airplane",
+    "aviões": "airplane",
+    "boat": "boat",
+    "boats": "boat",
+    "ship": "boat",
+    "ships": "boat",
+    "barco": "boat",
+    "barcos": "boat",
+    "navio": "boat",
+    "navios": "boat",
+    "car": "car",
+    "cars": "car",
+    "carro": "car",
+    "carros": "car",
+    "person": "person",
+    "people": "person",
+    "pessoa": "person",
+    "pessoas": "person",
+    "truck": "truck",
+    "trucks": "truck",
+    "camiao": "truck",
+    "camioes": "truck",
+    "camião": "truck",
+    "camiões": "truck",
+}
+
+
+def _normalise_query_text(query: str) -> str:
+    return re.sub(r"\s+", " ", (query or "").strip())
+
+
+def _extract_common_target(query: str) -> Optional[str]:
+    text = _normalise_query_text(query).lower()
+    words = re.findall(r"[\wÀ-ÿ]+", text)
+    for word in words:
+        if word in _COMMON_OBJECT_ALIASES:
+            return _COMMON_OBJECT_ALIASES[word]
+    return None
+
+
+def _requested_visual_engine(query: str) -> Optional[str]:
+    text = _normalise_query_text(query).lower()
+    matches: List[Tuple[int, str]] = []
+    for match in re.finditer(r"\bsam[-\s]?3\b|segment anything", text):
+        matches.append((match.start(), "sam3"))
+    for match in re.finditer(r"\brf[-\s]?detr\b|rfdetr", text):
+        matches.append((match.start(), "rfdetr"))
+    if not matches:
+        return None
+    return max(matches, key=lambda item: item[0])[1]
+
+
+def _looks_like_detection_task(query: str) -> bool:
+    text = _normalise_query_text(query).lower()
+    if not text:
+        return False
+    words = set(re.findall(r"[\wÀ-ÿ]+", text))
+    return (
+        _requested_visual_engine(text) is not None
+        or bool(words & _DETECTION_WORDS)
+        or _extract_common_target(text) is not None
+    )
+
+
+def _choose_visual_engine(query: str) -> Tuple[str, Optional[str]]:
+    """
+    Pick the concrete vision engine for a natural-language request.
+
+    RF-DETR is preferred for common COCO classes because it is fast and does
+    not need prompt interpretation. SAM3 remains the fallback for open-vocabulary
+    prompts such as "red inflatable boat" or "damaged antenna".
+    """
+    requested_engine = _requested_visual_engine(query)
+    target = _extract_common_target(query)
+
+    if requested_engine:
+        if requested_engine == "sam3":
+            return "sam3", target or _normalise_query_text(query) or None
+        return "rfdetr", target
+
+    if target:
+        return "rfdetr", target
+
+    cleaned = _normalise_query_text(query)
+    if cleaned:
+        return "sam3", cleaned
+
+    return "rfdetr", None
+
+
+def _target_label_pt(target: Optional[str]) -> str:
+    labels = {
+        "airplane": "aviões",
+        "boat": "embarcações",
+        "car": "carros",
+        "person": "pessoas",
+        "truck": "camiões",
+    }
+    return labels.get(target or "", target or "objetos")
+
+
+def _extract_detection_count(tool_result: str) -> Optional[int]:
+    for pattern in (r"Total detections:\s*(\d+)", r"Found\s+(\d+)\s+instance"):
+        match = re.search(pattern, tool_result or "", re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _summarise_tool_result(
+    query: str,
+    tool_result: str,
+    media_kind: str,
+    engine: str,
+    target: Optional[str] = None,
+) -> str:
+    count = _extract_detection_count(tool_result)
+    target_label = _target_label_pt(target)
+
+    if count is not None:
+        if media_kind == "video":
+            return (
+                f"Detetei {count} ocorrência(s) de {target_label} no vídeo com {engine}. "
+                "O vídeo anotado está abaixo.\n\n"
+                f"{tool_result}"
+            )
+        return (
+            f"Detetei {count} {target_label} na imagem com {engine}. "
+            "A imagem anotada está abaixo.\n\n"
+            f"{tool_result}"
+        )
+
+    return tool_result
+
+
+async def _image_analysis_fallback_response(
+    image_path: str,
+    reason: str,
+) -> dict:
+    try:
+        result = await run_vision_analysis(
+            image_path=image_path,
+            query=None,
+            engine="rfdetr",
+            provider="gemma",
+        )
+        return {
+            "text": (
+                f"{reason}\n\n"
+                "Executei uma deteção visual geral com RF-DETR para devolver uma resposta útil.\n\n"
+                f"{result.get('text') or ''}"
+            ),
+            "route": "image_analysis_fallback",
+            "engine": "rfdetr",
+            "image_base64": result.get("image_base64"),
+        }
+    except Exception as fallback_error:
+        detail = str(fallback_error) or repr(fallback_error)
+        logger.error(f"RF-DETR fallback failed after Gemma multimodal failure: {detail}")
+        return {
+            "text": (
+                f"{reason}\n\n"
+                "Também não consegui executar a deteção visual de fallback com RF-DETR. "
+                f"Detalhe técnico: {type(fallback_error).__name__}: {detail}"
+            ),
+            "route": "vision_unavailable",
+            "engine": "rfdetr",
+            "image_base64": None,
+        }
+
 
 @router.post("/vision/multimodal")
 async def multimodal_chat(
@@ -178,7 +380,7 @@ async def multimodal_chat(
     - query: the user's question
     - context: pre-built context string sent from the client (optional)
     - mode: "chat" (default)
-    - file: optional image for vision queries (PNG, JPG, JPEG, WEBP)
+    - file: optional image/video for visual queries
 
     Context is built client-side via /chat/context and passed as a plain
     text string; this endpoint just forwards it to Gemma.
@@ -190,23 +392,117 @@ async def multimodal_chat(
     if context and context.strip():
         prompt = f"{query}\n\n---\nContext:\n\n{context.strip()}"
 
-    # Collect images: user-uploaded file first, then assets embedded in context
+    # Collect images: user-uploaded image first, then assets embedded in context.
+    # Video uploads are handled by the video tracking agent when the request is
+    # detection/tracking-like; otherwise Gemma receives the first frame.
     images: List[Tuple[bytes, str]] = []
+    saved_path: Optional[str] = None
+    uploaded_ext: Optional[str] = None
 
     if file and file.filename:
         ext = Path(file.filename).suffix.lower()
-        if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        uploaded_ext = ext
+        if ext not in ALLOWED_IMAGE_EXTENSIONS and ext not in ALLOWED_VIDEO_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported image type '{ext}'. Allowed: {', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+                detail=(
+                    f"Unsupported file type '{ext}'. Allowed images: "
+                    f"{', '.join(ALLOWED_IMAGE_EXTENSIONS)}; videos: "
+                    f"{', '.join(ALLOWED_VIDEO_EXTENSIONS)}"
+                ),
             )
         file_bytes = await file.read()
-        if len(file_bytes) > MAX_IMAGE_SIZE:
+        if ext in ALLOWED_IMAGE_EXTENSIONS and len(file_bytes) > MAX_IMAGE_SIZE:
             raise HTTPException(status_code=413, detail="Image exceeds 20 MB limit.")
-        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-        images.append((file_bytes, mime_map.get(ext, "image/jpeg")))
+        if ext in ALLOWED_VIDEO_EXTENSIONS and len(file_bytes) > MAX_VIDEO_SIZE:
+            raise HTTPException(status_code=413, detail="Video exceeds 200 MB limit.")
 
-    if context:
+        file_id = uuid.uuid4().hex[:12]
+        saved_path = os.path.abspath(os.path.join(VISION_UPLOADS_DIR, f"{file_id}{ext}"))
+        with open(saved_path, "wb") as f:
+            f.write(file_bytes)
+
+        if ext in ALLOWED_IMAGE_EXTENSIONS and _looks_like_detection_task(query):
+            engine, target = _choose_visual_engine(query)
+            try:
+                result = await run_vision_analysis(
+                    image_path=saved_path,
+                    query=target,
+                    engine=engine,
+                    provider="gemma",
+                )
+                text = _summarise_tool_result(
+                    query=query,
+                    tool_result=str(result.get("text") or ""),
+                    media_kind="image",
+                    engine=engine,
+                    target=target,
+                )
+                return {
+                    "text": text,
+                    "route": "image_analysis",
+                    "engine": engine,
+                    "image_base64": result.get("image_base64"),
+                }
+            finally:
+                try:
+                    os.remove(saved_path)
+                except OSError:
+                    pass
+
+        if ext in ALLOWED_VIDEO_EXTENSIONS and _looks_like_detection_task(query):
+            engine, target = _choose_visual_engine(query)
+            try:
+                result = await run_video_tracking(
+                    video_path=saved_path,
+                    target=target,
+                    engine=engine,
+                )
+                output_path = result.get("video_path")
+                video_base64 = None
+                if output_path:
+                    with open(output_path, "rb") as vf:
+                        video_base64 = f"data:video/mp4;base64,{base64.b64encode(vf.read()).decode()}"
+                text = _summarise_tool_result(
+                    query=query,
+                    tool_result=str(result.get("text") or ""),
+                    media_kind="video",
+                    engine=engine,
+                    target=target,
+                )
+                return {
+                    "text": text,
+                    "route": "video_tracking",
+                    "engine": engine,
+                    "video_base64": video_base64,
+                }
+            finally:
+                try:
+                    os.remove(saved_path)
+                except OSError:
+                    pass
+                output_path = locals().get("output_path")
+                if output_path:
+                    try:
+                        os.remove(output_path)
+                    except OSError:
+                        pass
+
+        if ext in ALLOWED_VIDEO_EXTENSIONS:
+            frame = _first_frame_as_jpeg(saved_path)
+            if frame:
+                images.append((frame, "image/jpeg"))
+                prompt = (
+                    f"{prompt}\n\nNota: o ficheiro enviado é um vídeo. "
+                    "Para esta resposta geral foi analisado apenas o primeiro fotograma. "
+                    "Para deteção/seguimento de objetos, pede explicitamente para detetar, "
+                    "contar, identificar ou seguir o alvo."
+                )
+        else:
+            mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+            images.append((file_bytes, mime_map.get(ext, "image/jpeg")))
+
+    if context and not images:
         context_images = _extract_context_images(context, VISION_NOTE_ASSETS_DIR)
         images.extend(context_images)
 
@@ -217,15 +513,57 @@ async def multimodal_chat(
 
     try:
         text = await _call_gemma(prompt, images or None)
-        return {"text": text}
+        return {"text": text, "route": "gemma_multimodal"}
     except RuntimeError as e:
+        if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
+            return await _image_analysis_fallback_response(
+                saved_path,
+                "Não consegui usar a análise multimodal da Gemma.",
+            )
         raise HTTPException(status_code=503, detail=str(e))
+    except httpx.TimeoutException:
+        logger.warning(
+            f"Gemma multimodal timed out after {_gemma_multimodal_timeout()}s; "
+            f"falling back where possible. query={repr(query[:80])}"
+        )
+        if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
+            return await _image_analysis_fallback_response(
+                saved_path,
+                "A análise multimodal da Gemma demorou demasiado tempo.",
+            )
+        raise HTTPException(status_code=504, detail="Gemma multimodal request timed out")
     except httpx.HTTPStatusError as e:
         logger.error(f"Gemma API error: {e.response.status_code} {e.response.text[:200]}")
+        if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
+            return await _image_analysis_fallback_response(
+                saved_path,
+                f"A análise multimodal da Gemma falhou com HTTP {e.response.status_code}.",
+            )
         raise HTTPException(status_code=502, detail=f"Gemma API returned {e.response.status_code}")
+    except httpx.RequestError as e:
+        detail = str(e) or repr(e)
+        logger.error(f"Gemma request failed: {type(e).__name__}: {detail}")
+        if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
+            return await _image_analysis_fallback_response(
+                saved_path,
+                f"Não consegui contactar a Gemma multimodal ({type(e).__name__}).",
+            )
+        raise HTTPException(status_code=502, detail=f"Gemma request failed: {detail}")
     except Exception as e:
-        logger.error(f"Multimodal chat failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Multimodal chat failed: {e}")
+        detail = str(e) or repr(e)
+        logger.error(f"Multimodal chat failed: {type(e).__name__}: {detail}")
+        if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
+            return await _image_analysis_fallback_response(
+                saved_path,
+                f"A análise multimodal falhou ({type(e).__name__}).",
+            )
+        raise HTTPException(status_code=500, detail=f"Multimodal chat failed: {detail}")
+    finally:
+        if saved_path and os.path.exists(saved_path):
+            try:
+                os.remove(saved_path)
+            except OSError:
+                pass
 
 
 @router.post("/vision/image-analysis")

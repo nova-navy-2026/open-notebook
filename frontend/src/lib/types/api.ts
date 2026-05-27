@@ -151,6 +151,7 @@ export interface SourceChatMessage {
   type: 'human' | 'ai'
   content: string
   timestamp?: string
+  attachments?: ChatAttachment[]
 }
 
 export interface SourceChatContextIndicator {
@@ -198,6 +199,13 @@ export interface NotebookChatMessage {
   type: 'human' | 'ai'
   content: string
   timestamp?: string
+  attachments?: ChatAttachment[]
+}
+
+export interface ChatAttachment {
+  name: string
+  url: string
+  kind: 'image' | 'video' | 'file'
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {
@@ -246,7 +254,7 @@ export interface BuildContextResponse {
 }
 
 // Global Chat Types
-export interface GlobalChatSession extends BaseChatSession {}
+export type GlobalChatSession = BaseChatSession
 
 export interface GlobalChatSessionWithMessages extends GlobalChatSession {
   messages: NotebookChatMessage[]

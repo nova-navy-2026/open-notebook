@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { Settings2, Sparkles } from 'lucide-react'
+import { Lock, Settings2, Sparkles } from 'lucide-react'
 import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
@@ -28,12 +28,18 @@ interface ModelSelectorProps {
   currentModel?: string
   onModelChange: (model?: string) => void
   disabled?: boolean
+  displayNameOverride?: string
+  locked?: boolean
+  lockedReason?: string
 }
 
 export function ModelSelector({ 
   currentModel, 
   onModelChange,
-  disabled = false 
+  disabled = false,
+  displayNameOverride,
+  locked = false,
+  lockedReason,
 }: ModelSelectorProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -61,6 +67,9 @@ export function ModelSelector({
   }, [defaults?.default_chat_model, languageModels])
 
   const currentModelName = useMemo(() => {
+    if (displayNameOverride) {
+      return displayNameOverride
+    }
     if (currentModel) {
       return languageModels.find(model => model.id === currentModel)?.name || currentModel
     }
@@ -68,7 +77,7 @@ export function ModelSelector({
       return defaultModel.name
     }
     return t.common.default
-  }, [currentModel, languageModels, defaultModel, t.common.default])
+  }, [displayNameOverride, currentModel, languageModels, defaultModel, t.common.default])
 
   const handleSave = () => {
     onModelChange(selectedModel === 'default' ? undefined : selectedModel)
@@ -89,8 +98,13 @@ export function ModelSelector({
           size="sm"
           disabled={disabled}
           className="gap-2"
+          title={lockedReason}
         >
-          <Settings2 className="h-4 w-4" />
+          {locked ? (
+            <Lock className="h-4 w-4" />
+          ) : (
+            <Settings2 className="h-4 w-4" />
+          )}
           <span className="text-xs">
             {currentModelName}
           </span>

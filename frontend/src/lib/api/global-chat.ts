@@ -39,6 +39,17 @@ export const globalChatApi = {
     return response.data
   },
 
+  persistExchange: async (
+    sessionId: string,
+    data: { user_message: string; assistant_message: string },
+  ) => {
+    const response = await apiClient.post<GlobalChatSessionWithMessages>(
+      `/global-chat/sessions/${sessionId}/messages`,
+      data
+    )
+    return response.data
+  },
+
   deleteSession: async (sessionId: string) => {
     await apiClient.delete(`/global-chat/sessions/${sessionId}`)
   },
