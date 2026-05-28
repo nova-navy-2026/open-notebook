@@ -55,6 +55,19 @@ function buildVisualContext(previousResponse: string): string | undefined {
   return `Última análise visual:\n${previousResponse.trim()}`
 }
 
+function messagesContainVisualExchange(messages: NotebookChatMessage[]): boolean {
+  return messages.some((message) => {
+    const content = normaliseForMatching(message.content)
+    return (
+      content.includes('[anexo:')
+      || content.includes('resultado da analise visual')
+      || content.includes('video anotado')
+      || content.includes('gemma multimodal')
+      || content.includes('deteccao visual')
+    )
+  })
+}
+
 async function formatMultimodalResponse(result: MultimodalResponse): Promise<string> {
   const parts = [result.text]
 
@@ -115,6 +128,7 @@ export function useGlobalChat() {
   useEffect(() => {
     if (currentSession?.messages && !isSending && !hasLocalMultimodalMessagesRef.current) {
       setMessages(currentSession.messages)
+      setIsVisualModelLocked(messagesContainVisualExchange(currentSession.messages))
     }
   }, [currentSession, isSending])
 
@@ -187,6 +201,7 @@ export function useGlobalChat() {
         lastVisualFileRef.current = null
         lastVisualQueryRef.current = ''
         lastVisualContextRef.current = ''
+        setIsVisualModelLocked(false)
         setCurrentSessionId(null)
         setMessages([])
       }
@@ -361,7 +376,6 @@ export function useGlobalChat() {
       }
       setMessages(prev => [...prev, aiMessage])
     } finally {
-      setIsVisualModelLocked(false)
       setIsSending(false)
     }
   }, [currentSessionId, currentSession, pendingModelOverride, refetchCurrentSession, queryClient, t])
@@ -372,6 +386,7 @@ export function useGlobalChat() {
     lastVisualFileRef.current = null
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''
+    setIsVisualModelLocked(false)
     setCurrentSessionId(sessionId)
     setContextStats(null)
   }, [])
@@ -382,6 +397,7 @@ export function useGlobalChat() {
     lastVisualFileRef.current = null
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''
+    setIsVisualModelLocked(false)
     return createSessionMutation.mutate({ title })
   }, [createSessionMutation])
 
