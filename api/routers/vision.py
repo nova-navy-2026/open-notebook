@@ -6,8 +6,12 @@ Uses NOVA-Researcher GPTResearcher with the vision MCP config
 """
 
 import base64
+import asyncio
+import json
 import os
 import re
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -56,6 +60,28 @@ def _gemma_multimodal_max_tokens() -> int:
         return int(os.environ.get("GEMMA_MULTIMODAL_MAX_TOKENS", "1024"))
     except ValueError:
         return 1024
+
+
+def _gemma_ocr_max_tokens() -> int:
+    try:
+        return int(os.environ.get("GEMMA_OCR_MAX_TOKENS", "2048"))
+    except ValueError:
+        return 2048
+
+
+def _docling_ocr_timeout() -> float:
+    try:
+        return float(os.environ.get("DOCLING_OCR_TIMEOUT", "90"))
+    except ValueError:
+        return 90.0
+
+
+def _docling_ocr_enabled() -> bool:
+    return os.environ.get("DOCLING_OCR_ENABLED", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+    }
 
 
 def _first_frame_as_jpeg(video_path: str) -> Optional[bytes]:
@@ -117,6 +143,7 @@ def _extract_context_images(context: str, assets_dir: str) -> List[Tuple[bytes, 
 async def _call_gemma(
     prompt: str,
     images: Optional[List[Tuple[bytes, str]]] = None,
+    max_tokens: Optional[int] = None,
 ) -> str:
     """
     Call Gemma via OpenAI-compatible API with an optional list of images.
@@ -133,7 +160,7 @@ async def _call_gemma(
     payload = {
         "model": _gemma_model(),
         "messages": [{"role": "user", "content": content}],
-        "max_tokens": _gemma_multimodal_max_tokens(),
+        "max_tokens": max_tokens or _gemma_multimodal_max_tokens(),
     }
     async with httpx.AsyncClient(timeout=_gemma_multimodal_timeout()) as client:
         resp = await client.post(
@@ -183,6 +210,12 @@ _DETECTION_WORDS = {
     "find", "encontra", "encontrar", "locate", "localiza", "localizar",
     "count", "conta", "contar", "segment", "segmenta", "segmentar",
     "track", "segue", "seguir", "rastreia", "rastrear",
+}
+
+_OCR_WORDS = {
+    "ocr", "texto", "text", "ler", "read", "extrair", "extract",
+    "transcrever", "transcreve", "transcribe", "reconhecer", "recognize",
+    "reconhecimento", "documento", "document", "placa", "license", "plate",
 }
 
 _COMMON_OBJECT_ALIASES = {
@@ -256,6 +289,21 @@ def _looks_like_detection_task(query: str) -> bool:
         _requested_visual_engine(text) is not None
         or bool(words & _DETECTION_WORDS)
         or _extract_common_target(text) is not None
+    )
+
+
+def _looks_like_ocr_task(query: str) -> bool:
+    text = _normalise_query_text(query).lower()
+    if not text:
+        return False
+    words = set(re.findall(r"[\wÀ-ÿ]+", text))
+    if words & _OCR_WORDS:
+        return True
+    return bool(
+        re.search(
+            r"\b(read|extract|transcribe)\s+(the\s+)?(text|words|document)\b",
+            text,
+        )
     )
 
 
@@ -366,6 +414,199 @@ async def _image_analysis_fallback_response(
         }
 
 
+async def _run_gemma_ocr(
+    query: str,
+    images: List[Tuple[bytes, str]],
+    context: Optional[str] = None,
+    media_kind: str = "imagem",
+) -> dict:
+    prompt = (
+        "Atua como um motor de OCR rigoroso.\n"
+        f"Pedido do utilizador: {query}\n\n"
+        f"Analisa a {media_kind} enviada e extrai todo o texto visível.\n"
+        "Regras:\n"
+        "- Mantém o texto original tal como aparece, incluindo maiúsculas, números e pontuação.\n"
+        "- Se houver várias zonas de texto, organiza por blocos/linhas.\n"
+        "- Se algum texto estiver ilegível, marca como [ilegível] em vez de inventar.\n"
+        "- Depois da transcrição, acrescenta uma nota curta sobre a confiança/leiturabilidade.\n"
+        "- Responde em pt-PT, exceto se o pedido do utilizador estiver claramente noutra língua.\n"
+    )
+    if context and context.strip():
+        prompt = f"{prompt}\n\nContexto visual anterior, se for útil:\n{context.strip()}"
+
+    try:
+        text = await _call_gemma(prompt, images, max_tokens=_gemma_ocr_max_tokens())
+        return {
+            "text": text,
+            "route": "ocr",
+            "engine": "gemma_ocr",
+            "image_base64": None,
+        }
+    except Exception as e:
+        detail = str(e) or repr(e)
+        logger.error(f"Gemma OCR failed: {type(e).__name__}: {detail}")
+        return {
+            "text": (
+                "Não consegui executar OCR nesta imagem. "
+                f"Detalhe técnico: {type(e).__name__}: {detail}"
+            ),
+            "route": "ocr_failed",
+            "engine": "gemma_ocr",
+            "image_base64": None,
+        }
+
+
+def _run_docling_ocr_subprocess(image_path: str) -> str:
+    engine = os.environ.get("DOCLING_OCR_ENGINE", "auto").strip().lower() or "auto"
+    timeout = _docling_ocr_timeout()
+    langs = os.environ.get("DOCLING_OCR_LANGS", "").strip()
+
+    script = r"""
+import json
+import os
+import sys
+
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import (
+    EasyOcrOptions,
+    OcrAutoOptions,
+    PdfPipelineOptions,
+    RapidOcrOptions,
+    TesseractCliOcrOptions,
+    TesseractOcrOptions,
+)
+from docling.document_converter import (
+    DocumentConverter,
+    ImageFormatOption,
+    PdfFormatOption,
+)
+
+path = sys.argv[1]
+engine = sys.argv[2]
+langs_arg = sys.argv[3]
+
+pipeline_options = PdfPipelineOptions()
+pipeline_options.do_ocr = True
+pipeline_options.do_table_structure = True
+
+if engine == "rapidocr":
+    pipeline_options.ocr_options = RapidOcrOptions()
+elif engine == "easyocr":
+    langs = [x.strip() for x in (langs_arg or "pt,en").split(",") if x.strip()]
+    pipeline_options.ocr_options = EasyOcrOptions(
+        lang=langs,
+        download_enabled=os.environ.get("DOCLING_EASYOCR_DOWNLOAD", "false").lower()
+        in {"1", "true", "yes"},
+    )
+elif engine == "tesseract":
+    langs = [x.strip() for x in (langs_arg or "por,eng").split(",") if x.strip()]
+    pipeline_options.ocr_options = TesseractOcrOptions(lang=langs)
+elif engine in {"tesseract_cli", "tesseract-cli"}:
+    langs = [x.strip() for x in (langs_arg or "por,eng").split(",") if x.strip()]
+    pipeline_options.ocr_options = TesseractCliOcrOptions(lang=langs)
+else:
+    langs = [x.strip() for x in langs_arg.split(",") if x.strip()]
+    pipeline_options.ocr_options = OcrAutoOptions(lang=langs)
+
+converter = DocumentConverter(
+    format_options={
+        InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options),
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+    }
+)
+result = converter.convert(path)
+doc = result.document
+
+markdown = ""
+plain_text = ""
+if hasattr(doc, "export_to_markdown"):
+    markdown = doc.export_to_markdown() or ""
+if hasattr(doc, "export_to_text"):
+    plain_text = doc.export_to_text() or ""
+
+print(json.dumps({"markdown": markdown, "text": plain_text}, ensure_ascii=False))
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script, image_path, engine, langs],
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = stderr[-2000:] or stdout[-2000:] or f"exit code {completed.returncode}"
+        raise RuntimeError(detail)
+
+    stdout = (completed.stdout or "").strip()
+    json_line = ""
+    for line in reversed(stdout.splitlines()):
+        candidate = line.strip()
+        if candidate.startswith("{") and candidate.endswith("}"):
+            json_line = candidate
+            break
+
+    try:
+        payload = json.loads(json_line or stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Invalid Docling output: {stdout[:500]}") from e
+
+    text = (payload.get("markdown") or payload.get("text") or "").strip()
+    if not text:
+        raise RuntimeError("Docling did not extract any text.")
+    return text
+
+
+async def _run_docling_ocr(image_path: str) -> str:
+    return await asyncio.to_thread(_run_docling_ocr_subprocess, image_path)
+
+
+async def _run_ocr_with_fallback(
+    query: str,
+    image_path: str,
+    images: List[Tuple[bytes, str]],
+    context: Optional[str] = None,
+    media_kind: str = "imagem",
+) -> dict:
+    if _docling_ocr_enabled():
+        try:
+            text = await _run_docling_ocr(image_path)
+            return {
+                "text": (
+                    "OCR concluído com Docling.\n\n"
+                    f"{text}"
+                ),
+                "route": "ocr",
+                "engine": "docling",
+                "image_base64": None,
+            }
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"Docling OCR timed out after {_docling_ocr_timeout()}s; "
+                "falling back to Gemma OCR."
+            )
+        except Exception as e:
+            detail = str(e) or repr(e)
+            logger.warning(
+                f"Docling OCR failed ({type(e).__name__}); falling back to Gemma OCR: {detail}"
+            )
+
+    gemma_result = await _run_gemma_ocr(
+        query=query,
+        images=images,
+        context=context,
+        media_kind=media_kind,
+    )
+    if gemma_result.get("route") == "ocr":
+        gemma_result["text"] = (
+            "OCR concluído com Gemma multimodal.\n\n"
+            f"{gemma_result.get('text') or ''}"
+        )
+    return gemma_result
+
+
 @router.post("/vision/multimodal")
 async def multimodal_chat(
     query: str = Form(...),
@@ -421,6 +662,22 @@ async def multimodal_chat(
         saved_path = os.path.abspath(os.path.join(VISION_UPLOADS_DIR, f"{file_id}{ext}"))
         with open(saved_path, "wb") as f:
             f.write(file_bytes)
+
+        if ext in ALLOWED_IMAGE_EXTENSIONS and _looks_like_ocr_task(query):
+            mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+            try:
+                return await _run_ocr_with_fallback(
+                    query=query,
+                    image_path=saved_path,
+                    images=[(file_bytes, mime_map.get(ext, "image/jpeg"))],
+                    context=context,
+                    media_kind="imagem",
+                )
+            finally:
+                try:
+                    os.remove(saved_path)
+                except OSError:
+                    pass
 
         if ext in ALLOWED_IMAGE_EXTENSIONS and _looks_like_detection_task(query):
             engine, target = _choose_visual_engine(query)
@@ -491,6 +748,30 @@ async def multimodal_chat(
         if ext in ALLOWED_VIDEO_EXTENSIONS:
             frame = _first_frame_as_jpeg(saved_path)
             if frame:
+                if _looks_like_ocr_task(query):
+                    frame_id = uuid.uuid4().hex[:12]
+                    frame_path = os.path.abspath(
+                        os.path.join(VISION_UPLOADS_DIR, f"{frame_id}.jpg")
+                    )
+                    with open(frame_path, "wb") as f:
+                        f.write(frame)
+                    try:
+                        return await _run_ocr_with_fallback(
+                            query=query,
+                            image_path=frame_path,
+                            images=[(frame, "image/jpeg")],
+                            context=context,
+                            media_kind="primeiro fotograma do vídeo",
+                        )
+                    finally:
+                        try:
+                            os.remove(saved_path)
+                        except OSError:
+                            pass
+                        try:
+                            os.remove(frame_path)
+                        except OSError:
+                            pass
                 images.append((frame, "image/jpeg"))
                 prompt = (
                     f"{prompt}\n\nNota: o ficheiro enviado é um vídeo. "

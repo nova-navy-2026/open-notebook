@@ -84,12 +84,17 @@ function normaliseForMatching(text: string): string {
 
 function looksLikeVisualFollowUp(message: string): boolean {
   const text = normaliseForMatching(message)
-  return /\b(image|picture|photo|foto|imagem|video|frame|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
+  return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
 }
 
 function looksLikeVisualToolRequest(message: string): boolean {
   const text = normaliseForMatching(message)
-  return /\b(detetar|detectar|detect|deteccao|identifica|identificar|identify|conta|contar|count|quantos|numero|number|how many|segment|segmenta|segmentar|localiza|localizar|locate|track|seguir|rastrear|sam-?3|rf-?\s?detr|rfdetr)\b/.test(text)
+  return /\b(ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|deteccao|identifica|identificar|identify|conta|contar|count|quantos|numero|number|how many|segment|segmenta|segmentar|localiza|localizar|locate|track|seguir|rastrear|sam-?3|rf-?\s?detr|rfdetr)\b/.test(text)
+}
+
+function looksLikeOcrRequest(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|reconhecer|recognize)\b/.test(text)
 }
 
 function buildVisualFollowUpQuery(message: string, previousQuery: string): string {
@@ -224,6 +229,7 @@ export function useMultimodalChat({
       const visualFile = file ?? (isVisualFollowUp ? lastVisualFileRef.current ?? undefined : undefined)
       const visualQuery = isVisualFollowUp
         && looksLikeVisualToolRequest(message)
+        && !looksLikeOcrRequest(message)
         ? buildVisualFollowUpQuery(message, lastVisualQueryRef.current)
         : message
 
