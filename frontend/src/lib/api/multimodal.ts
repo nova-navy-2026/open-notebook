@@ -5,6 +5,7 @@ export interface MultimodalRequest {
   context?: string
   mode?: string
   file?: File
+  force_engine?: 'sam3' | 'rfdetr'
 }
 
 export interface MultimodalResponse {
@@ -21,6 +22,7 @@ export const multimodalApi = {
     form.append('query', data.query)
     if (data.context) form.append('context', data.context)
     form.append('mode', data.mode ?? 'chat')
+    if (data.force_engine) form.append('force_engine', data.force_engine)
     if (data.file) form.append('file', data.file)
     const response = await apiClient.post<MultimodalResponse>('/vision/multimodal', form)
     return response.data

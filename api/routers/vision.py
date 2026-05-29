@@ -14,6 +14,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from time import perf_counter
 from typing import List, Optional, Tuple
 
 import cv2
@@ -50,9 +51,9 @@ def _gemma_model() -> str:
 
 def _gemma_multimodal_timeout() -> float:
     try:
-        return float(os.environ.get("GEMMA_MULTIMODAL_TIMEOUT", "75"))
+        return float(os.environ.get("GEMMA_MULTIMODAL_TIMEOUT", "600"))
     except ValueError:
-        return 75.0
+        return 600.0
 
 
 def _gemma_multimodal_max_tokens() -> int:
@@ -67,6 +68,21 @@ def _gemma_ocr_max_tokens() -> int:
         return int(os.environ.get("GEMMA_OCR_MAX_TOKENS", "2048"))
     except ValueError:
         return 2048
+
+
+def _gemma_ocr_postprocess_enabled() -> bool:
+    return os.environ.get("GEMMA_OCR_POSTPROCESS_ENABLED", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
+
+def _gemma_ocr_postprocess_timeout() -> float:
+    try:
+        return float(os.environ.get("GEMMA_OCR_POSTPROCESS_TIMEOUT", "240"))
+    except ValueError:
+        return 240.0
 
 
 def _docling_ocr_timeout() -> float:
@@ -144,6 +160,8 @@ async def _call_gemma(
     prompt: str,
     images: Optional[List[Tuple[bytes, str]]] = None,
     max_tokens: Optional[int] = None,
+    timeout: Optional[float] = None,
+    purpose: str = "multimodal",
 ) -> str:
     """
     Call Gemma via OpenAI-compatible API with an optional list of images.
@@ -162,15 +180,46 @@ async def _call_gemma(
         "messages": [{"role": "user", "content": content}],
         "max_tokens": max_tokens or _gemma_multimodal_max_tokens(),
     }
-    async with httpx.AsyncClient(timeout=_gemma_multimodal_timeout()) as client:
-        resp = await client.post(
-            f"{_gemma_base_url()}/chat/completions",
-            json=payload,
-            headers={"Authorization": f"Bearer {_gemma_api_key()}"},
+    request_timeout = timeout or _gemma_multimodal_timeout()
+    started_at = perf_counter()
+    logger.info(
+        "ChatAgent LLM start | provider=gemma purpose={} model={} images={} "
+        "prompt_chars={} max_tokens={} timeout_s={}",
+        purpose,
+        payload["model"],
+        len(images or []),
+        len(prompt),
+        payload["max_tokens"],
+        request_timeout,
+    )
+    try:
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
+            resp = await client.post(
+                f"{_gemma_base_url()}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {_gemma_api_key()}"},
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        logger.success(
+            "ChatAgent LLM success | provider=gemma purpose={} duration_ms={} "
+            "response_chars={}",
+            purpose,
+            round((perf_counter() - started_at) * 1000),
+            len(text or ""),
         )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
+        return text
+    except Exception as e:
+        logger.error(
+            "ChatAgent LLM failure | provider=gemma purpose={} duration_ms={} "
+            "error_type={} error={}",
+            purpose,
+            round((perf_counter() - started_at) * 1000),
+            type(e).__name__,
+            str(e) or repr(e),
+        )
+        raise
 
 router = APIRouter()
 
@@ -208,12 +257,15 @@ _DETECTION_WORDS = {
     "detect", "detecta", "detetar", "detectar", "detection",
     "identify", "identifica", "identificar", "identification",
     "find", "encontra", "encontrar", "locate", "localiza", "localizar",
-    "count", "conta", "contar", "segment", "segmenta", "segmentar",
+    "count", "conta", "contar", "segment", "segmentation",
+    "segmenta", "segmentar", "segmentação", "segmentacao",
     "track", "segue", "seguir", "rastreia", "rastrear",
 }
 
 _OCR_WORDS = {
-    "ocr", "texto", "text", "ler", "read", "extrair", "extract",
+    "ocr", "texto", "text", "ler", "read", "extrai", "extrair", "extract",
+    "extração", "extracao", "tabela", "table", "csv", "coluna", "colunas",
+    "linha", "linhas",
     "transcrever", "transcreve", "transcribe", "reconhecer", "recognize",
     "reconhecimento", "documento", "document", "placa", "license", "plate",
 }
@@ -268,6 +320,30 @@ def _extract_common_target(query: str) -> Optional[str]:
     return None
 
 
+def _extract_sam3_target(query: str) -> str:
+    target = _extract_common_target(query)
+    if target:
+        return target
+
+    text = _normalise_query_text(query).lower()
+    if "pedido atual:" in text:
+        text = text.split("pedido atual:", 1)[1]
+    text = re.sub(r"\bsam[-\s]?3\b|segment anything|rf[-\s]?detr|rfdetr", " ", text)
+    text = re.sub(
+        r"\b(podes|pode|consegues|consegue|can you|please|por favor|analisa|analisar|analyze|imagem|image|foto|photo|utilizando|using|usar|use|fazer|do|a|o|os|as|the|this|esta|este|com|with|e|and|to)\b",
+        " ",
+        text,
+    )
+    text = re.sub(
+        r"\b(segmentacao|segmentação|segmentar|segmenta|segmentation|segment)\b",
+        " ",
+        text,
+    )
+    text = re.sub(r"[^\wÀ-ÿ\s-]", " ", text)
+    cleaned = _normalise_query_text(text)
+    return cleaned if len(cleaned) > 2 else "object"
+
+
 def _requested_visual_engine(query: str) -> Optional[str]:
     text = _normalise_query_text(query).lower()
     matches: List[Tuple[int, str]] = []
@@ -320,7 +396,7 @@ def _choose_visual_engine(query: str) -> Tuple[str, Optional[str]]:
 
     if requested_engine:
         if requested_engine == "sam3":
-            return "sam3", target or _normalise_query_text(query) or None
+            return "sam3", target or _extract_sam3_target(query)
         return "rfdetr", target
 
     if target:
@@ -435,7 +511,12 @@ async def _run_gemma_ocr(
         prompt = f"{prompt}\n\nContexto visual anterior, se for útil:\n{context.strip()}"
 
     try:
-        text = await _call_gemma(prompt, images, max_tokens=_gemma_ocr_max_tokens())
+        text = await _call_gemma(
+            prompt,
+            images,
+            max_tokens=_gemma_ocr_max_tokens(),
+            purpose="ocr_fallback",
+        )
         return {
             "text": text,
             "route": "ocr",
@@ -563,6 +644,45 @@ async def _run_docling_ocr(image_path: str) -> str:
     return await asyncio.to_thread(_run_docling_ocr_subprocess, image_path)
 
 
+async def _postprocess_ocr_with_gemma(ocr_text: str, query: str) -> Tuple[str, bool]:
+    if not _gemma_ocr_postprocess_enabled() or not ocr_text.strip():
+        return ocr_text, False
+
+    prompt = (
+        "Revê o seguinte texto extraído por OCR.\n\n"
+        "Objetivo: corrigir apenas erros óbvios de OCR, especialmente acentos, "
+        "cedilhas e tils em português europeu.\n\n"
+        "Regras estritas:\n"
+        "- Não inventes texto novo.\n"
+        "- Não resumas.\n"
+        "- Mantém nomes, números, siglas, datas, coordenadas e códigos exatamente como no OCR, "
+        "exceto quando a correção for inequívoca.\n"
+        "- Mantém a estrutura em linhas/blocos o mais parecida possível.\n"
+        "- Se uma palavra estiver ambígua, deixa como está.\n"
+        "- Devolve apenas o texto corrigido, sem comentários.\n\n"
+        f"Pedido original do utilizador: {query}\n\n"
+        "Texto OCR:\n"
+        f"{ocr_text}"
+    )
+    try:
+        corrected = await _call_gemma(
+            prompt,
+            images=None,
+            max_tokens=_gemma_ocr_max_tokens(),
+            timeout=_gemma_ocr_postprocess_timeout(),
+            purpose="ocr_postprocess",
+        )
+        corrected = corrected.strip()
+        return (corrected or ocr_text, bool(corrected))
+    except Exception as e:
+        detail = str(e) or repr(e)
+        logger.warning(
+            f"Gemma OCR post-processing failed; returning raw Docling OCR: "
+            f"{type(e).__name__}: {detail}"
+        )
+        return ocr_text, False
+
+
 async def _run_ocr_with_fallback(
     query: str,
     image_path: str,
@@ -573,13 +693,16 @@ async def _run_ocr_with_fallback(
     if _docling_ocr_enabled():
         try:
             text = await _run_docling_ocr(image_path)
+            text, polished = await _postprocess_ocr_with_gemma(text, query)
+            engine_note = (
+                "OCR concluído com Docling e revisto com Gemma para correção de acentuação.\n\n"
+                if polished
+                else "OCR concluído com Docling.\n\n"
+            )
             return {
-                "text": (
-                    "OCR concluído com Docling.\n\n"
-                    f"{text}"
-                ),
+                "text": f"{engine_note}{text}",
                 "route": "ocr",
-                "engine": "docling",
+                "engine": "docling_gemma" if polished else "docling",
                 "image_base64": None,
             }
         except subprocess.TimeoutExpired:
@@ -612,6 +735,7 @@ async def multimodal_chat(
     query: str = Form(...),
     context: Optional[str] = Form(None),
     mode: str = Form("chat"),
+    force_engine: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
 ):
     """
@@ -629,6 +753,7 @@ async def multimodal_chat(
     Returns JSON with:
     - text: the model's response
     """
+    started_at = perf_counter()
     prompt = query
     if context and context.strip():
         prompt = f"{query}\n\n---\nContext:\n\n{context.strip()}"
@@ -639,6 +764,12 @@ async def multimodal_chat(
     images: List[Tuple[bytes, str]] = []
     saved_path: Optional[str] = None
     uploaded_ext: Optional[str] = None
+    requested_force_engine = (force_engine or "").strip().lower()
+    if requested_force_engine not in {"", "sam3", "rfdetr"}:
+        raise HTTPException(
+            status_code=400,
+            detail="force_engine must be one of: sam3, rfdetr",
+        )
 
     if file and file.filename:
         ext = Path(file.filename).suffix.lower()
@@ -664,15 +795,30 @@ async def multimodal_chat(
             f.write(file_bytes)
 
         if ext in ALLOWED_IMAGE_EXTENSIONS and _looks_like_ocr_task(query):
+            logger.info(
+                "ChatAgent tool start | agent=multimodal route=ocr media=image "
+                "file={} bytes={} query={!r}",
+                file.filename,
+                len(file_bytes),
+                query[:160],
+            )
             mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
             try:
-                return await _run_ocr_with_fallback(
+                result = await _run_ocr_with_fallback(
                     query=query,
                     image_path=saved_path,
                     images=[(file_bytes, mime_map.get(ext, "image/jpeg"))],
                     context=context,
                     media_kind="imagem",
                 )
+                logger.success(
+                    "ChatAgent tool success | agent=multimodal route=ocr "
+                    "media=image engine={} duration_ms={} chars={}",
+                    result.get("engine"),
+                    round((perf_counter() - started_at) * 1000),
+                    len(result.get("text") or ""),
+                )
+                return result
             finally:
                 try:
                     os.remove(saved_path)
@@ -681,6 +827,17 @@ async def multimodal_chat(
 
         if ext in ALLOWED_IMAGE_EXTENSIONS and _looks_like_detection_task(query):
             engine, target = _choose_visual_engine(query)
+            if requested_force_engine:
+                engine = requested_force_engine
+            logger.info(
+                "ChatAgent tool start | agent=multimodal route=image_analysis "
+                "engine={} target={!r} file={} bytes={} query={!r}",
+                engine,
+                target,
+                file.filename,
+                len(file_bytes),
+                query[:160],
+            )
             try:
                 result = await run_vision_analysis(
                     image_path=saved_path,
@@ -695,11 +852,46 @@ async def multimodal_chat(
                     engine=engine,
                     target=target,
                 )
-                return {
+                response = {
                     "text": text,
                     "route": "image_analysis",
                     "engine": engine,
                     "image_base64": result.get("image_base64"),
+                }
+                logger.success(
+                    "ChatAgent tool success | agent=multimodal route=image_analysis "
+                    "engine={} duration_ms={} has_image={}",
+                    engine,
+                    round((perf_counter() - started_at) * 1000),
+                    bool(response.get("image_base64")),
+                )
+                return response
+            except Exception as e:
+                detail = str(e) or repr(e)
+                logger.error(
+                    "ChatAgent tool failure | agent=multimodal route=image_analysis "
+                    "engine={} duration_ms={} error_type={} error={}",
+                    engine,
+                    round((perf_counter() - started_at) * 1000),
+                    type(e).__name__,
+                    detail,
+                )
+                if engine == "sam3":
+                    return await _image_analysis_fallback_response(
+                        saved_path,
+                        (
+                            "Não consegui executar a segmentação com SAM3. "
+                            f"Detalhe técnico: {type(e).__name__}: {detail}"
+                        ),
+                    )
+                return {
+                    "text": (
+                        f"Não consegui executar a análise visual com {engine}. "
+                        f"Detalhe técnico: {type(e).__name__}: {detail}"
+                    ),
+                    "route": "vision_unavailable",
+                    "engine": engine,
+                    "image_base64": None,
                 }
             finally:
                 try:
@@ -709,6 +901,17 @@ async def multimodal_chat(
 
         if ext in ALLOWED_VIDEO_EXTENSIONS and _looks_like_detection_task(query):
             engine, target = _choose_visual_engine(query)
+            if requested_force_engine:
+                engine = requested_force_engine
+            logger.info(
+                "ChatAgent tool start | agent=multimodal route=video_tracking "
+                "engine={} target={!r} file={} bytes={} query={!r}",
+                engine,
+                target,
+                file.filename,
+                len(file_bytes),
+                query[:160],
+            )
             try:
                 result = await run_video_tracking(
                     video_path=saved_path,
@@ -727,12 +930,20 @@ async def multimodal_chat(
                     engine=engine,
                     target=target,
                 )
-                return {
+                response = {
                     "text": text,
                     "route": "video_tracking",
                     "engine": engine,
                     "video_base64": video_base64,
                 }
+                logger.success(
+                    "ChatAgent tool success | agent=multimodal route=video_tracking "
+                    "engine={} duration_ms={} has_video={}",
+                    engine,
+                    round((perf_counter() - started_at) * 1000),
+                    bool(response.get("video_base64")),
+                )
+                return response
             finally:
                 try:
                     os.remove(saved_path)
@@ -749,6 +960,13 @@ async def multimodal_chat(
             frame = _first_frame_as_jpeg(saved_path)
             if frame:
                 if _looks_like_ocr_task(query):
+                    logger.info(
+                        "ChatAgent tool start | agent=multimodal route=ocr media=video_frame "
+                        "file={} bytes={} query={!r}",
+                        file.filename,
+                        len(file_bytes),
+                        query[:160],
+                    )
                     frame_id = uuid.uuid4().hex[:12]
                     frame_path = os.path.abspath(
                         os.path.join(VISION_UPLOADS_DIR, f"{frame_id}.jpg")
@@ -756,13 +974,21 @@ async def multimodal_chat(
                     with open(frame_path, "wb") as f:
                         f.write(frame)
                     try:
-                        return await _run_ocr_with_fallback(
+                        result = await _run_ocr_with_fallback(
                             query=query,
                             image_path=frame_path,
                             images=[(frame, "image/jpeg")],
                             context=context,
                             media_kind="primeiro fotograma do vídeo",
                         )
+                        logger.success(
+                            "ChatAgent tool success | agent=multimodal route=ocr "
+                            "media=video_frame engine={} duration_ms={} chars={}",
+                            result.get("engine"),
+                            round((perf_counter() - started_at) * 1000),
+                            len(result.get("text") or ""),
+                        )
+                        return result
                     finally:
                         try:
                             os.remove(saved_path)
@@ -789,11 +1015,19 @@ async def multimodal_chat(
 
     logger.info(
         f"Multimodal chat: mode={mode}, images={len(images)}, "
-        f"context_len={len(context) if context else 0}, query={repr(query[:80])}"
+        f"context_len={len(context) if context else 0}, force_engine={requested_force_engine or None}, "
+        f"query={repr(query[:80])}"
     )
 
     try:
-        text = await _call_gemma(prompt, images or None)
+        text = await _call_gemma(prompt, images or None, purpose="multimodal_chat")
+        logger.success(
+            "ChatAgent tool success | agent=multimodal route=gemma_multimodal "
+            "duration_ms={} images={} chars={}",
+            round((perf_counter() - started_at) * 1000),
+            len(images or []),
+            len(text or ""),
+        )
         return {"text": text, "route": "gemma_multimodal"}
     except RuntimeError as e:
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:

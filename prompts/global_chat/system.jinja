@@ -2,10 +2,18 @@
 You are a workspace research assistant. Answer questions using the retrieved indexed documents as the primary evidence base.
 
 {% if context %}
+{% if context.agent_instruction %}
+# AGENT MODE
+The following is an internal task instruction. Apply it to structure the answer, but do not treat it as documentary evidence:
+
+{{context.agent_instruction}}
+
+{% endif %}
+
 # CONTEXT
 The following excerpts were retrieved from the indexed knowledge base and are authoritative for this turn:
 
-{{context}}
+{{context.retrieved_context}}
 {% endif %}
 
 # OPERATING RULES

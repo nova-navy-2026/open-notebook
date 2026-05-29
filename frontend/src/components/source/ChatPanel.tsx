@@ -1,21 +1,32 @@
 'use client'
 
-import { useState, useRef, useEffect, useId } from 'react'
+import { useState, useRef, useEffect, useId, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
   BaseChatSession
 } from '@/lib/types/api'
-import { ModelSelector } from './ModelSelector'
+import { ModelSelector as ChatModelSelector } from './ModelSelector'
+import { ModelSelector as InlineModelSelector } from '@/components/common/ModelSelector'
 import { ContextIndicator } from '@/components/common/ContextIndicator'
 import { SessionManager } from '@/components/source/SessionManager'
 import { MessageActions } from '@/components/source/MessageActions'
@@ -23,6 +34,10 @@ import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent
 import { useModalManager } from '@/lib/hooks/use-modal-manager'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
+import { useModelDefaults } from '@/lib/hooks/use-models'
+import { notebooksApi } from '@/lib/api/notebooks'
+import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 interface NotebookContextStats {
   sourcesInsights: number
@@ -42,7 +57,13 @@ interface ChatPanelProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
   contextIndicators: SourceChatContextIndicator | null
-  onSendMessage: (message: string, modelOverride?: string, file?: File) => void
+  onSendMessage: (
+    message: string,
+    modelOverride?: string,
+    file?: File,
+    deepResearch?: ChatDeepResearchOptions,
+    agentOptions?: ChatAgentUiOptions,
+  ) => void
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -62,6 +83,8 @@ interface ChatPanelProps {
   notebookId?: string
   enableAttachments?: boolean
   visualModelLocked?: boolean
+  enableDeepResearch?: boolean
+  enableAgentControls?: boolean
 }
 
 export function ChatPanel({
@@ -83,18 +106,64 @@ export function ChatPanel({
   notebookContextStats,
   notebookId,
   enableAttachments = false,
-  visualModelLocked = false
+  visualModelLocked = false,
+  enableDeepResearch = false,
+  enableAgentControls = false
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
   const [input, setInput] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [researchReportType, setResearchReportType] = useState('research_report')
+  const [researchTone, setResearchTone] = useState('Objective')
+  const [researchModelId, setResearchModelId] = useState('')
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState('auto')
+  const [transcriptionDiarize, setTranscriptionDiarize] = useState(false)
+  const [transcriptionSpeakers, setTranscriptionSpeakers] = useState('auto')
+  const [visionEngine, setVisionEngine] = useState<'auto' | 'sam3' | 'rfdetr'>('auto')
+  const [saveNoteNotebookId, setSaveNoteNotebookId] = useState('')
   const [activeTab, setActiveTab] = useState<'chat' | 'sessions'>('chat')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { openModal } = useModalManager()
-  const isVisualModelLocked = enableAttachments && (visualModelLocked || !!selectedFile)
+  const { data: reportTypes = [] } = useReportTypes()
+  const { data: tones = [] } = useResearchTones()
+  const { data: modelDefaults } = useModelDefaults()
+  const { data: availableNotebooks = [] } = useQuery({
+    queryKey: ['chat-agent-notebooks'],
+    queryFn: () => notebooksApi.list({ archived: false }),
+    enabled: enableAgentControls && !notebookId,
+  })
+  const selectedFileIsVisual = !!selectedFile && (
+    selectedFile.type.startsWith('image/')
+    || selectedFile.type.startsWith('video/')
+  )
+  const selectedFileIsAudio = !!selectedFile && selectedFile.type.startsWith('audio/')
+  const isVisualModelLocked = enableAttachments && (visualModelLocked || selectedFileIsVisual)
+  const canUseDeepResearch = enableDeepResearch && !selectedFile
+  const showTranscriptionControls = enableAgentControls && !!selectedFile && (
+    selectedFileIsAudio || selectedFile.type.startsWith('video/')
+  )
+  const showVisionControls = enableAgentControls && selectedFileIsVisual
+  const showSaveNoteControls = enableAgentControls && !notebookId && !selectedFile && availableNotebooks.length > 1
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const scrollRoot = scrollAreaRef.current
+    const viewport = scrollRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
+
+    const run = () => {
+      if (viewport) {
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior })
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
+      }
+    }
+
+    requestAnimationFrame(run)
+    window.setTimeout(run, 80)
+    window.setTimeout(run, 240)
+  }, [])
 
   const handleReferenceClick = (type: string, id: string) => {
     const modalType = type === 'source_insight' ? 'insight' : type as 'source' | 'note' | 'insight'
@@ -111,14 +180,52 @@ export function ChatPanel({
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    scrollToBottom('smooth')
+  }, [messages, isStreaming, scrollToBottom])
+
+  useEffect(() => {
+    if (!researchModelId && modelDefaults?.default_chat_model) {
+      setResearchModelId(modelDefaults.default_chat_model)
+    }
+  }, [modelDefaults?.default_chat_model, researchModelId])
 
   const handleSend = () => {
     if ((input.trim() || selectedFile) && !isStreaming) {
-      onSendMessage(input.trim() || 'Analisa este ficheiro.', modelOverride, selectedFile ?? undefined)
+      const deepResearch = canUseDeepResearch && deepResearchEnabled
+        ? {
+          reportType: researchReportType,
+          tone: researchTone,
+          modelId: researchModelId || undefined,
+        }
+        : undefined
+      onSendMessage(
+        input.trim() || 'Analisa este ficheiro.',
+        modelOverride,
+        deepResearch ? undefined : selectedFile ?? undefined,
+        deepResearch,
+        {
+          transcription: showTranscriptionControls
+            ? {
+              language: transcriptionLanguage === 'auto' ? undefined : transcriptionLanguage,
+              diarize: transcriptionDiarize,
+              numSpeakers: transcriptionSpeakers === 'auto'
+                ? undefined
+                : Number(transcriptionSpeakers),
+            }
+            : undefined,
+          vision: showVisionControls
+            ? { engine: visionEngine }
+            : undefined,
+          saveNote: saveNoteNotebookId
+            ? { notebookId: saveNoteNotebookId }
+            : undefined,
+        },
+      )
       setInput('')
       setSelectedFile(null)
+      if (deepResearch) {
+        setDeepResearchEnabled(false)
+      }
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -228,12 +335,20 @@ export function ChatPanel({
                                 src={attachment.url}
                                 alt={attachment.name}
                                 className="max-h-36 w-full object-contain"
+                                onLoad={() => scrollToBottom('auto')}
                               />
                             ) : attachment.kind === 'video' ? (
                               <video
                                 src={attachment.url}
                                 controls
                                 className="max-h-36 w-full bg-black"
+                                onLoadedMetadata={() => scrollToBottom('auto')}
+                              />
+                            ) : attachment.kind === 'audio' ? (
+                              <audio
+                                src={attachment.url}
+                                controls
+                                className="w-48"
                               />
                             ) : (
                               <div className="px-3 py-2 text-xs">{attachment.name}</div>
@@ -253,6 +368,7 @@ export function ChatPanel({
                         <AIMessageContent
                           content={message.content}
                           onReferenceClick={handleReferenceClick}
+                          onMediaLoad={() => scrollToBottom('auto')}
                         />
                       ) : (
                         <p className="text-sm break-all">{message.content}</p>
@@ -334,7 +450,7 @@ export function ChatPanel({
           {onModelChange && (
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">{t.chat.model}</span>
-              <ModelSelector
+              <ChatModelSelector
                 currentModel={modelOverride}
                 onModelChange={onModelChange}
                 disabled={isStreaming || isVisualModelLocked}
@@ -349,10 +465,171 @@ export function ChatPanel({
             </div>
           )}
 
+          {enableDeepResearch && (
+            <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <Button
+                  type="button"
+                  variant={deepResearchEnabled ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 gap-2"
+                  onClick={() => setDeepResearchEnabled((enabled) => !enabled)}
+                  disabled={isStreaming || !!selectedFile}
+                  title={selectedFile ? 'Deep Research usa apenas pedidos de texto.' : undefined}
+                >
+                  <Search className="h-4 w-4" />
+                  Deep Research
+                </Button>
+              </div>
+
+              {deepResearchEnabled && canUseDeepResearch && (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t.research?.reportType ?? 'Report Type'}</Label>
+                    <Select
+                      value={researchReportType}
+                      onValueChange={setResearchReportType}
+                      disabled={isStreaming}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {reportTypes.map((reportType) => (
+                          <SelectItem key={reportType.value} value={reportType.value}>
+                            {reportType.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t.research?.toneLabel ?? 'Writing Tone'}</Label>
+                    <Select
+                      value={researchTone}
+                      onValueChange={setResearchTone}
+                      disabled={isStreaming}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tones.map((tone) => (
+                          <SelectItem key={tone.value} value={tone.value}>
+                            {tone.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t.research?.modelLabel ?? 'AI Model'}</Label>
+                    <InlineModelSelector
+                      modelType="language"
+                      value={researchModelId}
+                      onChange={setResearchModelId}
+                      placeholder={t.research?.selectModelPlaceholder ?? 'Select a model...'}
+                      disabled={isStreaming}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {enableAgentControls && (showTranscriptionControls || showVisionControls || showSaveNoteControls) && (
+            <div className="grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-3">
+              {showTranscriptionControls && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Idioma</Label>
+                    <Select value={transcriptionLanguage} onValueChange={setTranscriptionLanguage} disabled={isStreaming}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        <SelectItem value="pt">Português</SelectItem>
+                        <SelectItem value="en">English</SelectItem>
+                        <SelectItem value="es">Español</SelectItem>
+                        <SelectItem value="fr">Français</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Oradores</Label>
+                    <Select value={transcriptionSpeakers} onValueChange={setTranscriptionSpeakers} disabled={isStreaming || !transcriptionDiarize}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        {[1, 2, 3, 4, 5, 6].map((count) => (
+                          <SelectItem key={count} value={String(count)}>
+                            {count}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <label className="flex h-8 items-center gap-2 self-end text-xs">
+                    <Checkbox
+                      checked={transcriptionDiarize}
+                      onCheckedChange={(checked) => setTranscriptionDiarize(Boolean(checked))}
+                      disabled={isStreaming}
+                    />
+                    Diarizar
+                  </label>
+                </>
+              )}
+
+              {showVisionControls && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Motor visual</Label>
+                  <Select value={visionEngine} onValueChange={(value) => setVisionEngine(value as 'auto' | 'sam3' | 'rfdetr')} disabled={isStreaming}>
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="sam3">SAM3</SelectItem>
+                      <SelectItem value="rfdetr">RF-DETR</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {showSaveNoteControls && (
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-xs">Guardar notas em</Label>
+                  <Select value={saveNoteNotebookId || 'auto'} onValueChange={(value) => setSaveNoteNotebookId(value === 'auto' ? '' : value)} disabled={isStreaming}>
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Perguntar automaticamente</SelectItem>
+                      {availableNotebooks.map((notebook) => (
+                        <SelectItem key={notebook.id} value={notebook.id}>
+                          {notebook.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
+
           {selectedFile && (
             <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
               <div className="flex min-w-0 items-center gap-2">
-                {selectedFile.type.startsWith('video/') ? (
+                {selectedFile.type.startsWith('audio/') ? (
+                  <AudioLines className="h-4 w-4 flex-shrink-0" />
+                ) : selectedFile.type.startsWith('video/') ? (
                   <Video className="h-4 w-4 flex-shrink-0" />
                 ) : (
                   <ImageIcon className="h-4 w-4 flex-shrink-0" />
@@ -386,7 +663,7 @@ export function ChatPanel({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo,audio/wav,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/flac,audio/ogg,audio/aac,audio/webm"
                   className="hidden"
                   onChange={handleFileChange}
                 />
@@ -439,10 +716,12 @@ export function ChatPanel({
 // Helper component to render AI messages with clickable references
 function AIMessageContent({
   content,
-  onReferenceClick
+  onReferenceClick,
+  onMediaLoad,
 }: {
   content: string
   onReferenceClick: (type: string, id: string) => void
+  onMediaLoad?: () => void
 }) {
   const { t } = useTranslation()
   // Convert references to compact markdown with numbered citations
@@ -488,6 +767,7 @@ function AIMessageContent({
               src={typeof src === 'string' ? src : undefined}
               alt={alt ?? ''}
               className="my-3 max-h-80 rounded-md border object-contain"
+              onLoad={onMediaLoad}
             />
           ),
           p: ({ children }) => <p className="mb-4">{children}</p>,

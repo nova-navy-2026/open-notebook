@@ -13,6 +13,17 @@ import {
   UpdateGlobalChatSessionRequest,
   GlobalChatContextStats,
 } from '@/lib/types/api'
+import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
+import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
+import { runRouteAgent } from '@/lib/chat-agents/route-agent'
+import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
+import { fileMetadata, logChatAgentEvent, previewMessage } from '@/lib/chat-agents/logger'
+import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
+import {
+  detectTextAgentInstruction,
+  instructionForAgent,
+} from '@/lib/utils/chat-agents'
+import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 function createAttachment(file?: File): NotebookChatMessage['attachments'] {
   if (!file) return undefined
@@ -20,7 +31,9 @@ function createAttachment(file?: File): NotebookChatMessage['attachments'] {
     ? 'image'
     : file.type.startsWith('video/')
       ? 'video'
-      : 'file'
+      : file.type.startsWith('audio/')
+        ? 'audio'
+        : 'file'
   return [{ name: file.name, url: URL.createObjectURL(file), kind }]
 }
 
@@ -38,21 +51,6 @@ function normaliseForMatching(text: string): string {
 function looksLikeVisualFollowUp(message: string): boolean {
   const text = normaliseForMatching(message)
   return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
-}
-
-function looksLikeVisualToolRequest(message: string): boolean {
-  const text = normaliseForMatching(message)
-  return /\b(ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|deteccao|identifica|identificar|identify|conta|contar|count|quantos|numero|number|how many|segment|segmenta|segmentar|localiza|localizar|locate|track|seguir|rastrear|sam-?3|rf-?\s?detr|rfdetr)\b/.test(text)
-}
-
-function looksLikeOcrRequest(message: string): boolean {
-  const text = normaliseForMatching(message)
-  return /\b(ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|reconhecer|recognize)\b/.test(text)
-}
-
-function buildVisualFollowUpQuery(message: string, previousQuery: string): string {
-  if (!previousQuery.trim()) return message
-  return `Pedido visual anterior:\n${previousQuery.trim()}\n\nPedido atual:\n${message}`
 }
 
 function buildVisualContext(previousResponse: string): string | undefined {
@@ -103,6 +101,7 @@ export function useGlobalChat() {
   // and do NOT pick another session for them.
   const autoSelectedRef = useRef(false)
   const hasLocalMultimodalMessagesRef = useRef(false)
+  const localMessagesDirtyRef = useRef(false)
   const lastVisualFileRef = useRef<File | null>(null)
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
@@ -132,10 +131,14 @@ export function useGlobalChat() {
   // isn't wiped out by a stale fetch of the freshly-created session.
   useEffect(() => {
     if (currentSession?.messages && !isSending && !hasLocalMultimodalMessagesRef.current) {
+      if (localMessagesDirtyRef.current && currentSession.messages.length < messages.length) {
+        return
+      }
+      localMessagesDirtyRef.current = false
       setMessages(currentSession.messages)
       setIsVisualModelLocked(messagesContainVisualExchange(currentSession.messages))
     }
-  }, [currentSession, isSending])
+  }, [currentSession, isSending, messages.length])
 
   // Auto-select most recent session — only on the very first load.
   useEffect(() => {
@@ -203,6 +206,7 @@ export function useGlobalChat() {
         // jump into another session — the user wants the panel cleared.
         autoSelectedRef.current = true
         hasLocalMultimodalMessagesRef.current = false
+        localMessagesDirtyRef.current = false
         lastVisualFileRef.current = null
         lastVisualQueryRef.current = ''
         lastVisualContextRef.current = ''
@@ -219,7 +223,13 @@ export function useGlobalChat() {
   })
 
   // Send message
-  const sendMessage = useCallback(async (message: string, modelOverride?: string, file?: File) => {
+  const sendMessage = useCallback(async (
+    message: string,
+    modelOverride?: string,
+    file?: File,
+    deepResearch?: ChatDeepResearchOptions,
+    agentOptions?: ChatAgentUiOptions,
+  ) => {
     let sessionId = currentSessionId
 
     // Auto-create session if none exists
@@ -252,29 +262,180 @@ export function useGlobalChat() {
     const userMessage: NotebookChatMessage = {
       id: `temp-${Date.now()}`,
       type: 'human',
-      content: file ? `${message}\n\n[Anexo: ${file.name}]` : message,
-      attachments: createAttachment(file),
+      content: file
+        ? `${message}\n\n[Anexo: ${file.name}]`
+        : isVisualFollowUp && visualFile
+          ? `${message}\n\n[Imagem anterior: ${visualFile.name}]`
+          : message,
+      attachments: createAttachment(file ?? (isVisualFollowUp ? visualFile : undefined)),
       timestamp: new Date().toISOString()
     }
     setMessages(prev => [...prev, userMessage])
+    localMessagesDirtyRef.current = true
     setIsSending(true)
 
     try {
+      const agentContext = {
+        surface: 'global_chat' as const,
+        sessionId,
+        modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
+      }
+      const routerDecision = await routeChatAgentWithGemma({
+        message,
+        file: visualFile,
+        visualFollowUp: isVisualFollowUp,
+        deepResearchEnabled: Boolean(deepResearch),
+        context: agentContext,
+      })
+      const preferredAgent = routerDecision && routerDecision.confidence >= 0.55
+        ? routerDecision.agent
+        : undefined
+
+      if (!file) {
+        const content = await runDeepResearchAgent({
+          message,
+          options: deepResearch,
+          queryClient,
+          context: agentContext,
+        })
+        if (content) {
+          const aiMessage: NotebookChatMessage = {
+            id: `ai-${Date.now()}`,
+            type: 'ai',
+            content,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          }).catch((persistError) => {
+            console.error('Failed to persist deep research exchange:', persistError)
+          })
+          return
+        }
+      }
+
+      if (!file) {
+        const content = await runGlobalSaveNoteAgent({
+          message,
+          messages,
+          queryClient,
+          context: agentContext,
+          force: preferredAgent === 'save_note',
+          targetNotebookId: agentOptions?.saveNote?.notebookId,
+        })
+        if (content) {
+          const aiMessage: NotebookChatMessage = {
+            id: `ai-${Date.now()}`,
+            type: 'ai',
+            content,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          }).catch((persistError) => {
+            console.error('Failed to persist save-note exchange:', persistError)
+          })
+          return
+        }
+      }
+
+      if (!file) {
+        const content = await runRouteAgent(
+          message,
+          agentContext,
+          preferredAgent === 'route' ? routerDecision?.parameters : undefined,
+        )
+        if (content) {
+          const aiMessage: NotebookChatMessage = {
+            id: `ai-${Date.now()}`,
+            type: 'ai',
+            content,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          }).catch((persistError) => {
+            console.error('Failed to persist route exchange:', persistError)
+          })
+          return
+        }
+      }
+
+      if (file) {
+        const content = await runTranscriptionAgent(
+          message,
+          file,
+          agentContext,
+          preferredAgent === 'transcription',
+          agentOptions?.transcription,
+        )
+        if (content) {
+          const aiMessage: NotebookChatMessage = {
+            id: `ai-${Date.now()}`,
+            type: 'ai',
+            content,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          }).catch((persistError) => {
+            console.error('Failed to persist transcription exchange:', persistError)
+          })
+          return
+        }
+      }
+
       if (isVisualFile(visualFile)) {
+        const startedAt = performance.now()
         hasLocalMultimodalMessagesRef.current = true
         setIsVisualModelLocked(true)
-        const visualQuery = isVisualFollowUp
-          && looksLikeVisualToolRequest(message)
-          && !looksLikeOcrRequest(message)
-          ? buildVisualFollowUpQuery(message, lastVisualQueryRef.current)
-          : message
+        const visualQuery = message
+        logChatAgentEvent({
+          surface: 'global_chat',
+          agent: 'multimodal',
+          event: 'selected',
+          status: 'selected',
+          context: agentContext,
+          message_preview: previewMessage(message),
+          file: fileMetadata(visualFile),
+          details: {
+            follow_up: isVisualFollowUp,
+            has_context: Boolean(isVisualFollowUp && lastVisualContextRef.current),
+          },
+        })
         const result = await multimodalApi.chat({
           query: visualQuery,
           context: isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
           mode: 'chat',
           file: visualFile,
+          force_engine: agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto'
+            ? agentOptions.vision.engine
+            : undefined,
         })
         const content = await formatMultimodalResponse(result)
+        logChatAgentEvent({
+          surface: 'global_chat',
+          agent: 'multimodal',
+          event: 'tool_call',
+          status: 'success',
+          context: agentContext,
+          duration_ms: Math.round(performance.now() - startedAt),
+          file: fileMetadata(visualFile),
+          details: {
+            route: result.route,
+            engine: result.engine,
+            has_image_result: Boolean(result.image_base64),
+            has_video_result: Boolean(result.video_base64),
+          },
+        })
         lastVisualFileRef.current = visualFile
         lastVisualQueryRef.current = visualQuery
         lastVisualContextRef.current = content
@@ -302,10 +463,24 @@ export function useGlobalChat() {
         return
       }
 
+      const agentInstruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(message)
+      if (agentInstruction) {
+        logChatAgentEvent({
+          surface: 'global_chat',
+          agent: 'text_instruction',
+          event: 'selected',
+          status: 'selected',
+          context: agentContext,
+          message_preview: previewMessage(message),
+          details: { instruction: agentInstruction.split('\n')[0] },
+        })
+      }
+
       const body = await globalChatApi.sendMessageStream({
         session_id: sessionId,
         message,
-        model_override: modelOverride ?? (currentSession?.model_override ?? undefined)
+        model_override: modelOverride ?? (currentSession?.model_override ?? undefined),
+        agent_instruction: agentInstruction,
       })
 
       if (!body) throw new Error('No response body')
@@ -383,12 +558,21 @@ export function useGlobalChat() {
       setMessages(prev => [...prev, aiMessage])
     } finally {
       setIsSending(false)
+      void refetchCurrentSession().then((result) => {
+        const serverMessages = result.data?.messages
+        if (serverMessages && serverMessages.length >= messages.length + 2) {
+          localMessagesDirtyRef.current = false
+          setMessages(serverMessages)
+          setIsVisualModelLocked(messagesContainVisualExchange(serverMessages))
+        }
+      }).catch(() => undefined)
     }
-  }, [currentSessionId, currentSession, pendingModelOverride, refetchCurrentSession, queryClient, t])
+  }, [currentSessionId, currentSession, pendingModelOverride, refetchCurrentSession, queryClient, t, messages])
 
   // Switch session
   const switchSession = useCallback((sessionId: string) => {
     hasLocalMultimodalMessagesRef.current = false
+    localMessagesDirtyRef.current = false
     lastVisualFileRef.current = null
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''
@@ -400,6 +584,7 @@ export function useGlobalChat() {
   // Create session
   const createSession = useCallback((title?: string) => {
     hasLocalMultimodalMessagesRef.current = false
+    localMessagesDirtyRef.current = false
     lastVisualFileRef.current = null
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''

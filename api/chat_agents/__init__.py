@@ -1,0 +1,2 @@
+"""Modular chat-agent registry."""
+

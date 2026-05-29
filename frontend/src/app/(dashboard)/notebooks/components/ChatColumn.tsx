@@ -100,10 +100,12 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       messages={chat.messages}
       isStreaming={chat.isSending}
       contextIndicators={null}
-      onSendMessage={(message, _modelOverride, file) => chat.sendMessage(message, file)}
+      onSendMessage={(message, _modelOverride, file, deepResearch, agentOptions) => chat.sendMessage(message, file, deepResearch, agentOptions)}
       notebookContextStats={contextStats}
       notebookId={notebookId}
       enableAttachments
+      enableDeepResearch
+      enableAgentControls
     />
   )
 }

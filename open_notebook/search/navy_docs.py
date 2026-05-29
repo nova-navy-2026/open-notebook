@@ -315,7 +315,12 @@ async def vector_search_navy_documents(
 
     except Exception as e:
         logger.error(f"Navy vector search failed, falling back to BM25: {e}")
-        return await search_navy_documents(query, doc_ids=doc_ids, k=k)
+        return await search_navy_documents(
+            query,
+            doc_ids=doc_ids,
+            k=k,
+            user_id=user_id,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { chatApi } from '@/lib/api/chat'
 import { multimodalApi } from '@/lib/api/multimodal'
@@ -8,6 +9,18 @@ import { SourceListResponse, NoteResponse } from '@/lib/types/api'
 import { ContextSelections } from '@/app/(dashboard)/notebooks/[id]/page'
 import { NotebookChatMessage } from '@/lib/types/api'
 import type { MultimodalResponse } from '@/lib/api/multimodal'
+import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
+import { runNotebookSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
+import { runRouteAgent } from '@/lib/chat-agents/route-agent'
+import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
+import { fileMetadata, logChatAgentEvent, previewMessage } from '@/lib/chat-agents/logger'
+import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
+import {
+  applyTextAgentInstruction,
+  detectTextAgentInstruction,
+  instructionForAgent,
+} from '@/lib/utils/chat-agents'
+import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 interface UseMultimodalChatParams {
   notebookId: string
@@ -67,7 +80,9 @@ function createAttachment(file?: File): NotebookChatMessage['attachments'] {
     ? 'image'
     : file.type.startsWith('video/')
       ? 'video'
-      : 'file'
+      : file.type.startsWith('audio/')
+        ? 'audio'
+        : 'file'
   return [{ name: file.name, url: URL.createObjectURL(file), kind }]
 }
 
@@ -85,21 +100,6 @@ function normaliseForMatching(text: string): string {
 function looksLikeVisualFollowUp(message: string): boolean {
   const text = normaliseForMatching(message)
   return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
-}
-
-function looksLikeVisualToolRequest(message: string): boolean {
-  const text = normaliseForMatching(message)
-  return /\b(ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|deteccao|identifica|identificar|identify|conta|contar|count|quantos|numero|number|how many|segment|segmenta|segmentar|localiza|localizar|locate|track|seguir|rastrear|sam-?3|rf-?\s?detr|rfdetr)\b/.test(text)
-}
-
-function looksLikeOcrRequest(message: string): boolean {
-  const text = normaliseForMatching(message)
-  return /\b(ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|reconhecer|recognize)\b/.test(text)
-}
-
-function buildVisualFollowUpQuery(message: string, previousQuery: string): string {
-  if (!previousQuery.trim()) return message
-  return `Pedido visual anterior:\n${previousQuery.trim()}\n\nPedido atual:\n${message}`
 }
 
 function buildVisualContext(previousResponse: string): string | undefined {
@@ -130,6 +130,7 @@ export function useMultimodalChat({
   contextSelections,
   selectedNavyDocIds,
 }: UseMultimodalChatParams) {
+  const queryClient = useQueryClient()
   const [messages, setMessages] = useState<NotebookChatMessage[]>([])
   const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState(0)
@@ -224,40 +225,191 @@ export function useMultimodalChat({
   )
 
   const sendMessage = useCallback(
-    async (message: string, file?: File) => {
+    async (
+      message: string,
+      file?: File,
+      deepResearch?: ChatDeepResearchOptions,
+      agentOptions?: ChatAgentUiOptions,
+    ) => {
       const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
       const visualFile = file ?? (isVisualFollowUp ? lastVisualFileRef.current ?? undefined : undefined)
-      const visualQuery = isVisualFollowUp
-        && looksLikeVisualToolRequest(message)
-        && !looksLikeOcrRequest(message)
-        ? buildVisualFollowUpQuery(message, lastVisualQueryRef.current)
-        : message
+      const visualQuery = message
 
       const userMessage: NotebookChatMessage = {
         id: `temp-${Date.now()}`,
         type: 'human',
-        content: file ? `${message}\n\n[Anexo: ${file.name}]` : message,
-        attachments: createAttachment(file),
+        content: file
+          ? `${message}\n\n[Anexo: ${file.name}]`
+          : isVisualFollowUp && visualFile
+            ? `${message}\n\n[Imagem anterior: ${visualFile.name}]`
+            : message,
+        attachments: createAttachment(file ?? (isVisualFollowUp ? visualFile : undefined)),
         timestamp: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, userMessage])
       setIsSending(true)
 
       try {
-        const rawContext = await buildContext(visualQuery)
+        const agentContext = {
+          surface: 'notebook_chat' as const,
+          notebookId,
+        }
+        const routerDecision = await routeChatAgentWithGemma({
+          message,
+          file: visualFile,
+          visualFollowUp: isVisualFollowUp,
+          deepResearchEnabled: Boolean(deepResearch),
+          context: agentContext,
+        })
+        const preferredAgent = routerDecision && routerDecision.confidence >= 0.55
+          ? routerDecision.agent
+          : undefined
+
+        if (!file) {
+          const content = await runDeepResearchAgent({
+            message,
+            options: deepResearch,
+            queryClient,
+            notebookId,
+            context: agentContext,
+          })
+          if (content) {
+            const aiMessage: NotebookChatMessage = {
+              id: `ai-${Date.now()}`,
+              type: 'ai',
+              content,
+              timestamp: new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, aiMessage])
+            return
+          }
+        }
+
+        if (!file) {
+          const content = await runNotebookSaveNoteAgent({
+            message,
+            messages,
+            notebookId,
+            queryClient,
+            context: agentContext,
+            force: preferredAgent === 'save_note',
+          })
+          if (content) {
+            const aiMessage: NotebookChatMessage = {
+              id: `ai-${Date.now()}`,
+              type: 'ai',
+              content,
+              timestamp: new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, aiMessage])
+            return
+          }
+        }
+
+        if (!file) {
+          const content = await runRouteAgent(
+            message,
+            agentContext,
+            preferredAgent === 'route' ? routerDecision?.parameters : undefined,
+          )
+          if (content) {
+            const aiMessage: NotebookChatMessage = {
+              id: `ai-${Date.now()}`,
+              type: 'ai',
+              content,
+              timestamp: new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, aiMessage])
+            return
+          }
+        }
+
+        if (file) {
+          const content = await runTranscriptionAgent(
+            message,
+            file,
+            agentContext,
+            preferredAgent === 'transcription',
+            agentOptions?.transcription,
+          )
+          if (content) {
+            const aiMessage: NotebookChatMessage = {
+              id: `ai-${Date.now()}`,
+              type: 'ai',
+              content,
+              timestamp: new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, aiMessage])
+            return
+          }
+        }
+
+        const instruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(visualQuery)
+        if (instruction) {
+          logChatAgentEvent({
+            surface: 'notebook_chat',
+            agent: 'text_instruction',
+            event: 'selected',
+            status: 'selected',
+            context: agentContext,
+            message_preview: previewMessage(message),
+            details: { instruction: instruction.split('\n')[0] },
+          })
+        }
+
+        const startedAt = performance.now()
+        if (isVisualFile(visualFile)) {
+          logChatAgentEvent({
+            surface: 'notebook_chat',
+            agent: 'multimodal',
+            event: 'selected',
+            status: 'selected',
+            context: agentContext,
+            message_preview: previewMessage(message),
+            file: fileMetadata(visualFile),
+            details: {
+              follow_up: isVisualFollowUp,
+              has_context: Boolean(isVisualFollowUp && lastVisualContextRef.current),
+            },
+          })
+        }
+
+        const agentQuery = instruction
+          ? `${visualQuery.trim()}\n\n${instruction}`
+          : applyTextAgentInstruction(visualQuery)
+        const rawContext = await buildContext(agentQuery)
         const contextText = [
           formatContext(rawContext),
           isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
         ].filter(Boolean).join('\n\n')
 
         const result = await multimodalApi.chat({
-          query: visualQuery,
+          query: agentQuery,
           context: contextText || undefined,
           mode: 'chat',
           file: visualFile,
+          force_engine: agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto'
+            ? agentOptions.vision.engine
+            : undefined,
         })
 
         const content = await formatMultimodalResponse(result)
+        logChatAgentEvent({
+          surface: 'notebook_chat',
+          agent: isVisualFile(visualFile) ? 'multimodal' : 'notebook_chat',
+          event: 'tool_call',
+          status: 'success',
+          context: agentContext,
+          duration_ms: Math.round(performance.now() - startedAt),
+          file: fileMetadata(visualFile),
+          details: {
+            route: result.route,
+            engine: result.engine,
+            text_instruction: Boolean(instruction),
+            has_image_result: Boolean(result.image_base64),
+            has_video_result: Boolean(result.video_base64),
+          },
+        })
         if (isVisualFile(visualFile)) {
           lastVisualFileRef.current = visualFile
           lastVisualQueryRef.current = visualQuery
@@ -287,7 +439,7 @@ export function useMultimodalChat({
         setIsSending(false)
       }
     },
-    [buildContext],
+    [buildContext, messages, notebookId, queryClient],
   )
 
   const clearMessages = useCallback(() => {

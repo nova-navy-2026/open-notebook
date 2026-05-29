@@ -98,6 +98,8 @@ export default function GlobalChatPage() {
           contextType="notebook"
           enableAttachments
           visualModelLocked={chat.isVisualModelLocked}
+          enableDeepResearch
+          enableAgentControls
         />
       </div>
     </div>

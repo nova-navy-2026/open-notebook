@@ -54,7 +54,7 @@ export const globalChatApi = {
     await apiClient.delete(`/global-chat/sessions/${sessionId}`)
   },
 
-  sendMessage: async (data: { session_id: string; message: string; model_override?: string }) => {
+  sendMessage: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string }) => {
     const response = await apiClient.post<{
       session_id: string
       messages: NotebookChatMessage[]
@@ -66,7 +66,7 @@ export const globalChatApi = {
     return response.data
   },
 
-  sendMessageStream: (data: { session_id: string; message: string; model_override?: string }) => {
+  sendMessageStream: (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string }) => {
     let token: string | null = null
     if (typeof window !== 'undefined') {
       const authStorage = localStorage.getItem('auth-storage')

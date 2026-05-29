@@ -205,7 +205,7 @@ export interface NotebookChatMessage {
 export interface ChatAttachment {
   name: string
   url: string
-  kind: 'image' | 'video' | 'file'
+  kind: 'image' | 'video' | 'audio' | 'file'
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {
