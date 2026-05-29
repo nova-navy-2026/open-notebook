@@ -37,6 +37,7 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
 import { useModelDefaults } from '@/lib/hooks/use-models'
 import { notebooksApi } from '@/lib/api/notebooks'
+import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 interface NotebookContextStats {
@@ -136,15 +137,13 @@ export function ChatPanel({
     queryFn: () => notebooksApi.list({ archived: false }),
     enabled: enableAgentControls && !notebookId,
   })
-  const selectedFileIsVisual = !!selectedFile && (
-    selectedFile.type.startsWith('image/')
-    || selectedFile.type.startsWith('video/')
-  )
-  const selectedFileIsAudio = !!selectedFile && selectedFile.type.startsWith('audio/')
+  const selectedFileKind = getAttachmentKind(selectedFile)
+  const selectedFileIsVisual = isVisualLikeFile(selectedFile)
+  const selectedFileIsAudio = isAudioLikeFile(selectedFile)
   const isVisualModelLocked = enableAttachments && (visualModelLocked || selectedFileIsVisual)
   const canUseDeepResearch = enableDeepResearch && !selectedFile
   const showTranscriptionControls = enableAgentControls && !!selectedFile && (
-    selectedFileIsAudio || selectedFile.type.startsWith('video/')
+    selectedFileIsAudio || isVideoLikeFile(selectedFile)
   )
   const showVisionControls = enableAgentControls && selectedFileIsVisual
   const showSaveNoteControls = enableAgentControls && !notebookId && !selectedFile && availableNotebooks.length > 1
@@ -627,9 +626,9 @@ export function ChatPanel({
           {selectedFile && (
             <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
               <div className="flex min-w-0 items-center gap-2">
-                {selectedFile.type.startsWith('audio/') ? (
+                {selectedFileKind === 'audio' ? (
                   <AudioLines className="h-4 w-4 flex-shrink-0" />
-                ) : selectedFile.type.startsWith('video/') ? (
+                ) : selectedFileKind === 'video' ? (
                   <Video className="h-4 w-4 flex-shrink-0" />
                 ) : (
                   <ImageIcon className="h-4 w-4 flex-shrink-0" />

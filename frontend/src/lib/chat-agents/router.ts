@@ -1,6 +1,7 @@
 import { chatAgentLogsApi } from '@/lib/api/chat-agent-logs'
 import type { ChatAgentRouteResponse } from '@/lib/api/chat-agent-logs'
 import type { ChatAgentRunContext } from '@/lib/chat-agents/logger'
+import { getAgentFileType } from '@/lib/utils/file-kind'
 
 export async function routeChatAgentWithGemma({
   message,
@@ -20,7 +21,7 @@ export async function routeChatAgentWithGemma({
       surface: context.surface,
       message,
       has_file: Boolean(file),
-      file_type: file?.type,
+      file_type: getAgentFileType(file),
       file_name: file?.name,
       visual_follow_up: Boolean(visualFollowUp),
       deep_research_enabled: Boolean(deepResearchEnabled),

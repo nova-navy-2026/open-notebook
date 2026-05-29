@@ -23,22 +23,16 @@ import {
   detectTextAgentInstruction,
   instructionForAgent,
 } from '@/lib/utils/chat-agents'
+import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 function createAttachment(file?: File): NotebookChatMessage['attachments'] {
   if (!file) return undefined
-  const kind = file.type.startsWith('image/')
-    ? 'image'
-    : file.type.startsWith('video/')
-      ? 'video'
-      : file.type.startsWith('audio/')
-        ? 'audio'
-        : 'file'
-  return [{ name: file.name, url: URL.createObjectURL(file), kind }]
+  return [{ name: file.name, url: URL.createObjectURL(file), kind: getAttachmentKind(file) }]
 }
 
 function isVisualFile(file?: File | null): file is File {
-  return !!file && (file.type.startsWith('image/') || file.type.startsWith('video/'))
+  return isVisualLikeFile(file)
 }
 
 function normaliseForMatching(text: string): string {

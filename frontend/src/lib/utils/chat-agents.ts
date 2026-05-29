@@ -1,6 +1,7 @@
 import type { NotebookChatMessage } from '@/lib/types/api'
 import type { NavigationRouteResponse } from '@/lib/api/navigation'
 import type { TranscriptionResult } from '@/lib/api/transcription'
+import { isAudioLikeFile } from '@/lib/utils/file-kind'
 
 export interface ChatDeepResearchOptions {
   reportType: string
@@ -30,7 +31,7 @@ export function normaliseForAgentMatching(text: string): string {
 }
 
 export function isAudioFile(file?: File | null): file is File {
-  return !!file && file.type.startsWith('audio/')
+  return isAudioLikeFile(file)
 }
 
 export function isTranscriptionRequest(message: string, file?: File | null): boolean {
