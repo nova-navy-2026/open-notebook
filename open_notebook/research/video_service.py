@@ -37,6 +37,50 @@ def _get_rfdetr_url() -> str:
     return url.rstrip("/") + "/detect"
 
 
+def _get_llm_url() -> str:
+    return os.environ.get("GEMMA_BASE_URL", "http://10.10.255.206:46888/v1").rstrip("/") + "/chat/completions"
+
+
+async def _extract_objects_from_query(query: str) -> str:
+    """
+    Use Gemma4 to extract clean object names from a conversational query.
+    Converts "Track the planes in the video" -> "plane".
+    Falls back to the raw query if the LLM service is unavailable.
+    """
+    system_prompt = (
+        "You are a computer vision extraction tool. "
+        "Extract the core object(s) the user wants to detect from their prompt. "
+        "Return ONLY a clean, comma-separated list of singular object names. "
+        "Do not include conversational padding, punctuation, or formatting. "
+        "Example input: 'Track the planes in the video' -> Example output: 'plane'"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            payload = {
+                "model": os.environ.get("GEMMA_MODEL", "google/gemma-4-31B-it"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": query},
+                ],
+                "temperature": 0.0,
+                "max_tokens": 20,
+            }
+            headers = {}
+            api_key = os.environ.get("GEMMA_API_KEY", "nova-vl")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            resp = await client.post(_get_llm_url(), json=payload, headers=headers)
+            resp.raise_for_status()
+            cleaned = resp.json()["choices"][0]["message"]["content"].strip()
+            return cleaned
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning(f"LLM rewriting service unreachable — passing raw query directly. ({type(e).__name__})")
+        return query
+    except Exception as e:
+        logger.error(f"LLM query extraction failed. Falling back to raw query. Error: {e}")
+        return query
+
+
 # COCO-91 lookup for RF-DETR class filtering.
 # RF-DETR returns COCO *category_id* values (1=person, 2=bicycle, ...),
 # NOT the contiguous 0-79 indexing used by some YOLO builds. Using the
@@ -248,8 +292,12 @@ async def run_video_tracking(
     if engine not in {"sam3", "rfdetr"}:
         raise ValueError(f"Invalid engine '{engine}'. Must be 'sam3' or 'rfdetr'.")
 
-    # Normalise target.
+    # Normalise target, then rewrite with Gemma4 to get clean object names.
     norm_target: Optional[str] = target.strip() if (target and target.strip()) else None
+    if norm_target:
+        clean_target = await _extract_objects_from_query(norm_target)
+        logger.info(f"LLM translated target: '{norm_target}' -> '{clean_target}'")
+        norm_target = clean_target
     if engine == "sam3" and not norm_target:
         raise ValueError("The SAM3 engine requires a non-empty target.")
 

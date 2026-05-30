@@ -32,6 +32,10 @@ def _get_rfdetr_url() -> str:
     return os.environ.get("RFDETR_API_URL", "http://localhost:4802").rstrip("/") + "/detect"
 
 
+def _get_llm_url() -> str:
+    return os.environ.get("GEMMA_BASE_URL", "http://10.10.255.206:46888/v1").rstrip("/") + "/chat/completions"
+
+
 # Default confidence gate for RF-DETR. Lower than SAM3's internal threshold
 # because RF-DETR's COCO head can be noisy.
 _RFDETR_DEFAULT_CONF = float(os.environ.get("RFDETR_CONF_THRESHOLD", "0.35"))
@@ -72,6 +76,51 @@ def _draw_boxes(
     return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
 
 
+async def _extract_objects_from_query(query: str) -> str:
+    """
+    Use the local LLM to extract clean object names from a conversational query.
+    Converts "Segment the planes in the image" -> "plane".
+    """
+    system_prompt = (
+        "You are a computer vision extraction tool. "
+        "Extract the core object(s) the user wants to detect from their prompt. "
+        "Return ONLY a clean, comma-separated list of singular object names. "
+        "Do not include conversational padding, punctuation, or formatting. "
+        "Example input: 'Segment the planes in the image' -> Example output: 'plane'"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            payload = {
+                "model": os.environ.get("GEMMA_MODEL", "google/gemma-4-31B-it"),
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": query}
+                ],
+                "temperature": 0.0,
+                "max_tokens": 20,
+            }
+
+            headers = {}
+            api_key = os.environ.get("GEMMA_API_KEY", "nova-vl")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            resp = await client.post(_get_llm_url(), json=payload, headers=headers)
+            resp.raise_for_status()
+
+            data = resp.json()
+            cleaned_query = data["choices"][0]["message"]["content"].strip()
+            return cleaned_query
+
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning(f"LLM rewriting service unreachable — passing raw query directly. ({type(e).__name__})")
+        return query
+    except Exception as e:
+        logger.error(f"LLM query extraction failed. Falling back to raw query. Error: {e}")
+        return query
+
+
 async def _run_sam3(image_bytes: bytes, filename: str, query: str) -> Dict[str, Any]:
     """Call SAM3 /segment directly and produce an annotated image + summary."""
     async with httpx.AsyncClient(timeout=300.0) as client:
@@ -106,8 +155,6 @@ async def _run_rfdetr(
     confidence_threshold: float = _RFDETR_DEFAULT_CONF,
 ) -> Dict[str, Any]:
     """Call RF-DETR /detect directly, filter by query class, annotate image."""
-    # Ask the server slightly below our gate so we don't lose detections to
-    # the library's internal default threshold.
     server_thr = max(0.0, confidence_threshold - 0.05)
     async with httpx.AsyncClient(timeout=300.0) as client:
         files = {"file": (filename, image_bytes, "image/png")}
@@ -131,9 +178,11 @@ async def _run_rfdetr(
     # Optional class-name filter from the user query
     q = (query or "").strip().lower()
     if q:
+        # Split by comma in case the LLM returned multiple objects (e.g., "plane, car")
+        query_parts = [part.strip() for part in q.split(",")]
         triples = [
             (b, c, cid) for (b, c, cid) in triples
-            if q in _class_name(cid).lower() or _class_name(cid).lower() in q
+            if any(part in _class_name(cid).lower() or _class_name(cid).lower() in part for part in query_parts)
         ]
 
     boxes = [t[0] for t in triples]
@@ -166,21 +215,10 @@ async def run_vision_analysis(
     image_path: str,
     query: Optional[str],
     engine: str = "sam3",
-    provider: Optional[str] = None,  # kept for API compatibility, no longer used
+    provider: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run image analysis by calling SAM3 or RF-DETR directly.
-
-    Args:
-        image_path: local path to the uploaded image.
-        query: text prompt. Required for ``sam3``; optional for ``rfdetr``
-               (``None``/empty triggers prompt-free detection).
-        engine: "sam3" (default) or "rfdetr".
-        provider: ignored. Accepted for backwards-compatibility with the
-                  previous NOVA-Researcher-backed signature.
-
-    Returns:
-        {"text": "...", "image_base64": "data:image/png;base64,..." | None}
     """
     if provider:
         logger.debug(
@@ -192,22 +230,30 @@ async def run_vision_analysis(
     if engine_norm not in {"sam3", "rfdetr"}:
         raise ValueError(f"Invalid engine '{engine}'. Must be 'sam3' or 'rfdetr'.")
 
+    # Step 1: Clean and extract the exact object using the LLM
     norm_query = query.strip() if (query and query.strip()) else None
-    if engine_norm == "sam3" and not norm_query:
+    clean_query = None
+    
+    if norm_query:
+        clean_query = await _extract_objects_from_query(norm_query)
+        logger.info(f"LLM translated query: '{norm_query}' -> '{clean_query}'")
+
+    if engine_norm == "sam3" and not clean_query:
         raise ValueError("The SAM3 engine requires a non-empty query.")
 
     with open(image_path, "rb") as f:
         image_bytes = f.read()
     filename = os.path.basename(image_path) or "image.png"
 
-    q_log = norm_query[:100] if norm_query else "<none>"
+    q_log = clean_query[:100] if clean_query else "<none>"
     logger.info(f"Vision ({engine_norm}) direct call: '{q_log}' on {image_path}")
 
     try:
+        # Pass the newly cleaned query to the models
         if engine_norm == "sam3":
-            result = await _run_sam3(image_bytes, filename, norm_query or "")
+            result = await _run_sam3(image_bytes, filename, clean_query or "")
         else:
-            result = await _run_rfdetr(image_bytes, filename, norm_query)
+            result = await _run_rfdetr(image_bytes, filename, clean_query)
 
         logger.success(
             f"Vision ({engine_norm}) done. Report length: {len(result.get('text', ''))}, "
