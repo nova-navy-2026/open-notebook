@@ -6,6 +6,7 @@ Uses NOVA-Researcher GPTResearcher with the vision MCP config
 """
 
 import base64
+import math
 import os
 import re
 import uuid
@@ -27,6 +28,9 @@ _NOTE_ASSET_RE = re.compile(r"/api/vision/note-asset/([A-Za-z0-9_-]+\.[A-Za-z0-9
 
 _VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi"}
 
+_VIDEO_FRAME_STRIDE = 15   # sample every N-th frame by default
+_VIDEO_MAX_FRAMES   = 50   # hard cap; triggers adaptive stride when exceeded
+
 
 def _gemma_base_url() -> str:
     url = os.environ.get("GEMMA_BASE_URL", "").rstrip("/")
@@ -44,17 +48,53 @@ def _gemma_model() -> str:
     return raw.split(":")[-1] if raw else "google/gemma-4-31B-it"
 
 
-def _first_frame_as_jpeg(video_path: str) -> Optional[bytes]:
-    """Extract the first frame of a video and return it as JPEG bytes."""
+def _extract_video_frames(video_path: str) -> List[bytes]:
+    """
+    Sample frames from a video at _VIDEO_FRAME_STRIDE intervals, up to
+    _VIDEO_MAX_FRAMES total.  When the natural sample count would exceed the
+    cap, the stride is recalculated to spread exactly _VIDEO_MAX_FRAMES frames
+    evenly across the full video (adaptive stride).
+
+    For videos with a known frame count, seek-based sampling is used (fast).
+    For unknown-length sources, a sequential scan is used as fallback.
+    Returns a list of JPEG-encoded frame bytes (may be empty on failure).
+    """
     cap = cv2.VideoCapture(video_path)
+    frames: List[bytes] = []
     try:
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            return None
-        ok, buf = cv2.imencode(".jpg", frame)
-        return bytes(buf) if ok else None
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if total > 0:
+            # Seek-based sampling — fast for indexed containers
+            if total // _VIDEO_FRAME_STRIDE > _VIDEO_MAX_FRAMES:
+                stride = max(1, math.ceil(total / _VIDEO_MAX_FRAMES))
+            else:
+                stride = _VIDEO_FRAME_STRIDE
+            for pos in range(0, total, stride):
+                if len(frames) >= _VIDEO_MAX_FRAMES:
+                    break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    continue
+                ok, buf = cv2.imencode(".jpg", frame)
+                if ok:
+                    frames.append(bytes(buf))
+        else:
+            # Sequential scan for streams / containers without frame-count metadata
+            current = 0
+            while len(frames) < _VIDEO_MAX_FRAMES:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                if current % _VIDEO_FRAME_STRIDE == 0:
+                    ok, buf = cv2.imencode(".jpg", frame)
+                    if ok:
+                        frames.append(bytes(buf))
+                current += 1
     finally:
         cap.release()
+    return frames
 
 
 def _extract_context_images(context: str, assets_dir: str) -> List[Tuple[bytes, str]]:
@@ -62,7 +102,7 @@ def _extract_context_images(context: str, assets_dir: str) -> List[Tuple[bytes, 
     Scan context text for embedded /api/vision/note-asset/<filename> URLs.
     Returns a list of (image_bytes, mime_type) for each found asset:
     - images: read bytes directly
-    - videos: extract first frame as JPEG
+    - videos: sample up to _VIDEO_MAX_FRAMES frames (adaptive stride)
     """
     results: List[Tuple[bytes, str]] = []
     seen: set = set()
@@ -83,12 +123,13 @@ def _extract_context_images(context: str, assets_dir: str) -> List[Tuple[bytes, 
 
         ext = Path(filename).suffix.lower()
         if ext in _VIDEO_EXTENSIONS:
-            frame = _first_frame_as_jpeg(asset_path)
-            if frame:
-                results.append((frame, "image/jpeg"))
-                logger.info(f"Extracted first frame from video asset: {filename}")
+            frames = _extract_video_frames(asset_path)
+            if frames:
+                for frame in frames:
+                    results.append((frame, "image/jpeg"))
+                logger.info(f"Extracted {len(frames)} frames from video asset: {filename}")
             else:
-                logger.warning(f"Could not extract first frame from: {filename}")
+                logger.warning(f"Could not extract frames from: {filename}")
         else:
             with open(asset_path, "rb") as f:
                 img_bytes = f.read()
