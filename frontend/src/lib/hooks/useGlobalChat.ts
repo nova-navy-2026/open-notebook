@@ -17,7 +17,12 @@ import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
 import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
-import { fileMetadata, logChatAgentEvent, previewMessage } from '@/lib/chat-agents/logger'
+import {
+  createChatAgentRunId,
+  fileMetadata,
+  logChatAgentEvent,
+  previewMessage,
+} from '@/lib/chat-agents/logger'
 import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
 import {
   detectTextAgentInstruction,
@@ -225,6 +230,12 @@ export function useGlobalChat() {
     agentOptions?: ChatAgentUiOptions,
   ) => {
     let sessionId = currentSessionId
+    let activeTextAgentContext: {
+      instruction?: string
+      name?: string
+      startedAt?: number
+      runId?: string
+    } = {}
 
     // Auto-create session if none exists
     if (!sessionId) {
@@ -271,6 +282,7 @@ export function useGlobalChat() {
     try {
       const agentContext = {
         surface: 'global_chat' as const,
+        runId: createChatAgentRunId('global_chat'),
         sessionId,
         modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
       }
@@ -459,9 +471,15 @@ export function useGlobalChat() {
 
       const agentInstruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(message)
       if (agentInstruction) {
+        activeTextAgentContext = {
+          instruction: agentInstruction,
+          name: preferredAgent ?? 'text_instruction',
+          startedAt: performance.now(),
+          runId: agentContext.runId,
+        }
         logChatAgentEvent({
           surface: 'global_chat',
-          agent: 'text_instruction',
+          agent: activeTextAgentContext.name ?? 'text_instruction',
           event: 'selected',
           status: 'selected',
           context: agentContext,
@@ -532,9 +550,40 @@ export function useGlobalChat() {
         }
       }
 
+      if (activeTextAgentContext.instruction && activeTextAgentContext.startedAt) {
+        logChatAgentEvent({
+          surface: 'global_chat',
+          agent: activeTextAgentContext.name ?? 'text_instruction',
+          event: 'tool_call',
+          status: 'success',
+          context: agentContext,
+          duration_ms: Math.round(performance.now() - activeTextAgentContext.startedAt),
+          details: {
+            response_chars: aiContent.length,
+            instruction: activeTextAgentContext.instruction.split('\n')[0],
+          },
+        })
+      }
+
       await refetchCurrentSession()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      if (activeTextAgentContext.instruction && activeTextAgentContext.startedAt) {
+        logChatAgentEvent({
+          surface: 'global_chat',
+          agent: activeTextAgentContext.name ?? 'text_instruction',
+          event: 'tool_call',
+          status: 'failure',
+          context: {
+            surface: 'global_chat',
+            runId: activeTextAgentContext.runId,
+            sessionId,
+            modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
+          },
+          duration_ms: Math.round(performance.now() - activeTextAgentContext.startedAt),
+          details: { error: error.response?.data?.detail || error.message || String(error) },
+        })
+      }
       console.error('Error sending message:', error)
       const rawMessage = error.response?.data?.detail || error.message
       const messageText = getApiErrorMessage(

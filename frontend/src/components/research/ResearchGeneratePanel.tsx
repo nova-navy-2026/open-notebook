@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -46,6 +46,29 @@ export function ResearchGeneratePanel({
   const [modelId, setModelId] = useState("");
   const [fromTranscript, setFromTranscript] = useState(false);
 
+  const availableReportTypes = useMemo(() => reportTypes ?? [], [reportTypes]);
+  const availableTones = useMemo(() => tones ?? [], [tones]);
+  const selectedReportTypeInfo = useMemo(
+    () => availableReportTypes.find((rt) => rt.value === reportType),
+    [availableReportTypes, reportType],
+  );
+  const selectedToneInfo = useMemo(
+    () => availableTones.find((tn) => tn.value === tone),
+    [availableTones, tone],
+  );
+
+  const handleReportTypeChange = useCallback((value: string) => {
+    setReportType((current) => (current === value ? current : value));
+  }, []);
+
+  const handleToneChange = useCallback((value: string) => {
+    setTone((current) => (current === value ? current : value));
+  }, []);
+
+  const handleModelChange = useCallback((value: string) => {
+    setModelId((current) => (current === value ? current : value));
+  }, []);
+
   // Pre-fill the query when arriving from the Transcription page.
   // The transcript text is stashed in sessionStorage by that page so
   // we don't have to plumb a global store for a one-shot hand-off.
@@ -90,6 +113,21 @@ export function ResearchGeneratePanel({
       setModelId(modelDefaults.default_chat_model);
     }
   }, [modelDefaults?.default_chat_model, modelId]);
+
+  useEffect(() => {
+    if (
+      availableReportTypes.length > 0 &&
+      !availableReportTypes.some((rt) => rt.value === reportType)
+    ) {
+      setReportType(availableReportTypes[0].value);
+    }
+  }, [availableReportTypes, reportType]);
+
+  useEffect(() => {
+    if (availableTones.length > 0 && !availableTones.some((tn) => tn.value === tone)) {
+      setTone(availableTones[0].value);
+    }
+  }, [availableTones, tone]);
 
   const isLoading = typesLoading || tonesLoading;
   const isSubmitting = generateMutation.isPending;
@@ -161,15 +199,15 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent className="space-y-3">
             <Select
-              value={reportType}
-              onValueChange={setReportType}
-              disabled={isSubmitting}
+              value={selectedReportTypeInfo ? reportType : undefined}
+              onValueChange={handleReportTypeChange}
+              disabled={isSubmitting || availableReportTypes.length === 0}
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder={t.research?.reportType ?? "Report Type"} />
               </SelectTrigger>
               <SelectContent>
-                {reportTypes?.map((rt) => (
+                {availableReportTypes.map((rt) => (
                   <SelectItem key={rt.value} value={rt.value}>
                     {rt.label}
                     {rt.speed ? ` (${rt.speed})` : ""}
@@ -178,10 +216,9 @@ export function ResearchGeneratePanel({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {reportTypes?.find((rt) => rt.value === reportType)
-                ?.description ?? ""}
+              {selectedReportTypeInfo?.description ?? ""}
               {" - "}
-              {reportTypes?.find((rt) => rt.value === reportType)?.speed ?? ""}
+              {selectedReportTypeInfo?.speed ?? ""}
             </p>
           </CardContent>
         </Card>
@@ -195,15 +232,15 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent>
             <Select
-              value={tone}
-              onValueChange={setTone}
-              disabled={isSubmitting}
+              value={selectedToneInfo ? tone : undefined}
+              onValueChange={handleToneChange}
+              disabled={isSubmitting || availableTones.length === 0}
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder={t.research?.toneLabel ?? "Writing Tone"} />
               </SelectTrigger>
               <SelectContent>
-                {tones?.map((tn) => (
+                {availableTones.map((tn) => (
                   <SelectItem key={tn.value} value={tn.value}>
                     {tn.label} — {tn.description}
                   </SelectItem>
@@ -229,7 +266,7 @@ export function ResearchGeneratePanel({
             <ModelSelector
               modelType="language"
               value={modelId}
-              onChange={setModelId}
+              onChange={handleModelChange}
               placeholder={
                 t.research?.selectModelPlaceholder ?? "Select a model..."
               }

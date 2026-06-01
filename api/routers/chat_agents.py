@@ -18,6 +18,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user_id
+from api.chat_agent_log_service import (
+    build_chat_agent_event,
+    chat_agent_tool_log_path,
+    write_chat_agent_event,
+)
 from api.chat_agents.registry import (
     agent_catalog_for_prompt,
     agent_names_for_prompt,
@@ -44,6 +49,7 @@ class ChatAgentLogRequest(BaseModel):
     agent: str = Field(..., min_length=1, max_length=80)
     event: str = Field(..., min_length=1, max_length=80)
     status: Literal["started", "selected", "success", "skipped", "failure", "info"] = "info"
+    run_id: Optional[str] = Field(None, max_length=180)
     session_id: Optional[str] = Field(None, max_length=180)
     notebook_id: Optional[str] = Field(None, max_length=180)
     model_id: Optional[str] = Field(None, max_length=180)
@@ -56,6 +62,10 @@ class ChatAgentLogRequest(BaseModel):
 class ChatAgentRouteRequest(BaseModel):
     surface: Literal["global_chat", "notebook_chat"]
     message: str = Field(..., min_length=1)
+    run_id: Optional[str] = Field(None, max_length=180)
+    session_id: Optional[str] = Field(None, max_length=180)
+    notebook_id: Optional[str] = Field(None, max_length=180)
+    model_id: Optional[str] = Field(None, max_length=180)
     has_file: bool = False
     file_type: Optional[str] = None
     file_name: Optional[str] = None
@@ -277,6 +287,44 @@ Mensagem:
 """.strip()
 
 
+async def _write_structured_router_log(
+    *,
+    request: ChatAgentRouteRequest,
+    user_id: str,
+    status: Literal["success", "skipped", "failure"],
+    duration_ms: int,
+    details: Dict[str, Any],
+) -> None:
+    await write_chat_agent_event(
+        build_chat_agent_event(
+            source="backend",
+            user_id=user_id,
+            surface=request.surface,
+            run_id=request.run_id,
+            session_id=request.session_id,
+            notebook_id=request.notebook_id,
+            model_id=request.model_id,
+            agent="agent_router",
+            event="router_call",
+            status=status,
+            message_preview=request.message[:180],
+            file={
+                "name": request.file_name,
+                "type": request.file_type,
+            }
+            if request.has_file
+            else None,
+            duration_ms=duration_ms,
+            details={
+                "has_file": request.has_file,
+                "visual_follow_up": request.visual_follow_up,
+                "deep_research_enabled": request.deep_research_enabled,
+                **details,
+            },
+        )
+    )
+
+
 @router.post("/chat-agents/log")
 async def log_chat_agent_event(
     event: ChatAgentLogRequest,
@@ -290,12 +338,14 @@ async def log_chat_agent_event(
     }
     logger.info(
         "ChatAgent event | user={} surface={} agent={} event={} status={} "
-        "session={} notebook={} model={} duration_ms={} file={} message_preview={!r} details={}",
+        "run={} session={} notebook={} model={} duration_ms={} file={} "
+        "message_preview={!r} details={}",
         user_id or "anonymous",
         event.surface,
         event.agent,
         event.event,
         event.status,
+        event.run_id,
         event.session_id,
         event.notebook_id,
         event.model_id,
@@ -304,7 +354,28 @@ async def log_chat_agent_event(
         event.message_preview,
         safe_details,
     )
-    return {"success": True}
+    structured = build_chat_agent_event(
+        source="frontend",
+        user_id=user_id,
+        surface=event.surface,
+        run_id=event.run_id,
+        session_id=event.session_id,
+        notebook_id=event.notebook_id,
+        model_id=event.model_id,
+        agent=event.agent,
+        event=event.event,
+        status=event.status,
+        message_preview=event.message_preview,
+        file=event.file.model_dump(exclude_none=True) if event.file else None,
+        duration_ms=event.duration_ms,
+        details=safe_details,
+    )
+    written = await write_chat_agent_event(structured)
+    return {
+        "success": True,
+        "structured_log_written": written,
+        "log_path": str(chat_agent_tool_log_path()),
+    }
 
 
 @router.get("/chat-agents", response_model=list[ChatAgentCatalogItem])
@@ -329,7 +400,20 @@ async def route_chat_agent(
 ):
     """Ask Gemma to choose the best chat agent for this turn."""
     if not _agent_router_enabled():
-        return _fallback_route(request, "Gemma agent router disabled.")
+        response = _fallback_route(request, "Gemma agent router disabled.")
+        await _write_structured_router_log(
+            request=request,
+            user_id=user_id,
+            status="skipped",
+            duration_ms=0,
+            details={
+                "reason": "router_disabled",
+                "selected_agent": response.agent,
+                "confidence": response.confidence,
+                "route_source": response.source,
+            },
+        )
+        return response
 
     started_at = perf_counter()
     logger.info(
@@ -369,15 +453,44 @@ async def route_chat_agent(
             response.reason,
             response.parameters,
         )
+        await _write_structured_router_log(
+            request=request,
+            user_id=user_id,
+            status="success",
+            duration_ms=round((perf_counter() - started_at) * 1000),
+            details={
+                "selected_agent": response.agent,
+                "confidence": response.confidence,
+                "reason": response.reason,
+                "route_source": response.source,
+                "handler": response.handler,
+                "parameters": response.parameters,
+            },
+        )
         return response
     except Exception as e:
+        duration_ms = round((perf_counter() - started_at) * 1000)
         logger.error(
             "ChatAgent router failure | user={} surface={} duration_ms={} "
             "error_type={} error={}",
             user_id or "anonymous",
             request.surface,
-            round((perf_counter() - started_at) * 1000),
+            duration_ms,
             type(e).__name__,
             str(e) or repr(e),
         )
-        return _fallback_route(request, f"Gemma agent router failed: {type(e).__name__}")
+        response = _fallback_route(request, f"Gemma agent router failed: {type(e).__name__}")
+        await _write_structured_router_log(
+            request=request,
+            user_id=user_id,
+            status="failure",
+            duration_ms=duration_ms,
+            details={
+                "error_type": type(e).__name__,
+                "error": str(e) or repr(e),
+                "selected_agent": response.agent,
+                "confidence": response.confidence,
+                "route_source": response.source,
+            },
+        )
+        return response

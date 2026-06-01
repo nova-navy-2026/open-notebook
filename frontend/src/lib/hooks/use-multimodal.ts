@@ -13,7 +13,12 @@ import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
 import { runNotebookSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
-import { fileMetadata, logChatAgentEvent, previewMessage } from '@/lib/chat-agents/logger'
+import {
+  createChatAgentRunId,
+  fileMetadata,
+  logChatAgentEvent,
+  previewMessage,
+} from '@/lib/chat-agents/logger'
 import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
 import {
   applyTextAgentInstruction,
@@ -246,6 +251,7 @@ export function useMultimodalChat({
       try {
         const agentContext = {
           surface: 'notebook_chat' as const,
+          runId: createChatAgentRunId('notebook_chat'),
           notebookId,
         }
         const routerDecision = await routeChatAgentWithGemma({
@@ -390,7 +396,7 @@ export function useMultimodalChat({
         const content = await formatMultimodalResponse(result)
         logChatAgentEvent({
           surface: 'notebook_chat',
-          agent: isVisualFile(visualFile) ? 'multimodal' : 'notebook_chat',
+          agent: isVisualFile(visualFile) ? 'multimodal' : (preferredAgent ?? 'notebook_chat'),
           event: 'tool_call',
           status: 'success',
           context: agentContext,

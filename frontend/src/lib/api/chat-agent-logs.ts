@@ -5,6 +5,7 @@ export interface ChatAgentLogPayload {
   agent: string
   event: string
   status?: 'started' | 'selected' | 'success' | 'skipped' | 'failure' | 'info'
+  run_id?: string
   session_id?: string
   notebook_id?: string
   model_id?: string
@@ -23,6 +24,10 @@ export type ChatAgentName = string
 export interface ChatAgentRouteRequest {
   surface: 'global_chat' | 'notebook_chat'
   message: string
+  run_id?: string
+  session_id?: string
+  notebook_id?: string
+  model_id?: string
   has_file?: boolean
   file_type?: string
   file_name?: string
@@ -55,7 +60,11 @@ export const chatAgentLogsApi = {
   },
 
   log: async (payload: ChatAgentLogPayload) => {
-    const response = await apiClient.post<{ success: boolean }>(
+    const response = await apiClient.post<{
+      success: boolean
+      structured_log_written?: boolean
+      log_path?: string
+    }>(
       '/chat-agents/log',
       payload,
     )

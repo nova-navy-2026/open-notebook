@@ -20,6 +20,10 @@ export async function routeChatAgentWithGemma({
     return await chatAgentLogsApi.route({
       surface: context.surface,
       message,
+      run_id: context.runId,
+      session_id: context.sessionId,
+      notebook_id: context.notebookId,
+      model_id: context.modelId,
       has_file: Boolean(file),
       file_type: getAgentFileType(file),
       file_name: file?.name,

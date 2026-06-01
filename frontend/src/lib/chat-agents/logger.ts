@@ -3,9 +3,17 @@ import type { ChatAgentLogPayload } from '@/lib/api/chat-agent-logs'
 
 export interface ChatAgentRunContext {
   surface: ChatAgentLogPayload['surface']
+  runId?: string
   sessionId?: string
   notebookId?: string
   modelId?: string
+}
+
+export function createChatAgentRunId(surface: ChatAgentRunContext['surface']): string {
+  const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return `${surface}:${randomId}`
 }
 
 export function previewMessage(message: string, limit = 180): string {
@@ -29,6 +37,7 @@ export function logChatAgentEvent(
   const { context, ...event } = payload
   void chatAgentLogsApi.log({
     ...event,
+    run_id: context?.runId,
     session_id: context?.sessionId,
     notebook_id: context?.notebookId,
     model_id: context?.modelId,
