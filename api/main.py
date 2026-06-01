@@ -49,6 +49,7 @@ from api.routers import (
     opensearch,
     permissions,
     podcasts,
+    prompt_improvement,
     research,
     vision,
     search,
@@ -514,6 +515,7 @@ app.include_router(global_chat.router, prefix="/api", tags=["global-chat"])
 app.include_router(vision.router, prefix="/api", tags=["vision"])
 app.include_router(navigation.router, prefix="/api", tags=["navigation"])
 app.include_router(transcription.router, prefix="/api", tags=["transcription"])
+app.include_router(prompt_improvement.router, prefix="/api", tags=["prompt-improvement"])
 
 
 @app.get("/")

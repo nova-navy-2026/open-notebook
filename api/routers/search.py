@@ -106,6 +106,22 @@ async def stream_ask_response(
                 final_data = {"type": "final_answer", "content": final_answer}
                 yield f"data: {json.dumps(final_data)}\n\n"
 
+            elif "verify_answer" in chunk:
+                # Iterative self-check pass: may replace `final_answer` with a
+                # grounded revision and/or report unsupported claims.
+                update = chunk["verify_answer"] or {}
+                revised = update.get("final_answer")
+                issues = update.get("unsupported_issues", [])
+                if revised:
+                    final_answer = revised
+                verify_data = {
+                    "type": "verification",
+                    "revised": bool(revised),
+                    "content": revised,
+                    "issues": issues,
+                }
+                yield f"data: {json.dumps(verify_data)}\n\n"
+
         # Send completion signal
         completion_data = {"type": "complete", "final_answer": final_answer}
         yield f"data: {json.dumps(completion_data)}\n\n"
