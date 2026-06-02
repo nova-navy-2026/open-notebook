@@ -25,6 +25,11 @@ export const transcriptionApi = {
       language?: string
       diarize?: boolean
       numSpeakers?: number
+      surface?: 'global_chat' | 'notebook_chat'
+      run_id?: string
+      session_id?: string
+      notebook_id?: string
+      model_id?: string
     },
   ) => {
     const form = new FormData()
@@ -34,6 +39,11 @@ export const transcriptionApi = {
     if (options?.numSpeakers) {
       form.append('num_speakers', String(options.numSpeakers))
     }
+    if (options?.surface) form.append('surface', options.surface)
+    if (options?.run_id) form.append('run_id', options.run_id)
+    if (options?.session_id) form.append('session_id', options.session_id)
+    if (options?.notebook_id) form.append('notebook_id', options.notebook_id)
+    if (options?.model_id) form.append('model_id', options.model_id)
     const response = await apiClient.post<TranscriptionResult>(
       '/transcription/transcribe',
       form,

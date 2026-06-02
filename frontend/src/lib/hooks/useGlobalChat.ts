@@ -425,6 +425,10 @@ export function useGlobalChat() {
           force_engine: agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto'
             ? agentOptions.vision.engine
             : undefined,
+          surface: agentContext.surface,
+          run_id: agentContext.runId,
+          session_id: agentContext.sessionId,
+          model_id: agentContext.modelId,
         })
         const content = await formatMultimodalResponse(result)
         logChatAgentEvent({

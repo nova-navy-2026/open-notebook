@@ -63,16 +63,6 @@ export function useTranslation() {
             lastResetTime.current = now
           }
 
-          if (typeof prop === 'string') {
-             const key = path ? `${path}.${prop}` : prop;
-             accessCounts.current[key] = (accessCounts.current[key] || 0) + 1;
-             
-             if (accessCounts.current[key] > 1000) {
-               console.error(`[useTranslation] INFINITE LOOP DETECTED on key: "${key}". Breaking recursion.`);
-               return key; // Force break
-             }
-          }
-
           // Handle Symbol properties immediately
           if (typeof prop === 'symbol') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,6 +82,15 @@ export function useTranslation() {
           // since target is a function and has built-in properties like 'name'
           // that would shadow translation keys)
           const result = i18nTranslateCopy(currentPath, { returnObjects: true });
+
+          if (typeof prop === 'string' && path) {
+             accessCounts.current[currentPath] = (accessCounts.current[currentPath] || 0) + 1;
+
+             if (accessCounts.current[currentPath] > 5000) {
+               console.warn(`[useTranslation] Possible recursive translation access on key: "${currentPath}". Breaking traversal.`);
+               return currentPath; // Force break
+             }
+          }
 
           // If it's a leaf string, return it directly
           if (typeof result === 'string') {

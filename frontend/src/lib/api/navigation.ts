@@ -3,6 +3,11 @@ import apiClient from './client'
 export interface NavigationRouteRequest {
   location_a: string
   location_b: string
+  surface?: 'global_chat' | 'notebook_chat'
+  run_id?: string
+  session_id?: string
+  notebook_id?: string
+  model_id?: string
 }
 
 export interface NavigationRouteResponse {

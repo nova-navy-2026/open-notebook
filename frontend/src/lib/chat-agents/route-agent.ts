@@ -34,6 +34,11 @@ export async function runRouteAgent(
     const result = await navigationApi.route({
       location_a: route.from,
       location_b: route.to,
+      surface: context?.surface,
+      run_id: context?.runId,
+      session_id: context?.sessionId,
+      notebook_id: context?.notebookId,
+      model_id: context?.modelId,
     })
     logChatAgentEvent({
       surface: context?.surface ?? 'global_chat',

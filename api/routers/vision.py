@@ -16,15 +16,17 @@ import sys
 import uuid
 from pathlib import Path
 from time import perf_counter
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from api.auth import get_current_user_id
+from api.chat_agent_log_service import build_chat_agent_event, write_chat_agent_event
 from open_notebook.research.vision_service import run_vision_analysis
 from open_notebook.research.video_service import run_video_tracking
 
@@ -306,6 +308,40 @@ NOTE_ASSET_MIME_TO_EXT = {
 MAX_NOTE_ASSET_SIZE = 50 * 1024 * 1024
 
 DATA_URL_RE = re.compile(r"^data:([^;,]+);base64,(.+)$", re.DOTALL)
+
+
+async def _write_multimodal_tool_log(
+    *,
+    user_id: str,
+    surface: str,
+    run_id: Optional[str],
+    session_id: Optional[str],
+    notebook_id: Optional[str],
+    model_id: Optional[str],
+    status: str,
+    duration_ms: Optional[int],
+    query: str,
+    file: Optional[Dict[str, Any]] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    await write_chat_agent_event(
+        build_chat_agent_event(
+            source="backend",
+            user_id=user_id,
+            surface=surface or "global_chat",
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            agent="multimodal",
+            event="tool_call",
+            status=status,
+            message_preview=query[:180],
+            file=file,
+            duration_ms=duration_ms,
+            details=details or {},
+        )
+    )
 
 _DETECTION_WORDS = {
     "detect", "detecta", "detetar", "detectar", "detection",
@@ -790,7 +826,13 @@ async def multimodal_chat(
     context: Optional[str] = Form(None),
     mode: str = Form("chat"),
     force_engine: Optional[str] = Form(None),
+    surface: str = Form("global_chat"),
+    run_id: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    notebook_id: Optional[str] = Form(None),
+    model_id: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
     Chat with notebook context using Gemma (vision-capable LLM).
@@ -838,6 +880,11 @@ async def multimodal_chat(
                 ),
             )
         file_bytes = await file.read()
+        log_file = {
+            "name": file.filename,
+            "type": file.content_type,
+            "size": len(file_bytes),
+        }
         if ext in ALLOWED_IMAGE_EXTENSIONS and len(file_bytes) > MAX_IMAGE_SIZE:
             raise HTTPException(status_code=413, detail="Image exceeds 20 MB limit.")
         if ext in ALLOWED_VIDEO_EXTENSIONS and len(file_bytes) > MAX_VIDEO_SIZE:
@@ -856,6 +903,19 @@ async def multimodal_chat(
                 len(file_bytes),
                 query[:160],
             )
+            await _write_multimodal_tool_log(
+                user_id=user_id,
+                surface=surface,
+                run_id=run_id,
+                session_id=session_id,
+                notebook_id=notebook_id,
+                model_id=model_id,
+                status="started",
+                duration_ms=None,
+                query=query,
+                file=log_file,
+                details={"route": "ocr", "media": "image"},
+            )
             mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
             try:
                 result = await _run_ocr_with_fallback(
@@ -872,7 +932,45 @@ async def multimodal_chat(
                     round((perf_counter() - started_at) * 1000),
                     len(result.get("text") or ""),
                 )
+                await _write_multimodal_tool_log(
+                    user_id=user_id,
+                    surface=surface,
+                    run_id=run_id,
+                    session_id=session_id,
+                    notebook_id=notebook_id,
+                    model_id=model_id,
+                    status="success",
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    query=query,
+                    file=log_file,
+                    details={
+                        "route": "ocr",
+                        "media": "image",
+                        "engine": result.get("engine"),
+                        "response_chars": len(result.get("text") or ""),
+                    },
+                )
                 return result
+            except Exception as e:
+                await _write_multimodal_tool_log(
+                    user_id=user_id,
+                    surface=surface,
+                    run_id=run_id,
+                    session_id=session_id,
+                    notebook_id=notebook_id,
+                    model_id=model_id,
+                    status="failure",
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    query=query,
+                    file=log_file,
+                    details={
+                        "route": "ocr",
+                        "media": "image",
+                        "error_type": type(e).__name__,
+                        "error": str(e) or repr(e),
+                    },
+                )
+                raise
             finally:
                 try:
                     os.remove(saved_path)
@@ -891,6 +989,19 @@ async def multimodal_chat(
                 file.filename,
                 len(file_bytes),
                 query[:160],
+            )
+            await _write_multimodal_tool_log(
+                user_id=user_id,
+                surface=surface,
+                run_id=run_id,
+                session_id=session_id,
+                notebook_id=notebook_id,
+                model_id=model_id,
+                status="started",
+                duration_ms=None,
+                query=query,
+                file=log_file,
+                details={"route": "image_analysis", "engine": engine, "target": target},
             )
             try:
                 result = await run_vision_analysis(
@@ -919,6 +1030,24 @@ async def multimodal_chat(
                     round((perf_counter() - started_at) * 1000),
                     bool(response.get("image_base64")),
                 )
+                await _write_multimodal_tool_log(
+                    user_id=user_id,
+                    surface=surface,
+                    run_id=run_id,
+                    session_id=session_id,
+                    notebook_id=notebook_id,
+                    model_id=model_id,
+                    status="success",
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    query=query,
+                    file=log_file,
+                    details={
+                        "route": "image_analysis",
+                        "engine": engine,
+                        "target": target,
+                        "has_image_result": bool(response.get("image_base64")),
+                    },
+                )
                 return response
             except Exception as e:
                 detail = str(e) or repr(e)
@@ -929,6 +1058,25 @@ async def multimodal_chat(
                     round((perf_counter() - started_at) * 1000),
                     type(e).__name__,
                     detail,
+                )
+                await _write_multimodal_tool_log(
+                    user_id=user_id,
+                    surface=surface,
+                    run_id=run_id,
+                    session_id=session_id,
+                    notebook_id=notebook_id,
+                    model_id=model_id,
+                    status="failure",
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    query=query,
+                    file=log_file,
+                    details={
+                        "route": "image_analysis",
+                        "engine": engine,
+                        "target": target,
+                        "error_type": type(e).__name__,
+                        "error": detail,
+                    },
                 )
                 if engine == "sam3":
                     return await _image_analysis_fallback_response(
@@ -966,6 +1114,19 @@ async def multimodal_chat(
                 len(file_bytes),
                 query[:160],
             )
+            await _write_multimodal_tool_log(
+                user_id=user_id,
+                surface=surface,
+                run_id=run_id,
+                session_id=session_id,
+                notebook_id=notebook_id,
+                model_id=model_id,
+                status="started",
+                duration_ms=None,
+                query=query,
+                file=log_file,
+                details={"route": "video_tracking", "engine": engine, "target": target},
+            )
             try:
                 result = await run_video_tracking(
                     video_path=saved_path,
@@ -997,7 +1158,46 @@ async def multimodal_chat(
                     round((perf_counter() - started_at) * 1000),
                     bool(response.get("video_base64")),
                 )
+                await _write_multimodal_tool_log(
+                    user_id=user_id,
+                    surface=surface,
+                    run_id=run_id,
+                    session_id=session_id,
+                    notebook_id=notebook_id,
+                    model_id=model_id,
+                    status="success",
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    query=query,
+                    file=log_file,
+                    details={
+                        "route": "video_tracking",
+                        "engine": engine,
+                        "target": target,
+                        "has_video_result": bool(response.get("video_base64")),
+                    },
+                )
                 return response
+            except Exception as e:
+                await _write_multimodal_tool_log(
+                    user_id=user_id,
+                    surface=surface,
+                    run_id=run_id,
+                    session_id=session_id,
+                    notebook_id=notebook_id,
+                    model_id=model_id,
+                    status="failure",
+                    duration_ms=round((perf_counter() - started_at) * 1000),
+                    query=query,
+                    file=log_file,
+                    details={
+                        "route": "video_tracking",
+                        "engine": engine,
+                        "target": target,
+                        "error_type": type(e).__name__,
+                        "error": str(e) or repr(e),
+                    },
+                )
+                raise
             finally:
                 try:
                     os.remove(saved_path)
@@ -1021,6 +1221,19 @@ async def multimodal_chat(
                         len(file_bytes),
                         query[:160],
                     )
+                    await _write_multimodal_tool_log(
+                        user_id=user_id,
+                        surface=surface,
+                        run_id=run_id,
+                        session_id=session_id,
+                        notebook_id=notebook_id,
+                        model_id=model_id,
+                        status="started",
+                        duration_ms=None,
+                        query=query,
+                        file=log_file,
+                        details={"route": "ocr", "media": "video_frame"},
+                    )
                     frame_id = uuid.uuid4().hex[:12]
                     frame_path = os.path.abspath(
                         os.path.join(VISION_UPLOADS_DIR, f"{frame_id}.jpg")
@@ -1042,7 +1255,45 @@ async def multimodal_chat(
                             round((perf_counter() - started_at) * 1000),
                             len(result.get("text") or ""),
                         )
+                        await _write_multimodal_tool_log(
+                            user_id=user_id,
+                            surface=surface,
+                            run_id=run_id,
+                            session_id=session_id,
+                            notebook_id=notebook_id,
+                            model_id=model_id,
+                            status="success",
+                            duration_ms=round((perf_counter() - started_at) * 1000),
+                            query=query,
+                            file=log_file,
+                            details={
+                                "route": "ocr",
+                                "media": "video_frame",
+                                "engine": result.get("engine"),
+                                "response_chars": len(result.get("text") or ""),
+                            },
+                        )
                         return result
+                    except Exception as e:
+                        await _write_multimodal_tool_log(
+                            user_id=user_id,
+                            surface=surface,
+                            run_id=run_id,
+                            session_id=session_id,
+                            notebook_id=notebook_id,
+                            model_id=model_id,
+                            status="failure",
+                            duration_ms=round((perf_counter() - started_at) * 1000),
+                            query=query,
+                            file=log_file,
+                            details={
+                                "route": "ocr",
+                                "media": "video_frame",
+                                "error_type": type(e).__name__,
+                                "error": str(e) or repr(e),
+                            },
+                        )
+                        raise
                     finally:
                         try:
                             os.remove(saved_path)
@@ -1074,6 +1325,24 @@ async def multimodal_chat(
     )
 
     try:
+        await _write_multimodal_tool_log(
+            user_id=user_id,
+            surface=surface,
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            status="started",
+            duration_ms=None,
+            query=query,
+            file=locals().get("log_file"),
+            details={
+                "route": "gemma_multimodal",
+                "mode": mode,
+                "images": len(images or []),
+                "context_len": len(context) if context else 0,
+            },
+        )
         text = await _call_gemma(prompt, images or None, purpose="multimodal_chat")
         logger.success(
             "ChatAgent tool success | agent=multimodal route=gemma_multimodal "
@@ -1081,6 +1350,24 @@ async def multimodal_chat(
             round((perf_counter() - started_at) * 1000),
             len(images or []),
             len(text or ""),
+        )
+        await _write_multimodal_tool_log(
+            user_id=user_id,
+            surface=surface,
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            status="success",
+            duration_ms=round((perf_counter() - started_at) * 1000),
+            query=query,
+            file=locals().get("log_file"),
+            details={
+                "route": "gemma_multimodal",
+                "mode": mode,
+                "images": len(images or []),
+                "response_chars": len(text or ""),
+            },
         )
         return {"text": text, "route": "gemma_multimodal"}
     except RuntimeError as e:

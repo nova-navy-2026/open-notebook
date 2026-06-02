@@ -42,6 +42,11 @@ export async function runTranscriptionAgent(
       diarize,
       language: options?.language,
       numSpeakers: options?.numSpeakers,
+      surface: context?.surface,
+      run_id: context?.runId,
+      session_id: context?.sessionId,
+      notebook_id: context?.notebookId,
+      model_id: context?.modelId,
     })
     logChatAgentEvent({
       surface: context?.surface ?? 'global_chat',

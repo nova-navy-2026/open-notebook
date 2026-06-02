@@ -391,6 +391,9 @@ export function useMultimodalChat({
           force_engine: agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto'
             ? agentOptions.vision.engine
             : undefined,
+          surface: agentContext.surface,
+          run_id: agentContext.runId,
+          notebook_id: agentContext.notebookId,
         })
 
         const content = await formatMultimodalResponse(result)

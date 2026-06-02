@@ -13,9 +13,11 @@ from pathlib import Path
 from time import perf_counter
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from loguru import logger
 
+from api.auth import get_current_user_id
+from api.chat_agent_log_service import build_chat_agent_event, write_chat_agent_event
 from open_notebook.research.transcription_service import (
     fetch_capabilities,
     run_transcription,
@@ -41,6 +43,40 @@ ALLOWED_AUDIO_EXTENSIONS = {
     ".wma",
 }
 MAX_AUDIO_SIZE = 200 * 1024 * 1024  # 200 MB
+
+
+async def _write_transcription_tool_log(
+    *,
+    user_id: str,
+    surface: str,
+    run_id: Optional[str],
+    session_id: Optional[str],
+    notebook_id: Optional[str],
+    model_id: Optional[str],
+    status: str,
+    duration_ms: Optional[int],
+    filename: Optional[str],
+    content_type: Optional[str],
+    size: Optional[int],
+    details: dict,
+) -> None:
+    await write_chat_agent_event(
+        build_chat_agent_event(
+            source="backend",
+            user_id=user_id,
+            surface=surface or "global_chat",
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            agent="transcription",
+            event="tool_call",
+            status=status,
+            file={"name": filename, "type": content_type, "size": size},
+            duration_ms=duration_ms,
+            details=details,
+        )
+    )
 
 
 @router.get("/transcription/capabilities")
@@ -72,6 +108,12 @@ async def transcribe(
     num_speakers: Optional[int] = Form(None),
     min_speakers: Optional[int] = Form(None),
     max_speakers: Optional[int] = Form(None),
+    surface: str = Form("global_chat"),
+    run_id: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    notebook_id: Optional[str] = Form(None),
+    model_id: Optional[str] = Form(None),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
     Transcribe an uploaded audio file by forwarding it to the
@@ -123,6 +165,28 @@ async def transcribe(
         norm_lang,
         diarize,
         (num_speakers, min_speakers, max_speakers),
+    )
+    await _write_transcription_tool_log(
+        user_id=user_id,
+        surface=surface,
+        run_id=run_id,
+        session_id=session_id,
+        notebook_id=notebook_id,
+        model_id=model_id,
+        status="started",
+        duration_ms=None,
+        filename=audio.filename,
+        content_type=audio.content_type,
+        size=len(audio_bytes),
+        details={
+            "language": norm_lang,
+            "diarize": diarize,
+            "speakers": {
+                "num": num_speakers,
+                "min": min_speakers,
+                "max": max_speakers,
+            },
+        },
     )
 
     # Resolve which speech-to-text engine the user picked on the
@@ -211,6 +275,26 @@ async def transcribe(
                 len(result.get("dialog") or result.get("text") or ""),
                 result.get("diarized"),
             )
+            await _write_transcription_tool_log(
+                user_id=user_id,
+                surface=surface,
+                run_id=run_id,
+                session_id=session_id,
+                notebook_id=notebook_id,
+                model_id=model_id,
+                status="success",
+                duration_ms=round((perf_counter() - started_at) * 1000),
+                filename=audio.filename,
+                content_type=audio.content_type,
+                size=len(audio_bytes),
+                details={
+                    "provider": result.get("provider"),
+                    "model": result.get("model"),
+                    "language": result.get("language"),
+                    "diarized": result.get("diarized"),
+                    "response_chars": len(result.get("dialog") or result.get("text") or ""),
+                },
+            )
             return result
 
         # Default path: local NOVA-Researcher whisper server
@@ -236,6 +320,26 @@ async def transcribe(
             len(result.get("dialog") or result.get("text") or ""),
             result.get("diarized"),
         )
+        await _write_transcription_tool_log(
+            user_id=user_id,
+            surface=surface,
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            status="success",
+            duration_ms=round((perf_counter() - started_at) * 1000),
+            filename=audio.filename,
+            content_type=audio.content_type,
+            size=len(audio_bytes),
+            details={
+                "provider": result.get("provider"),
+                "model": result.get("model"),
+                "language": result.get("language"),
+                "diarized": result.get("diarized"),
+                "response_chars": len(result.get("dialog") or result.get("text") or ""),
+            },
+        )
         return result
 
     except HTTPException:
@@ -246,6 +350,20 @@ async def transcribe(
             "duration_ms={} error={}",
             round((perf_counter() - started_at) * 1000),
             e,
+        )
+        await _write_transcription_tool_log(
+            user_id=user_id,
+            surface=surface,
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            status="failure",
+            duration_ms=round((perf_counter() - started_at) * 1000),
+            filename=audio.filename,
+            content_type=audio.content_type,
+            size=len(audio_bytes),
+            details={"error_type": type(e).__name__, "error": str(e) or repr(e)},
         )
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
     finally:
