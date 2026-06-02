@@ -6,12 +6,9 @@ Uses NOVA-Researcher GPTResearcher with the vision MCP config
 """
 
 import base64
-<<<<<<< HEAD
-import math
-=======
 import asyncio
 import json
->>>>>>> TOUCAN-try
+import math
 import os
 import re
 import subprocess
@@ -56,7 +53,6 @@ def _gemma_model() -> str:
     return raw.split(":")[-1] if raw else "google/gemma-4-31B-it"
 
 
-<<<<<<< HEAD
 def _extract_video_frames(video_path: str) -> List[bytes]:
     """
     Sample frames from a video at _VIDEO_FRAME_STRIDE intervals, up to
@@ -68,7 +64,44 @@ def _extract_video_frames(video_path: str) -> List[bytes]:
     For unknown-length sources, a sequential scan is used as fallback.
     Returns a list of JPEG-encoded frame bytes (may be empty on failure).
     """
-=======
+    cap = cv2.VideoCapture(video_path)
+    frames: List[bytes] = []
+    try:
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if total > 0:
+            # Seek-based sampling - fast for indexed containers.
+            if total // _VIDEO_FRAME_STRIDE > _VIDEO_MAX_FRAMES:
+                stride = max(1, math.ceil(total / _VIDEO_MAX_FRAMES))
+            else:
+                stride = _VIDEO_FRAME_STRIDE
+            for pos in range(0, total, stride):
+                if len(frames) >= _VIDEO_MAX_FRAMES:
+                    break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    continue
+                ok, buf = cv2.imencode(".jpg", frame)
+                if ok:
+                    frames.append(bytes(buf))
+        else:
+            # Sequential scan for streams / containers without frame-count metadata.
+            current = 0
+            while len(frames) < _VIDEO_MAX_FRAMES:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                if current % _VIDEO_FRAME_STRIDE == 0:
+                    ok, buf = cv2.imencode(".jpg", frame)
+                    if ok:
+                        frames.append(bytes(buf))
+                current += 1
+    finally:
+        cap.release()
+    return frames
+
+
 def _gemma_multimodal_timeout() -> float:
     try:
         return float(os.environ.get("GEMMA_MULTIMODAL_TIMEOUT", "600"))
@@ -122,43 +155,15 @@ def _docling_ocr_enabled() -> bool:
 
 def _first_frame_as_jpeg(video_path: str) -> Optional[bytes]:
     """Extract the first frame of a video and return it as JPEG bytes."""
->>>>>>> TOUCAN-try
     cap = cv2.VideoCapture(video_path)
-    frames: List[bytes] = []
     try:
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if total > 0:
-            # Seek-based sampling — fast for indexed containers
-            if total // _VIDEO_FRAME_STRIDE > _VIDEO_MAX_FRAMES:
-                stride = max(1, math.ceil(total / _VIDEO_MAX_FRAMES))
-            else:
-                stride = _VIDEO_FRAME_STRIDE
-            for pos in range(0, total, stride):
-                if len(frames) >= _VIDEO_MAX_FRAMES:
-                    break
-                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-                ret, frame = cap.read()
-                if not ret or frame is None:
-                    continue
-                ok, buf = cv2.imencode(".jpg", frame)
-                if ok:
-                    frames.append(bytes(buf))
-        else:
-            # Sequential scan for streams / containers without frame-count metadata
-            current = 0
-            while len(frames) < _VIDEO_MAX_FRAMES:
-                ret, frame = cap.read()
-                if not ret or frame is None:
-                    break
-                if current % _VIDEO_FRAME_STRIDE == 0:
-                    ok, buf = cv2.imencode(".jpg", frame)
-                    if ok:
-                        frames.append(bytes(buf))
-                current += 1
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return None
+        ok, buf = cv2.imencode(".jpg", frame)
+        return bytes(buf) if ok else None
     finally:
         cap.release()
-    return frames
 
 
 def _extract_context_images(context: str, assets_dir: str) -> List[Tuple[bytes, str]]:
