@@ -42,13 +42,6 @@ class Strategy(BaseModel):
     )
 
 
-class QueryRewrite(BaseModel):
-    variants: List[str] = Field(
-        default_factory=list,
-        description="Alternative search queries for the same information need.",
-    )
-
-
 class ThreadState(TypedDict):
     question: str
     strategy: Strategy
@@ -142,61 +135,24 @@ async def _rewrite_query(
     config: RunnableConfig,
     max_variants: int = 2,
 ) -> List[str]:
-    """Metaprompting: ask the strategy model for additional retrieval-friendly
-    variants of the current search term. Returns a deduplicated list that
-    always includes the original term and never raises (rewriting is an
-    enhancement, not a correctness requirement).
+    """Metaprompting: expand the current search term into retrieval-friendly
+    variants. Delegates to the shared ``rewrite_search_query`` helper so the
+    same implementation is used across every retrieval flow. Never raises.
     """
-    try:
-        parser = PydanticOutputParser(pydantic_object=QueryRewrite)
-        payload = {
-            "question": question,
-            "term": term,
-            "instructions": instructions,
-            "max_variants": max_variants,
-        }
-        system_prompt = Prompter(
-            prompt_template="ask/query_rewrite", parser=parser
-        ).render(data=payload)  # type: ignore[arg-type]
-        model = await provision_langchain_model(
-            system_prompt,
-            config.get("configurable", {}).get("query_rewrite_model")
-            or config.get("configurable", {}).get("strategy_model"),
-            "tools",
-            max_tokens=400,
-            structured=dict(type="json"),
-        )
-        ai_message = await model.ainvoke(system_prompt)
-        cleaned = clean_thinking_content(extract_text_content(ai_message.content))
-        try:
-            rewrite = parser.parse(cleaned)
-        except Exception as parse_err:
-            repair_prompt = (
-                f"{system_prompt}\n\n"
-                "# PREVIOUS RESPONSE (invalid)\n"
-                f"{cleaned}\n\n"
-                "# PARSER ERROR\n"
-                f"{parse_err}\n\n"
-                "Return a corrected JSON object that matches the schema. "
-                "Output only the JSON, no commentary, no markdown."
-            )
-            ai_message = await model.ainvoke(repair_prompt)
-            cleaned = clean_thinking_content(extract_text_content(ai_message.content))
-            rewrite = parser.parse(cleaned)
+    from open_notebook.search.query_rewrite import rewrite_search_query
 
-        variants = [term] + [v.strip() for v in (rewrite.variants or []) if v and v.strip()]
-        # Dedupe (case-insensitive) while preserving order.
-        seen: set = set()
-        out: List[str] = []
-        for v in variants:
-            k = v.lower()
-            if k in seen:
-                continue
-            seen.add(k)
-            out.append(v)
-        return out[: max_variants + 1]
-    except Exception:
-        return [term]
+    model_id = config.get("configurable", {}).get(
+        "query_rewrite_model"
+    ) or config.get("configurable", {}).get("strategy_model")
+    # The shared helper keys off the query text; pass the term as the query and
+    # forward the per-search extraction instructions for better paraphrases.
+    instructions = f"{instructions}\n\nOriginal question: {question}".strip()
+    return await rewrite_search_query(
+        term,
+        model_id=model_id,
+        instructions=instructions,
+        max_variants=max_variants,
+    )
 
 
 async def provide_answer(state: SubGraphState, config: RunnableConfig) -> dict:

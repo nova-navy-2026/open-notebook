@@ -127,6 +127,91 @@ class SuccessResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+async def _search_user_sources(query: str, k: int) -> List[Dict[str, Any]]:
+    """Hybrid (BM25 + k-NN) search over user-indexed sources for one query.
+
+    Returns normalized chunk dicts. Never raises.
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        from open_notebook.search import is_opensearch_enabled
+
+        if not is_opensearch_enabled():
+            return out
+
+        from open_notebook.utils.embedding import generate_embedding
+
+        try:
+            embedding = await generate_embedding(query)
+        except Exception as e:
+            logger.warning(
+                f"Global chat: failed to embed query, falling back to BM25: {e}"
+            )
+            embedding = None
+
+        if embedding:
+            from open_notebook.search.query import opensearch_hybrid_search
+
+            results = await opensearch_hybrid_search(
+                query, embedding, results=k, source=True, note=False
+            )
+        else:
+            from open_notebook.search.query import opensearch_text_search
+
+            results = await opensearch_text_search(query, k, source=True, note=False)
+
+        for r in results or []:
+            content = r.get("content", "")
+            if not content and r.get("matches"):
+                content = r["matches"][0] if r["matches"] else ""
+            out.append(
+                {
+                    "id": r.get("id", ""),
+                    "parent_id": r.get("parent_id", ""),
+                    "title": r.get("title", ""),
+                    "content": content,
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Global chat: OpenSearch user search failed: {e}")
+    return out
+
+
+async def _search_navy_corpus(
+    query: str, k: int, user_id: Optional[str]
+) -> List[Dict[str, Any]]:
+    """Semantic k-NN search over the navy corpus for one query. Never raises."""
+    out: List[Dict[str, Any]] = []
+    try:
+        from open_notebook.search.navy_docs import vector_search_navy_documents
+
+        navy_results = await vector_search_navy_documents(
+            query=query, doc_ids=None, k=k, user_id=user_id
+        )
+        for r in navy_results:
+            label = r.get("doc_id", "")
+            section = r.get("section_title", "")
+            if section:
+                label = f"{label} — {section}"
+            page = r.get("page_start")
+            if page is not None:
+                label += f" (p.{page})"
+            out.append(
+                {
+                    "id": f"navy:{r.get('doc_id', '')}:p{page or 0}",
+                    "doc_id": r.get("doc_id", ""),
+                    "source": r.get("source", ""),
+                    "title": label,
+                    "content": r.get("content", ""),
+                    "page_start": r.get("page_start"),
+                    "page_end": r.get("page_end"),
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Global chat: navy corpus search failed: {e}")
+    return out
+
+
 async def _build_global_context(
     query: str,
     k: int = 5,
@@ -140,94 +225,57 @@ async def _build_global_context(
         fallback inside ``vector_search_navy_documents`` if embedding
         generation fails.
 
+    Metaprompting: the user's message is first expanded into a few pt-PT / EN
+    query variants (``rewrite_search_query``); every variant is searched in
+    parallel and the chunks are merged (deduped by id) so recall on the
+    multilingual navy corpus improves. Falls back to the single original
+    query when rewriting is disabled or fails.
+
     Notes are excluded so they do not influence the generated responses.
     """
     context_data: Dict[str, Any] = {"sources": [], "navy_corpus": []}
     total_content = ""
 
-    # 1. Search user-indexed sources via OpenSearch hybrid (semantic) search
-    try:
-        from open_notebook.search import is_opensearch_enabled
+    # 0. Metaprompting — expand the query into retrieval-friendly variants.
+    from open_notebook.search.query_rewrite import rewrite_search_query
 
-        if is_opensearch_enabled():
-            from open_notebook.utils.embedding import generate_embedding
-
-            try:
-                embedding = await generate_embedding(query)
-            except Exception as e:
-                logger.warning(
-                    f"Global chat: failed to embed query, falling back to BM25: {e}"
-                )
-                embedding = None
-
-            if embedding:
-                from open_notebook.search.query import opensearch_hybrid_search
-
-                results = await opensearch_hybrid_search(
-                    query, embedding, results=k, source=True, note=False
-                )
-            else:
-                from open_notebook.search.query import opensearch_text_search
-
-                results = await opensearch_text_search(
-                    query, k, source=True, note=False
-                )
-
-            logger.info(
-                f"Global chat context: OpenSearch returned {len(results) if results else 0} source chunks for query='{query[:80]}'"
-            )
-            if results:
-                for r in results:
-                    content = r.get("content", "")
-                    if not content and r.get("matches"):
-                        content = r["matches"][0] if r["matches"] else ""
-                    item = {
-                        "id": r.get("id", ""),
-                        "parent_id": r.get("parent_id", ""),
-                        "title": r.get("title", ""),
-                        "content": content,
-                    }
-                    context_data["sources"].append(item)
-                    total_content += content
-                # Log unique document IDs
-                unique_ids = set(str(r.get("id", "")) for r in results)
-                logger.info(
-                    f"Global chat context: {len(results)} chunks from {len(unique_ids)} unique source IDs: {unique_ids}"
-                )
-    except Exception as e:
-        logger.warning(f"Global chat: OpenSearch user search failed: {e}")
-
-    # 2. Search navy corpus with semantic kNN (BM25 fallback inside the helper)
-    try:
-        from open_notebook.search.navy_docs import vector_search_navy_documents
-
-        navy_results = await vector_search_navy_documents(
-            query=query, doc_ids=None, k=k, user_id=user_id
-        )
+    variants = await rewrite_search_query(query, max_variants=2)
+    if len(variants) > 1:
         logger.info(
-            f"Global chat context: navy corpus returned {len(navy_results)} chunks for query='{query[:80]}'"
+            f"Global chat: query expanded into {len(variants)} variants: {variants}"
         )
-        for r in navy_results:
-            label = r.get("doc_id", "")
-            section = r.get("section_title", "")
-            if section:
-                label = f"{label} — {section}"
-            page = r.get("page_start")
-            if page is not None:
-                label += f" (p.{page})"
-            item = {
-                "id": f"navy:{r.get('doc_id', '')}:p{page or 0}",
-                "doc_id": r.get("doc_id", ""),
-                "source": r.get("source", ""),
-                "title": label,
-                "content": r.get("content", ""),
-                "page_start": r.get("page_start"),
-                "page_end": r.get("page_end"),
-            }
-            context_data["navy_corpus"].append(item)
-            total_content += r.get("content", "")
-    except Exception as e:
-        logger.warning(f"Global chat: navy corpus search failed: {e}")
+    # Spread the budget across variants so the merged set stays around ``k``.
+    per_query = max(2, k // max(1, len(variants) - 1)) if len(variants) > 1 else k
+
+    # 1+2. Search user sources and navy corpus for every variant in parallel.
+    search_tasks = []
+    for v in variants:
+        search_tasks.append(_search_user_sources(v, per_query))
+        search_tasks.append(_search_navy_corpus(v, per_query, user_id))
+    results_per_task = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+    seen_source_ids: set = set()
+    seen_navy_ids: set = set()
+    for idx, task_result in enumerate(results_per_task):
+        if isinstance(task_result, Exception):
+            logger.warning(f"Global chat: variant search task failed: {task_result}")
+            continue
+        is_navy = idx % 2 == 1
+        for item in task_result:
+            item_id = item.get("id", "")
+            if is_navy:
+                if item_id and item_id in seen_navy_ids:
+                    continue
+                if item_id:
+                    seen_navy_ids.add(item_id)
+                context_data["navy_corpus"].append(item)
+            else:
+                if item_id and item_id in seen_source_ids:
+                    continue
+                if item_id:
+                    seen_source_ids.add(item_id)
+                context_data["sources"].append(item)
+            total_content += item.get("content", "")
 
     # ------------------------------------------------------------------
     # Aggregate chunks into document-level summaries
