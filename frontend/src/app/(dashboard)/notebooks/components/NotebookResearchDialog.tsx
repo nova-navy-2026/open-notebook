@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -70,12 +70,50 @@ export function NotebookResearchDialog({
   const { data: activeJob } = useResearchJob(activeJobId);
   const { data: modelDefaults } = useModelDefaults();
 
+  const availableReportTypes = useMemo(() => reportTypes ?? [], [reportTypes]);
+  const availableTones = useMemo(() => tones ?? [], [tones]);
+  const selectedReportTypeInfo = useMemo(
+    () => availableReportTypes.find((rt) => rt.value === reportType),
+    [availableReportTypes, reportType],
+  );
+  const selectedToneInfo = useMemo(
+    () => availableTones.find((tn) => tn.value === tone),
+    [availableTones, tone],
+  );
+
+  const handleReportTypeChange = useCallback((value: string) => {
+    setReportType((current) => (current === value ? current : value));
+  }, []);
+
+  const handleToneChange = useCallback((value: string) => {
+    setTone((current) => (current === value ? current : value));
+  }, []);
+
+  const handleModelChange = useCallback((value: string) => {
+    setModelId((current) => (current === value ? current : value));
+  }, []);
+
   // Pre-select the default chat model once loaded
   useEffect(() => {
     if (!modelId && modelDefaults?.default_chat_model) {
       setModelId(modelDefaults.default_chat_model);
     }
-  }, [modelDefaults?.default_chat_model]);
+  }, [modelDefaults?.default_chat_model, modelId]);
+
+  useEffect(() => {
+    if (
+      availableReportTypes.length > 0 &&
+      !availableReportTypes.some((rt) => rt.value === reportType)
+    ) {
+      setReportType(availableReportTypes[0].value);
+    }
+  }, [availableReportTypes, reportType]);
+
+  useEffect(() => {
+    if (availableTones.length > 0 && !availableTones.some((tn) => tn.value === tone)) {
+      setTone(availableTones[0].value);
+    }
+  }, [availableTones, tone]);
 
   // Auto-save as note when the job completes
   useEffect(() => {
@@ -314,26 +352,26 @@ export function NotebookResearchDialog({
               <div className="space-y-2">
                 <Label>{t.research?.reportType ?? "Report Type"}</Label>
                 <Select
-                  value={reportType}
-                  onValueChange={setReportType}
-                  disabled={isSubmitting}
+                  value={selectedReportTypeInfo ? reportType : undefined}
+                  onValueChange={handleReportTypeChange}
+                  disabled={isSubmitting || availableReportTypes.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder={t.research?.reportType ?? "Report Type"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {reportTypes?.map((rt) => (
+                    {availableReportTypes.map((rt) => (
                       <SelectItem key={rt.value} value={rt.value}>
                         {rt.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {reportTypes && (
+                {availableReportTypes.length > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    {reportTypes.find((rt) => rt.value === reportType)?.description}
+                    {selectedReportTypeInfo?.description}
                     {" - "}
-                    {reportTypes.find((rt) => rt.value === reportType)?.speed ?? ""}
+                    {selectedReportTypeInfo?.speed ?? ""}
                   </p>
                 )}
               </div>
@@ -341,15 +379,15 @@ export function NotebookResearchDialog({
               <div className="space-y-2">
                 <Label>{t.research?.toneLabel ?? "Writing Tone"}</Label>
                 <Select
-                  value={tone}
-                  onValueChange={setTone}
-                  disabled={isSubmitting}
+                  value={selectedToneInfo ? tone : undefined}
+                  onValueChange={handleToneChange}
+                  disabled={isSubmitting || availableTones.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder={t.research?.toneLabel ?? "Writing Tone"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {tones?.map((tn) => (
+                    {availableTones.map((tn) => (
                       <SelectItem key={tn.value} value={tn.value}>
                         {tn.label}
                       </SelectItem>
@@ -368,7 +406,7 @@ export function NotebookResearchDialog({
               <ModelSelector
                 modelType="language"
                 value={modelId}
-                onChange={setModelId}
+                onChange={handleModelChange}
                 placeholder="Select a model..."
                 disabled={isSubmitting}
               />

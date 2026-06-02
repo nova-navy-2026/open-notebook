@@ -5,10 +5,15 @@ export interface MultimodalRequest {
   context?: string
   mode?: string
   file?: File
+  force_engine?: 'sam3' | 'rfdetr'
 }
 
 export interface MultimodalResponse {
   text: string
+  route?: string
+  engine?: string
+  image_base64?: string | null
+  video_base64?: string | null
 }
 
 export const multimodalApi = {
@@ -17,8 +22,15 @@ export const multimodalApi = {
     form.append('query', data.query)
     if (data.context) form.append('context', data.context)
     form.append('mode', data.mode ?? 'chat')
+    if (data.force_engine) form.append('force_engine', data.force_engine)
     if (data.file) form.append('file', data.file)
     const response = await apiClient.post<MultimodalResponse>('/vision/multimodal', form)
     return response.data
+  },
+  saveNoteAsset: async (dataUrl: string): Promise<string> => {
+    const response = await apiClient.post<{ url: string }>('/vision/note-asset', {
+      data_url: dataUrl,
+    })
+    return response.data.url
   },
 }

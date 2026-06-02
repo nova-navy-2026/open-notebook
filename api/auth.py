@@ -42,10 +42,10 @@ def is_admin(request: Request) -> bool:
 def get_navy_acl_user_id(request: Request) -> Optional[str]:
     """FastAPI dependency that returns the navy user id to use for ACL filtering.
 
-    - Admins bypass ACL entirely → returns ``"__admin__"`` so callers skip
-      the filter and see all documents.
-    - Regular users with a navy entry → returns their ``navy_user_id``
+    - Users with a navy entry → returns their ``navy_user_id``
       (ACL filter applied via ``build_opensearch_filter``).
+    - Admins without a navy entry → returns ``"__admin__"`` so bootstrap
+      administration can still inspect the corpus.
     - Regular users without a navy entry → returns ``None``, callers
       fail-closed (empty results).
     """
@@ -54,9 +54,11 @@ def get_navy_acl_user_id(request: Request) -> Optional[str]:
     logger.debug(
         f"[navy-acl] resolving user_id: roles={roles!r} navy_user_id={navy_id!r}"
     )
+    if navy_id:
+        return navy_id
     if "admin" in roles:
         return "__admin__"
-    return navy_id
+    return None
 
 
 class PasswordAuthMiddleware(BaseHTTPMiddleware):

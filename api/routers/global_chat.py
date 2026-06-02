@@ -101,6 +101,15 @@ class ExecuteGlobalChatRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this message"
     )
+    agent_instruction: Optional[str] = Field(
+        None,
+        description="Optional internal instruction for a chat agent mode",
+    )
+
+
+class PersistGlobalChatExchangeRequest(BaseModel):
+    user_message: str = Field(..., description="User message to persist")
+    assistant_message: str = Field(..., description="Assistant message to persist")
 
 
 class ExecuteGlobalChatResponse(BaseModel):
@@ -270,6 +279,42 @@ async def _build_global_context(
         f"{len(navy_docs)} docs, {len(total_content)} chars"
     )
     return context_data
+
+
+def _context_with_agent_instruction(
+    context: Dict[str, Any],
+    agent_instruction: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "agent_instruction": agent_instruction,
+        "retrieved_context": _format_global_context_for_prompt(context),
+    }
+
+
+def _format_global_context_for_prompt(context: Dict[str, Any]) -> str:
+    """Render retrieved global-chat context without internal control fields."""
+    parts: List[str] = []
+
+    if context.get("sources"):
+        parts.append("## Indexed sources")
+        for item in context["sources"]:
+            title = item.get("title") or item.get("id") or "Source"
+            content = item.get("content") or ""
+            if content.strip():
+                parts.append(f"### {title}\n{content}")
+
+    if context.get("navy_corpus"):
+        parts.append("## Navy corpus")
+        for item in context["navy_corpus"]:
+            title = item.get("title") or item.get("doc_id") or "Document"
+            content = item.get("content") or ""
+            if content.strip():
+                parts.append(f"### {title}\n{content}")
+
+    if not parts:
+        return "No relevant excerpts were retrieved."
+
+    return "\n\n".join(parts)
 
 
 async def _get_global_sessions(user_id: str) -> List[ChatSession]:
@@ -454,6 +499,76 @@ async def update_global_session(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post(
+    "/global-chat/sessions/{session_id}/messages",
+    response_model=GlobalChatSessionWithMessagesResponse,
+)
+async def persist_global_chat_exchange(
+    session_id: str,
+    request: PersistGlobalChatExchangeRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Persist a user/assistant exchange produced outside the normal chat graph."""
+    try:
+        full_id = (
+            session_id
+            if session_id.startswith("chat_session:")
+            else f"chat_session:{session_id}"
+        )
+        session = await ChatSession.get(full_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        await asyncio.to_thread(
+            chat_graph.update_state,
+            RunnableConfig(configurable={"thread_id": full_id}),
+            {
+                "messages": [
+                    HumanMessage(content=request.user_message),
+                    AIMessage(content=request.assistant_message),
+                ]
+            },
+        )
+        await session.save()
+
+        thread_state = await asyncio.to_thread(
+            chat_graph.get_state,
+            config=RunnableConfig(configurable={"thread_id": full_id}),
+        )
+
+        messages: List[ChatMessage] = []
+        if thread_state and thread_state.values and "messages" in thread_state.values:
+            for msg in thread_state.values["messages"]:
+                messages.append(
+                    ChatMessage(
+                        id=getattr(msg, "id", f"msg_{len(messages)}"),
+                        type=msg.type if hasattr(msg, "type") else "unknown",
+                        content=msg.content if hasattr(msg, "content") else str(msg),
+                    )
+                )
+
+        return GlobalChatSessionWithMessagesResponse(
+            id=session.id or "",
+            title=session.title or "Untitled Session",
+            created=str(session.created),
+            updated=str(session.updated),
+            message_count=len(messages),
+            messages=messages,
+            model_override=getattr(session, "model_override", None),
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error persisting global chat exchange: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete(
     "/global-chat/sessions/{session_id}",
     response_model=SuccessResponse,
@@ -511,6 +626,18 @@ async def execute_global_chat(
 
         # Build context from all indexed docs
         context = await _build_global_context(request.message, user_id=user_id)
+        context_for_prompt = _context_with_agent_instruction(
+            context,
+            request.agent_instruction,
+        )
+        if request.agent_instruction:
+            logger.info(
+                "ChatAgent text instruction | surface=global_chat session={} "
+                "instruction={!r} message_preview={!r}",
+                full_id,
+                request.agent_instruction.splitlines()[0],
+                request.message[:180],
+            )
 
         model_override = (
             request.model_override
@@ -525,7 +652,7 @@ async def execute_global_chat(
 
         state_values = current_state.values if current_state else {}
         state_values["messages"] = state_values.get("messages", [])
-        state_values["context"] = context
+        state_values["context"] = context_for_prompt
         state_values["model_override"] = model_override
         state_values["prompt_template"] = "global_chat/system"
 
@@ -586,6 +713,7 @@ async def _stream_global_chat_sse(
     context: Dict[str, Any],
     context_stats: Dict[str, Any],
     model_override: Optional[str],
+    agent_instruction: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Wrap ``astream_chat_response`` as Server-Sent Events for global chat."""
     yield f"data: {json.dumps({'type': 'user_message', 'content': user_message})}\n\n"
@@ -594,7 +722,7 @@ async def _stream_global_chat_sse(
         async for event in astream_chat_response(
             session_id=session_id,
             user_message=user_message,
-            context=context,
+            context=_context_with_agent_instruction(context, agent_instruction),
             model_override=model_override,
             prompt_template="global_chat/system",
         ):
@@ -624,6 +752,14 @@ async def execute_global_chat_stream(
 
     # Build context (RAG over indexed docs) up front
     context = await _build_global_context(request.message, user_id=user_id)
+    if request.agent_instruction:
+        logger.info(
+            "ChatAgent text instruction | surface=global_chat session={} "
+            "instruction={!r} message_preview={!r}",
+            full_id,
+            request.agent_instruction.splitlines()[0],
+            request.message[:180],
+        )
 
     model_override = (
         request.model_override
@@ -647,6 +783,7 @@ async def execute_global_chat_stream(
             context=context,
             context_stats=context_stats,
             model_override=model_override,
+            agent_instruction=request.agent_instruction,
         ),
         media_type="text/event-stream",
         headers={

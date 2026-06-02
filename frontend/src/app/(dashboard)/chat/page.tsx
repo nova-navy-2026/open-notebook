@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { useGlobalChat } from "@/lib/hooks/useGlobalChat";
+import { useModels } from "@/lib/hooks/use-models";
 import { ChatPanel } from "@/components/source/ChatPanel";
 import { Badge } from "@/components/ui/badge";
 import { FileText, ChevronDown, ChevronUp } from "lucide-react";
@@ -11,9 +12,21 @@ import { Button } from "@/components/ui/button";
 export default function GlobalChatPage() {
   const { t } = useTranslation();
   const chat = useGlobalChat();
+  const { data: models = [] } = useModels();
   const [docsExpanded, setDocsExpanded] = useState(false);
 
   const documents = chat.contextStats?.documents ?? [];
+  const gemmaModel = models.find((model) => {
+    const provider = model.provider?.toLowerCase() ?? "";
+    const name = model.name?.toLowerCase() ?? "";
+    const id = model.id?.toLowerCase() ?? "";
+    return model.type === "language" && (
+      provider === "gemma" || name.includes("gemma") || id.includes("gemma")
+    );
+  });
+  const activeModelOverride = chat.isVisualModelLocked
+    ? gemmaModel?.id
+    : chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined;
 
   return (
     <div className="app-page-wide flex h-full flex-col">
@@ -70,9 +83,7 @@ export default function GlobalChatPage() {
           isStreaming={chat.isSending}
           contextIndicators={null}
           onSendMessage={chat.sendMessage}
-          modelOverride={
-            chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined
-          }
+          modelOverride={activeModelOverride}
           onModelChange={(model) => chat.setModelOverride(model ?? null)}
           sessions={chat.sessions}
           currentSessionId={chat.currentSessionId}
@@ -85,6 +96,10 @@ export default function GlobalChatPage() {
           loadingSessions={chat.loadingSessions}
           title={t.common.chat ?? "Chat"}
           contextType="notebook"
+          enableAttachments
+          visualModelLocked={chat.isVisualModelLocked}
+          enableDeepResearch
+          enableAgentControls
         />
       </div>
     </div>

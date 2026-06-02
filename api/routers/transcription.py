@@ -10,6 +10,7 @@ Endpoints:
 import os
 import uuid
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -84,6 +85,7 @@ async def transcribe(
     - diarize: "true" / "false"
     - num_speakers / min_speakers / max_speakers: optional diarization hints
     """
+    started_at = perf_counter()
     ext = Path(audio.filename or "").suffix.lower()
     if ext not in ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(
@@ -113,8 +115,14 @@ async def transcribe(
 
     norm_lang = (language or "").strip() or None
     logger.info(
-        f"Transcription requested: file={saved_path}, language={norm_lang!r}, "
-        f"diarize={diarize}, speakers={(num_speakers, min_speakers, max_speakers)}"
+        "ChatAgent tool start | agent=transcription tool=transcription.transcribe "
+        "file={} content_type={} bytes={} language={!r} diarize={} speakers={}",
+        audio.filename,
+        audio.content_type,
+        len(audio_bytes),
+        norm_lang,
+        diarize,
+        (num_speakers, min_speakers, max_speakers),
     )
 
     # Resolve which speech-to-text engine the user picked on the
@@ -194,6 +202,15 @@ async def transcribe(
                 }
             result.setdefault("provider", stt_provider)
             result.setdefault("model", stt_model_name)
+            logger.success(
+                "ChatAgent tool success | agent=transcription tool=transcription.transcribe "
+                "duration_ms={} provider={} model={} chars={} diarized={}",
+                round((perf_counter() - started_at) * 1000),
+                result.get("provider"),
+                result.get("model"),
+                len(result.get("dialog") or result.get("text") or ""),
+                result.get("diarized"),
+            )
             return result
 
         # Default path: local NOVA-Researcher whisper server
@@ -210,12 +227,26 @@ async def transcribe(
         result.setdefault("provider", "whisper")
         if stt_model_name:
             result.setdefault("model", stt_model_name)
+        logger.success(
+            "ChatAgent tool success | agent=transcription tool=transcription.transcribe "
+            "duration_ms={} provider={} model={} chars={} diarized={}",
+            round((perf_counter() - started_at) * 1000),
+            result.get("provider"),
+            result.get("model"),
+            len(result.get("dialog") or result.get("text") or ""),
+            result.get("diarized"),
+        )
         return result
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Transcription failed: {e}")
+        logger.error(
+            "ChatAgent tool failure | agent=transcription tool=transcription.transcribe "
+            "duration_ms={} error={}",
+            round((perf_counter() - started_at) * 1000),
+            e,
+        )
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
     finally:
         try:

@@ -1,21 +1,32 @@
 'use client'
 
-import { useState, useRef, useEffect, useId } from 'react'
+import { useState, useRef, useEffect, useId, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
   BaseChatSession
 } from '@/lib/types/api'
-import { ModelSelector } from './ModelSelector'
+import { ModelSelector as ChatModelSelector } from './ModelSelector'
+import { ModelSelector as InlineModelSelector } from '@/components/common/ModelSelector'
 import { ContextIndicator } from '@/components/common/ContextIndicator'
 import { SessionManager } from '@/components/source/SessionManager'
 import { MessageActions } from '@/components/source/MessageActions'
@@ -23,6 +34,11 @@ import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent
 import { useModalManager } from '@/lib/hooks/use-modal-manager'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
+import { useModelDefaults } from '@/lib/hooks/use-models'
+import { notebooksApi } from '@/lib/api/notebooks'
+import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
+import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 interface NotebookContextStats {
   sourcesInsights: number
@@ -32,11 +48,23 @@ interface NotebookContextStats {
   charCount?: number
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 interface ChatPanelProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
   contextIndicators: SourceChatContextIndicator | null
-  onSendMessage: (message: string, modelOverride?: string) => void
+  onSendMessage: (
+    message: string,
+    modelOverride?: string,
+    file?: File,
+    deepResearch?: ChatDeepResearchOptions,
+    agentOptions?: ChatAgentUiOptions,
+  ) => void
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -54,6 +82,10 @@ interface ChatPanelProps {
   notebookContextStats?: NotebookContextStats
   // Notebook ID for saving notes
   notebookId?: string
+  enableAttachments?: boolean
+  visualModelLocked?: boolean
+  enableDeepResearch?: boolean
+  enableAgentControls?: boolean
 }
 
 export function ChatPanel({
@@ -73,15 +105,64 @@ export function ChatPanel({
   title,
   contextType = 'source',
   notebookContextStats,
-  notebookId
+  notebookId,
+  enableAttachments = false,
+  visualModelLocked = false,
+  enableDeepResearch = false,
+  enableAgentControls = false
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
   const [input, setInput] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [researchReportType, setResearchReportType] = useState('research_report')
+  const [researchTone, setResearchTone] = useState('Objective')
+  const [researchModelId, setResearchModelId] = useState('')
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState('auto')
+  const [transcriptionDiarize, setTranscriptionDiarize] = useState(false)
+  const [transcriptionSpeakers, setTranscriptionSpeakers] = useState('auto')
+  const [visionEngine, setVisionEngine] = useState<'auto' | 'sam3' | 'rfdetr'>('auto')
+  const [saveNoteNotebookId, setSaveNoteNotebookId] = useState('')
   const [activeTab, setActiveTab] = useState<'chat' | 'sessions'>('chat')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { openModal } = useModalManager()
+  const { data: reportTypes = [] } = useReportTypes()
+  const { data: tones = [] } = useResearchTones()
+  const { data: modelDefaults } = useModelDefaults()
+  const { data: availableNotebooks = [] } = useQuery({
+    queryKey: ['chat-agent-notebooks'],
+    queryFn: () => notebooksApi.list({ archived: false }),
+    enabled: enableAgentControls && !notebookId,
+  })
+  const selectedFileKind = getAttachmentKind(selectedFile)
+  const selectedFileIsVisual = isVisualLikeFile(selectedFile)
+  const selectedFileIsAudio = isAudioLikeFile(selectedFile)
+  const isVisualModelLocked = enableAttachments && (visualModelLocked || selectedFileIsVisual)
+  const canUseDeepResearch = enableDeepResearch && !selectedFile
+  const showTranscriptionControls = enableAgentControls && !!selectedFile && (
+    selectedFileIsAudio || isVideoLikeFile(selectedFile)
+  )
+  const showVisionControls = enableAgentControls && selectedFileIsVisual
+  const showSaveNoteControls = enableAgentControls && !notebookId && !selectedFile && availableNotebooks.length > 1
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const scrollRoot = scrollAreaRef.current
+    const viewport = scrollRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
+
+    const run = () => {
+      if (viewport) {
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior })
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
+      }
+    }
+
+    requestAnimationFrame(run)
+    window.setTimeout(run, 80)
+    window.setTimeout(run, 240)
+  }, [])
 
   const handleReferenceClick = (type: string, id: string) => {
     const modalType = type === 'source_insight' ? 'insight' : type as 'source' | 'note' | 'insight'
@@ -98,13 +179,62 @@ export function ChatPanel({
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    scrollToBottom('smooth')
+  }, [messages, isStreaming, scrollToBottom])
+
+  useEffect(() => {
+    if (!researchModelId && modelDefaults?.default_chat_model) {
+      setResearchModelId(modelDefaults.default_chat_model)
+    }
+  }, [modelDefaults?.default_chat_model, researchModelId])
 
   const handleSend = () => {
-    if (input.trim() && !isStreaming) {
-      onSendMessage(input.trim(), modelOverride)
+    if ((input.trim() || selectedFile) && !isStreaming) {
+      const deepResearch = canUseDeepResearch && deepResearchEnabled
+        ? {
+          reportType: researchReportType,
+          tone: researchTone,
+          modelId: researchModelId || undefined,
+        }
+        : undefined
+      onSendMessage(
+        input.trim() || 'Analisa este ficheiro.',
+        modelOverride,
+        deepResearch ? undefined : selectedFile ?? undefined,
+        deepResearch,
+        {
+          transcription: showTranscriptionControls
+            ? {
+              language: transcriptionLanguage === 'auto' ? undefined : transcriptionLanguage,
+              diarize: transcriptionDiarize,
+              numSpeakers: transcriptionSpeakers === 'auto'
+                ? undefined
+                : Number(transcriptionSpeakers),
+            }
+            : undefined,
+          vision: showVisionControls
+            ? { engine: visionEngine }
+            : undefined,
+          saveNote: saveNoteNotebookId
+            ? { notebookId: saveNoteNotebookId }
+            : undefined,
+        },
+      )
       setInput('')
+      setSelectedFile(null)
+      if (deepResearch) {
+        setDeepResearchEnabled(false)
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+    if (file) {
+      setSelectedFile(file)
     }
   }
 
@@ -194,6 +324,38 @@ export function ChatPanel({
                     </div>
                   )}
                   <div className="flex flex-col gap-2 max-w-[80%]">
+                    {message.type === 'human' && message.attachments?.length ? (
+                      <div className="flex justify-end">
+                        {message.attachments.map((attachment) => (
+                          <div key={attachment.url} className="max-w-48 overflow-hidden rounded-md border bg-background">
+                            {attachment.kind === 'image' ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={attachment.url}
+                                alt={attachment.name}
+                                className="max-h-36 w-full object-contain"
+                                onLoad={() => scrollToBottom('auto')}
+                              />
+                            ) : attachment.kind === 'video' ? (
+                              <video
+                                src={attachment.url}
+                                controls
+                                className="max-h-36 w-full bg-black"
+                                onLoadedMetadata={() => scrollToBottom('auto')}
+                              />
+                            ) : attachment.kind === 'audio' ? (
+                              <audio
+                                src={attachment.url}
+                                controls
+                                className="w-48"
+                              />
+                            ) : (
+                              <div className="px-3 py-2 text-xs">{attachment.name}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <div
                       className={`rounded-lg px-4 py-2 ${
                         message.type === 'human'
@@ -205,6 +367,7 @@ export function ChatPanel({
                         <AIMessageContent
                           content={message.content}
                           onReferenceClick={handleReferenceClick}
+                          onMediaLoad={() => scrollToBottom('auto')}
                         />
                       ) : (
                         <p className="text-sm break-all">{message.content}</p>
@@ -286,15 +449,235 @@ export function ChatPanel({
           {onModelChange && (
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">{t.chat.model}</span>
-              <ModelSelector
+              <ChatModelSelector
                 currentModel={modelOverride}
                 onModelChange={onModelChange}
-                disabled={isStreaming}
+                disabled={isStreaming || isVisualModelLocked}
+                displayNameOverride={isVisualModelLocked ? 'Gemma' : undefined}
+                locked={isVisualModelLocked}
+                lockedReason={
+                  isVisualModelLocked
+                    ? 'Os pedidos com imagem ou vídeo usam automaticamente a Gemma multimodal.'
+                    : undefined
+                }
               />
             </div>
           )}
 
+          {enableDeepResearch && (
+            <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <Button
+                  type="button"
+                  variant={deepResearchEnabled ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-8 gap-2"
+                  onClick={() => setDeepResearchEnabled((enabled) => !enabled)}
+                  disabled={isStreaming || !!selectedFile}
+                  title={selectedFile ? 'Deep Research usa apenas pedidos de texto.' : undefined}
+                >
+                  <Search className="h-4 w-4" />
+                  Deep Research
+                </Button>
+              </div>
+
+              {deepResearchEnabled && canUseDeepResearch && (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t.research?.reportType ?? 'Report Type'}</Label>
+                    <Select
+                      value={researchReportType}
+                      onValueChange={setResearchReportType}
+                      disabled={isStreaming}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {reportTypes.map((reportType) => (
+                          <SelectItem key={reportType.value} value={reportType.value}>
+                            {reportType.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t.research?.toneLabel ?? 'Writing Tone'}</Label>
+                    <Select
+                      value={researchTone}
+                      onValueChange={setResearchTone}
+                      disabled={isStreaming}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tones.map((tone) => (
+                          <SelectItem key={tone.value} value={tone.value}>
+                            {tone.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t.research?.modelLabel ?? 'AI Model'}</Label>
+                    <InlineModelSelector
+                      modelType="language"
+                      value={researchModelId}
+                      onChange={setResearchModelId}
+                      placeholder={t.research?.selectModelPlaceholder ?? 'Select a model...'}
+                      disabled={isStreaming}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {enableAgentControls && (showTranscriptionControls || showVisionControls || showSaveNoteControls) && (
+            <div className="grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-3">
+              {showTranscriptionControls && (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Idioma</Label>
+                    <Select value={transcriptionLanguage} onValueChange={setTranscriptionLanguage} disabled={isStreaming}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        <SelectItem value="pt">Português</SelectItem>
+                        <SelectItem value="en">English</SelectItem>
+                        <SelectItem value="es">Español</SelectItem>
+                        <SelectItem value="fr">Français</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Oradores</Label>
+                    <Select value={transcriptionSpeakers} onValueChange={setTranscriptionSpeakers} disabled={isStreaming || !transcriptionDiarize}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        {[1, 2, 3, 4, 5, 6].map((count) => (
+                          <SelectItem key={count} value={String(count)}>
+                            {count}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <label className="flex h-8 items-center gap-2 self-end text-xs">
+                    <Checkbox
+                      checked={transcriptionDiarize}
+                      onCheckedChange={(checked) => setTranscriptionDiarize(Boolean(checked))}
+                      disabled={isStreaming}
+                    />
+                    Diarizar
+                  </label>
+                </>
+              )}
+
+              {showVisionControls && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Motor visual</Label>
+                  <Select value={visionEngine} onValueChange={(value) => setVisionEngine(value as 'auto' | 'sam3' | 'rfdetr')} disabled={isStreaming}>
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="sam3">SAM3</SelectItem>
+                      <SelectItem value="rfdetr">RF-DETR</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {showSaveNoteControls && (
+                <div className="space-y-1 sm:col-span-2">
+                  <Label className="text-xs">Guardar notas em</Label>
+                  <Select value={saveNoteNotebookId || 'auto'} onValueChange={(value) => setSaveNoteNotebookId(value === 'auto' ? '' : value)} disabled={isStreaming}>
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Perguntar automaticamente</SelectItem>
+                      {availableNotebooks.map((notebook) => (
+                        <SelectItem key={notebook.id} value={notebook.id}>
+                          {notebook.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedFile && (
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+              <div className="flex min-w-0 items-center gap-2">
+                {selectedFileKind === 'audio' ? (
+                  <AudioLines className="h-4 w-4 flex-shrink-0" />
+                ) : selectedFileKind === 'video' ? (
+                  <Video className="h-4 w-4 flex-shrink-0" />
+                ) : (
+                  <ImageIcon className="h-4 w-4 flex-shrink-0" />
+                )}
+                <span className="truncate">{selectedFile.name}</span>
+                <span className="flex-shrink-0 text-muted-foreground">
+                  {formatFileSize(selectedFile.size)}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 flex-shrink-0"
+                onClick={() => {
+                  setSelectedFile(null)
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = ''
+                  }
+                }}
+                disabled={isStreaming}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
           <div className="flex gap-2 items-end min-w-0">
+            {enableAttachments && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo,audio/wav,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/flac,audio/ogg,audio/aac,audio/webm"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-[40px] w-[40px] flex-shrink-0"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStreaming}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </>
+            )}
             <Textarea
               id={chatInputId}
               name="chat-message"
@@ -309,7 +692,7 @@ export function ChatPanel({
             />
             <Button
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming}
+              disabled={(!input.trim() && !selectedFile) || isStreaming}
               size="icon"
               className="h-[40px] w-[40px] flex-shrink-0"
             >
@@ -332,17 +715,44 @@ export function ChatPanel({
 // Helper component to render AI messages with clickable references
 function AIMessageContent({
   content,
-  onReferenceClick
+  onReferenceClick,
+  onMediaLoad,
 }: {
   content: string
   onReferenceClick: (type: string, id: string) => void
+  onMediaLoad?: () => void
 }) {
   const { t } = useTranslation()
   // Convert references to compact markdown with numbered citations
   const markdownWithCompactRefs = convertReferencesToCompactMarkdown(content, t.common.references)
 
   // Create custom link component for compact references
-  const LinkComponent = createCompactReferenceLinkComponent(onReferenceClick)
+  const ReferenceLinkComponent = createCompactReferenceLinkComponent(onReferenceClick)
+  const LinkComponent = ({
+    href,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+    href?: string
+    children?: React.ReactNode
+  }) => {
+    const isVideoAsset =
+      !!href && (href.startsWith('data:video/') || /\/api\/vision\/note-asset\/[^)\s]+\.(mp4|webm|mov)$/i.test(href))
+
+    if (isVideoAsset) {
+      return (
+        <video
+          src={href}
+          controls
+          className="my-3 max-h-80 w-full rounded-md border bg-black"
+        >
+          {children}
+        </video>
+      )
+    }
+
+    return <ReferenceLinkComponent href={href} {...props}>{children}</ReferenceLinkComponent>
+  }
 
   return (
     <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-a:text-blue-600 prose-a:break-all prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
@@ -350,6 +760,15 @@ function AIMessageContent({
         remarkPlugins={[remarkGfm]}
         components={{
           a: LinkComponent,
+          img: ({ src, alt }) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={typeof src === 'string' ? src : undefined}
+              alt={alt ?? ''}
+              className="my-3 max-h-80 rounded-md border object-contain"
+              onLoad={onMediaLoad}
+            />
+          ),
           p: ({ children }) => <p className="mb-4">{children}</p>,
           h1: ({ children }) => <h1 className="mb-4 mt-6">{children}</h1>,
           h2: ({ children }) => <h2 className="mb-3 mt-5">{children}</h2>,

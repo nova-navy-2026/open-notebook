@@ -56,6 +56,11 @@ Comprehensive list of all environment variables available in Open Notebook.
 | Variable | Required? | Default | Description |
 |----------|-----------|---------|-------------|
 | `ESPERANTO_LLM_TIMEOUT` | No | 60 | LLM inference timeout in seconds |
+| `CHAT_AGENT_ROUTER_ENABLED` | No | true | Enable Gemma-based routing for chat agents, with deterministic fallback if routing fails. |
+| `CHAT_AGENT_ROUTER_TIMEOUT` | No | 180 | Timeout in seconds for Gemma chat-agent routing/classification. Increase on shared or queued vLLM/GPU clusters. |
+| `GEMMA_MULTIMODAL_TIMEOUT` | No | 600 | Timeout in seconds for Gemma multimodal image/video-frame analysis. Increase on shared or queued vLLM/GPU clusters. |
+| `GEMMA_OCR_POSTPROCESS_TIMEOUT` | No | 240 | Timeout in seconds for optional Gemma cleanup of OCR text extracted by Docling. |
+| `DOCLING_OCR_TIMEOUT` | No | 90 | Timeout in seconds for local Docling OCR before falling back to Gemma OCR. |
 | `ESPERANTO_SSL_VERIFY` | No | true | Verify SSL certificates (false = development only) |
 | `ESPERANTO_SSL_CA_BUNDLE` | No | None | Path to custom CA certificate bundle |
 
