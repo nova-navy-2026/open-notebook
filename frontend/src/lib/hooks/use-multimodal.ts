@@ -248,12 +248,19 @@ export function useMultimodalChat({
       setMessages((prev) => [...prev, userMessage])
       setIsSending(true)
 
+      const agentContext = {
+        surface: 'notebook_chat' as const,
+        runId: createChatAgentRunId('notebook_chat'),
+        notebookId,
+      }
+      let activeAgentForFailure = 'notebook_chat'
+      let activeTextAgentContext: {
+        name?: string
+        instruction?: string
+        startedAt?: number
+      } = {}
+
       try {
-        const agentContext = {
-          surface: 'notebook_chat' as const,
-          runId: createChatAgentRunId('notebook_chat'),
-          notebookId,
-        }
         const routerDecision = await routeChatAgentWithGemma({
           message,
           file: visualFile,
@@ -264,6 +271,7 @@ export function useMultimodalChat({
         const preferredAgent = routerDecision && routerDecision.confidence >= 0.55
           ? routerDecision.agent
           : undefined
+        activeAgentForFailure = preferredAgent ?? activeAgentForFailure
 
         if (!file) {
           const content = await runDeepResearchAgent({
@@ -346,9 +354,15 @@ export function useMultimodalChat({
 
         const instruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(visualQuery)
         if (instruction) {
+          activeTextAgentContext = {
+            name: preferredAgent ?? 'text_instruction',
+            instruction,
+            startedAt: performance.now(),
+          }
+          activeAgentForFailure = activeTextAgentContext.name ?? activeAgentForFailure
           logChatAgentEvent({
             surface: 'notebook_chat',
-            agent: 'text_instruction',
+            agent: activeTextAgentContext.name ?? 'text_instruction',
             event: 'selected',
             status: 'selected',
             context: agentContext,
@@ -357,8 +371,9 @@ export function useMultimodalChat({
           })
         }
 
-        const startedAt = performance.now()
+        const startedAt = activeTextAgentContext.startedAt ?? performance.now()
         if (isVisualFile(visualFile)) {
+          activeAgentForFailure = 'multimodal'
           logChatAgentEvent({
             surface: 'notebook_chat',
             agent: 'multimodal',
@@ -399,7 +414,9 @@ export function useMultimodalChat({
         const content = await formatMultimodalResponse(result)
         logChatAgentEvent({
           surface: 'notebook_chat',
-          agent: isVisualFile(visualFile) ? 'multimodal' : (preferredAgent ?? 'notebook_chat'),
+          agent: isVisualFile(visualFile)
+            ? 'multimodal'
+            : (activeTextAgentContext.name ?? preferredAgent ?? 'notebook_chat'),
           event: 'tool_call',
           status: 'success',
           context: agentContext,
@@ -408,7 +425,7 @@ export function useMultimodalChat({
           details: {
             route: result.route,
             engine: result.engine,
-            text_instruction: Boolean(instruction),
+            text_instruction: Boolean(activeTextAgentContext.instruction),
             has_image_result: Boolean(result.image_base64),
             has_video_result: Boolean(result.video_base64),
           },
@@ -430,6 +447,21 @@ export function useMultimodalChat({
         console.error('Multimodal chat error:', error)
         const messageText =
           error.response?.data?.detail || error.message || 'Failed to send message'
+        logChatAgentEvent({
+          surface: 'notebook_chat',
+          agent: activeAgentForFailure,
+          event: 'tool_call',
+          status: 'failure',
+          context: agentContext,
+          duration_ms: activeTextAgentContext.startedAt
+            ? Math.round(performance.now() - activeTextAgentContext.startedAt)
+            : undefined,
+          file: fileMetadata(visualFile),
+          details: {
+            error: messageText,
+            text_instruction: Boolean(activeTextAgentContext.instruction),
+          },
+        })
         toast.error(messageText)
         const aiMessage: NotebookChatMessage = {
           id: `ai-error-${Date.now()}`,

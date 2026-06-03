@@ -860,6 +860,7 @@ async def multimodal_chat(
     images: List[Tuple[bytes, str]] = []
     saved_path: Optional[str] = None
     uploaded_ext: Optional[str] = None
+    log_file: Optional[Dict[str, Any]] = None
     requested_force_engine = (force_engine or "").strip().lower()
     if requested_force_engine not in {"", "sam3", "rfdetr"}:
         raise HTTPException(
@@ -1324,6 +1325,28 @@ async def multimodal_chat(
         f"query={repr(query[:80])}"
     )
 
+    async def _log_gemma_multimodal_failure(error: Exception, detail: str) -> None:
+        await _write_multimodal_tool_log(
+            user_id=user_id,
+            surface=surface,
+            run_id=run_id,
+            session_id=session_id,
+            notebook_id=notebook_id,
+            model_id=model_id,
+            status="failure",
+            duration_ms=round((perf_counter() - started_at) * 1000),
+            query=query,
+            file=log_file,
+            details={
+                "route": "gemma_multimodal",
+                "mode": mode,
+                "images": len(images or []),
+                "error_type": type(error).__name__,
+                "error": detail,
+                "fallback_available": bool(saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS),
+            },
+        )
+
     try:
         await _write_multimodal_tool_log(
             user_id=user_id,
@@ -1335,7 +1358,7 @@ async def multimodal_chat(
             status="started",
             duration_ms=None,
             query=query,
-            file=locals().get("log_file"),
+            file=log_file,
             details={
                 "route": "gemma_multimodal",
                 "mode": mode,
@@ -1361,7 +1384,7 @@ async def multimodal_chat(
             status="success",
             duration_ms=round((perf_counter() - started_at) * 1000),
             query=query,
-            file=locals().get("log_file"),
+            file=log_file,
             details={
                 "route": "gemma_multimodal",
                 "mode": mode,
@@ -1371,6 +1394,7 @@ async def multimodal_chat(
         )
         return {"text": text, "route": "gemma_multimodal"}
     except RuntimeError as e:
+        await _log_gemma_multimodal_failure(e, str(e) or repr(e))
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
@@ -1382,6 +1406,7 @@ async def multimodal_chat(
             f"Gemma multimodal timed out after {_gemma_multimodal_timeout()}s; "
             f"falling back where possible. query={repr(query[:80])}"
         )
+        await _log_gemma_multimodal_failure(e, "Gemma multimodal request timed out")
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
@@ -1390,6 +1415,10 @@ async def multimodal_chat(
         raise HTTPException(status_code=504, detail="Gemma multimodal request timed out")
     except httpx.HTTPStatusError as e:
         logger.error(f"Gemma API error: {e.response.status_code} {e.response.text[:200]}")
+        await _log_gemma_multimodal_failure(
+            e,
+            f"Gemma API returned {e.response.status_code}: {e.response.text[:200]}",
+        )
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
@@ -1399,6 +1428,7 @@ async def multimodal_chat(
     except httpx.RequestError as e:
         detail = str(e) or repr(e)
         logger.error(f"Gemma request failed: {type(e).__name__}: {detail}")
+        await _log_gemma_multimodal_failure(e, detail)
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
@@ -1408,6 +1438,7 @@ async def multimodal_chat(
     except Exception as e:
         detail = str(e) or repr(e)
         logger.error(f"Multimodal chat failed: {type(e).__name__}: {detail}")
+        await _log_gemma_multimodal_failure(e, detail)
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,

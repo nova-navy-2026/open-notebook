@@ -9,6 +9,7 @@ execute in their own backend routers (vision, navigation, transcription).
 import json
 import os
 import re
+import unicodedata
 from time import perf_counter
 from typing import Any, Dict, Literal, Optional
 
@@ -122,6 +123,14 @@ def _gemma_model() -> str:
     return raw.split(":")[-1] if raw else "google/gemma-4-31B-it"
 
 
+def _normalise_for_matching(text: str) -> str:
+    decomposed = unicodedata.normalize("NFD", text or "")
+    without_accents = "".join(
+        char for char in decomposed if unicodedata.category(char) != "Mn"
+    )
+    return without_accents.lower()
+
+
 async def _call_gemma_router(prompt: str) -> str:
     timeout = _agent_router_timeout()
     payload = {
@@ -168,7 +177,7 @@ async def _call_gemma_router(prompt: str) -> str:
 
 def _fallback_route(request: ChatAgentRouteRequest, reason: str) -> ChatAgentRouteResponse:
     file_type = (request.file_type or "").lower()
-    text = request.message.lower()
+    text = _normalise_for_matching(request.message)
 
     if request.has_file and file_type:
         matching_file_agents = list(agents_for_file_type(file_type))
