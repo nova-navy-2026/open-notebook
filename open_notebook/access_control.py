@@ -1,21 +1,44 @@
 """Navy document access control.
 
-Each indexed document in the navy OpenSearch corpus carries:
+Each authenticated user carries (from the users directory file)::
 
-* ``document_classification`` (int 0-4) \u2014 see ``CLASSIFICATION_MAP``.
-* ``allowed_departments`` (list[str]) \u2014 departments allowed to read the
-  document. The reserved value ``"general"`` means "any department".
+    {
+      "m24409": {"email": "borges.rodrigues@marinha.pt",
+                 "departments": ["SI-DAGI"], "clearance_level": 2}
+    }
 
-Each authenticated user carries (from the users directory file):
+* ``departments`` (list[str]) \u2014 the units/entities the user belongs to.
+  The legacy single-value ``department`` (str) key is still accepted.
+* ``clearance_level`` (int 0-4) \u2014 the user's clearance. The legacy
+  ``clearence`` key is still accepted.
 
-* ``department`` (str)
-* ``clearence`` (int 0-4)  \u2014 spelling matches the navy schema in use.
+Each document carries the richer navy template::
+
+    {
+      "document_status": "active",
+      "access_scope": "general" | "departmental" | "individual",
+      "allowed_entities": ["COMNAV", "EMA", "SI-DAGI"] | ["m24409"] | ["general"],
+      "classification_level": 2,
+      ...
+    }
 
 A user may read a document iff::
 
-    user.clearence       >= document.document_classification
-    user.department      in document.allowed_departments
-        OR  "general"    in document.allowed_departments
+    user.clearance_level  >= document.classification_level
+    document.document_status == "active"
+    AND ( "general"        in document.allowed_entities
+          OR user_id       in document.allowed_entities   # individual docs
+          OR any department in document.allowed_entities ) # departmental docs
+
+IMPORTANT \u2014 index field names:
+    The navy OpenSearch corpus has **not** yet been reindexed to this
+    richer template. It still stores ``document_classification`` and
+    ``allowed_departments`` and has no ``document_status`` field. To avoid a
+    breaking reindex, the live OpenSearch filter keeps querying the original
+    field names (see ``ENTITY_FIELD`` / ``CLASSIFICATION_FIELD`` below) and
+    treats a missing ``document_status`` as active. When the corpus is
+    rebuilt with the new schema, switch the three field-name constants and
+    nothing else.
 
 This module is navy-specific: it lives in open-notebook, not in
 NOVA-Researcher. open-notebook is responsible for translating the
@@ -24,14 +47,7 @@ clause to NOVA-Researcher via the ``retriever_filter`` field on the
 research / opensearch-prefetch payloads.
 
 User directory: JSON file at the path given by ``NAVY_USERS_FILE``
-(default: ``./users.json``). Example::
-
-    {
-      "m24409": {"email": "borges.rodrigues@marinha.pt",
-                 "department": "SI-DAGI", "clearence": 2},
-      "m25109": {"email": "ferreira.guerra@marinha.pt",
-                 "department": "SI-DITIC", "clearence": 2}
-    }
+(default: ``./users.json``).
 """
 from __future__ import annotations
 
@@ -52,9 +68,25 @@ CLASSIFICATION_MAP: Dict[str, int] = {
     "topsecret": 4,
 }
 
-# Departments listed here in a document's ``allowed_departments`` open
-# the document to every department.
+# The reserved entity that opens a document to every department/user.
 WILDCARD_DEPARTMENT = "general"
+
+# Documents whose status is anything other than this are treated as expired /
+# archived and filtered out.
+ACTIVE_STATUS = "active"
+
+# ---------------------------------------------------------------------------
+# OpenSearch index field names.
+#
+# The navy corpus has been reindexed to the richer template, so the live
+# filter queries the new field names below. (The legacy names
+# ``allowed_departments`` / ``document_classification`` are no longer present
+# in the index.) ``is_document_allowed`` still understands both key sets for
+# any in-memory documents that predate the reindex.
+# ---------------------------------------------------------------------------
+ENTITY_FIELD = "allowed_entities"
+CLASSIFICATION_FIELD = "classification_level"
+STATUS_FIELD = "document_status"
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +160,66 @@ def access_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# User-field normalization (new template + legacy fallback)
+# ---------------------------------------------------------------------------
+def user_departments(user: Dict[str, Any]) -> List[str]:
+    """Return the user's departments as a list.
+
+    Accepts the new ``departments`` (list) key and falls back to the legacy
+    ``department`` (single string) key.
+    """
+    depts = user.get("departments")
+    if isinstance(depts, (list, tuple, set)):
+        return [str(d) for d in depts if d]
+    if isinstance(depts, str) and depts:
+        return [depts]
+    single = user.get("department")
+    return [str(single)] if single else []
+
+
+def user_clearance(user: Dict[str, Any]) -> int:
+    """Return the user's clearance level.
+
+    Accepts the new ``clearance_level`` key and falls back to the legacy
+    ``clearence`` key. Defaults to 0 on missing/invalid values.
+    """
+    raw = user.get("clearance_level")
+    if raw is None:
+        raw = user.get("clearence", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _document_classification(document: Dict[str, Any]) -> Optional[int]:
+    """Read a document's classification, supporting old and new key names."""
+    raw = document.get("classification_level")
+    if raw is None:
+        raw = document.get("document_classification", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _document_entities(document: Dict[str, Any]) -> List[str]:
+    """Read a document's allowed entities, supporting old and new key names."""
+    allowed = document.get("allowed_entities")
+    if allowed is None:
+        allowed = document.get("allowed_departments")
+    return list(allowed or [])
+
+
+def _document_is_active(document: Dict[str, Any]) -> bool:
+    """Return True when the document is active (missing status == active)."""
+    status = document.get("document_status")
+    if status is None:
+        return True
+    return str(status).strip().lower() == ACTIVE_STATUS
+
+
+# ---------------------------------------------------------------------------
 # Filter builder \u2014 produces an OpenSearch ``bool`` clause to be sent to
 # NOVA-Researcher as the ``retriever_filter`` field.
 # ---------------------------------------------------------------------------
@@ -156,23 +248,44 @@ def build_opensearch_filter(
         # Fail-closed.
         return {"bool": {"must_not": {"match_all": {}}}}
 
-    try:
-        clearance = int(user.get("clearence", 0))
-    except (TypeError, ValueError):
-        clearance = 0
-    department = user.get("department") or ""
+    clearance = user_clearance(user)
+    departments = user_departments(user)
+
+    # Entities the user is allowed to match:
+    #   - the user's own navy id  → individual documents,
+    #   - each of the user's departments → departmental documents,
+    #   - the "general" wildcard → general documents.
+    entities = [user_id, *departments, WILDCARD_DEPARTMENT]
 
     return {
         "bool": {
             "must": [
                 {
                     "range": {
-                        "document_classification": {"lte": clearance}
+                        CLASSIFICATION_FIELD: {"lte": clearance}
                     }
                 },
                 {
                     "terms": {
-                        "allowed_departments": [department, WILDCARD_DEPARTMENT]
+                        ENTITY_FIELD: entities
+                    }
+                },
+                # Exclude expired/archived documents. The current corpus has
+                # no document_status field, so a missing field is treated as
+                # active to avoid filtering everything out before the reindex.
+                {
+                    "bool": {
+                        "should": [
+                            {"term": {STATUS_FIELD: ACTIVE_STATUS}},
+                            {
+                                "bool": {
+                                    "must_not": {
+                                        "exists": {"field": STATUS_FIELD}
+                                    }
+                                }
+                            },
+                        ],
+                        "minimum_should_match": 1,
                     }
                 },
             ]
@@ -185,7 +298,12 @@ def is_document_allowed(
     user_id: Optional[str],
 ) -> bool:
     """In-memory equivalent of ``build_opensearch_filter`` — useful for
-    post-filtering documents that didn't go through OpenSearch."""
+    post-filtering documents that didn't go through OpenSearch.
+
+    Understands both the legacy keys (``document_classification`` /
+    ``allowed_departments``) and the new template keys (``classification_level``
+    / ``allowed_entities`` / ``document_status`` / ``access_scope``).
+    """
     if not access_enabled():
         return True
 
@@ -197,32 +315,36 @@ def is_document_allowed(
     if not user:
         return False
 
-    try:
-        clearance = int(user.get("clearence", 0))
-    except (TypeError, ValueError):
-        return False
-    department = user.get("department") or ""
-
-    try:
-        doc_class = int(document.get("document_classification", 0))
-    except (TypeError, ValueError):
-        return False
-    if doc_class > clearance:
+    # Expired/archived documents are never visible.
+    if not _document_is_active(document):
         return False
 
-    allowed: List[str] = list(document.get("allowed_departments") or [])
+    clearance = user_clearance(user)
+    doc_class = _document_classification(document)
+    if doc_class is None or doc_class > clearance:
+        return False
+
+    allowed = _document_entities(document)
     if WILDCARD_DEPARTMENT in allowed:
         return True
-    return department in allowed
+    if user_id in allowed:  # individual documents
+        return True
+    return any(dept in allowed for dept in user_departments(user))
 
 
 __all__ = [
     "CLASSIFICATION_MAP",
     "WILDCARD_DEPARTMENT",
+    "ACTIVE_STATUS",
+    "ENTITY_FIELD",
+    "CLASSIFICATION_FIELD",
+    "STATUS_FIELD",
     "access_enabled",
     "build_opensearch_filter",
     "get_user",
     "get_user_by_email",
     "is_document_allowed",
     "load_users",
+    "user_clearance",
+    "user_departments",
 ]

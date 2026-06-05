@@ -28,10 +28,23 @@ def _navy_claims_for_email(email: Optional[str]) -> dict:
         return {}
     navy_id, entry = match
     claims: dict = {"navy_user_id": navy_id}
-    if entry.get("department") is not None:
-        claims["department"] = entry.get("department")
-    if entry.get("clearence") is not None:
-        claims["clearence"] = entry.get("clearence")
+
+    # Departments: prefer the new list-valued ``departments`` key, fall back
+    # to the legacy single-valued ``department`` key.
+    departments = entry.get("departments")
+    if departments is None and entry.get("department") is not None:
+        departments = [entry.get("department")]
+    if departments is not None:
+        claims["departments"] = departments
+
+    # Clearance: prefer the new ``clearance_level`` key, fall back to the
+    # legacy ``clearence`` key.
+    clearance = entry.get("clearance_level")
+    if clearance is None:
+        clearance = entry.get("clearence")
+    if clearance is not None:
+        claims["clearance_level"] = clearance
+
     return claims
 
 router = APIRouter(prefix="/auth", tags=["auth"])

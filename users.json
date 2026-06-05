@@ -1,17 +1,17 @@
 {
   "m24409": {
     "email": "borges.rodrigues@marinha.pt",
-    "department": "SI-DAGI",
-    "clearence": 2
+    "departments": ["SI-DAGI"],
+    "clearance_level": 2
   },
   "m25109": {
     "email": "ferreira.guerra@marinha.pt",
-    "department": "SI-DITIC",
-    "clearence": 2
+    "departments": ["SI-DITIC"],
+    "clearance_level": 2
   },
   "m10001": {
     "email": "admin@open-notebook.local",
-    "department": "SP-DP",
-    "clearence": 4
+    "departments": ["SP-DP"],
+    "clearance_level": 4
   }
 }

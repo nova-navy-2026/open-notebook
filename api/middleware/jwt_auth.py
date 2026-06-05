@@ -84,8 +84,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 
                 # Navy-specific claims (populated at login from users.json).
                 request.state.navy_user_id = payload.get("navy_user_id")
-                request.state.navy_department = payload.get("department")
-                request.state.navy_clearance = payload.get("clearence")
+                # New template: list of departments + clearance_level, with
+                # backward-compatible fallback to the legacy single-value keys.
+                request.state.navy_departments = payload.get("departments") or (
+                    [payload["department"]] if payload.get("department") else None
+                )
+                request.state.navy_clearance = payload.get(
+                    "clearance_level", payload.get("clearence")
+                )
                 
                 logger.debug(f"✅ JWT auth successful: {payload['email']}")
                 
