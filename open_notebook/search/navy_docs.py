@@ -24,6 +24,44 @@ from loguru import logger
 from open_notebook.config import NAVY_OPENSEARCH_INDEX
 from open_notebook.search.client import get_client
 
+
+async def _search_with_retry(
+    client: Any,
+    body: Dict[str, Any],
+    *,
+    retries: int = 3,
+    base_delay: float = 0.25,
+) -> Dict[str, Any]:
+    """Run an OpenSearch ``search`` with retries on transient 5xx errors.
+
+    The managed OpenSearch cluster occasionally returns a transient HTTP 500
+    (e.g. ``security_exception: Unexpected exception``) when several workers
+    hammer it at once during startup priming. These are not query or auth
+    problems — the same request succeeds on retry — so we retry a few times
+    with a short exponential backoff before giving up.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        try:
+            return await asyncio.to_thread(
+                client.search, index=NAVY_OPENSEARCH_INDEX, body=body
+            )
+        except Exception as exc:  # noqa: BLE001 - inspected below
+            status = getattr(exc, "status_code", None)
+            transient = status is None or (isinstance(status, int) and status >= 500)
+            if not transient or attempt == retries:
+                raise
+            last_exc = exc
+            delay = base_delay * (2**attempt)
+            logger.warning(
+                f"Transient OpenSearch error on navy search "
+                f"(attempt {attempt + 1}/{retries + 1}, retrying in {delay:.2f}s): {exc}"
+            )
+            await asyncio.sleep(delay)
+    # Unreachable, but keeps type checkers happy.
+    raise last_exc  # type: ignore[misc]
+
+
 # In-process TTL cache for the navy documents listing. The corpus
 # changes rarely (manual re-index), but every notebook/source page
 # load asks for it, so caching avoids hitting OpenSearch with an
@@ -112,9 +150,7 @@ async def _list_navy_documents_uncached(
             if acl_filter is not None:
                 body["query"] = acl_filter
 
-        response = await asyncio.to_thread(
-            client.search, index=NAVY_OPENSEARCH_INDEX, body=body
-        )
+        response = await _search_with_retry(client, body)
 
         buckets = response.get("aggregations", {}).get("unique_docs", {}).get("buckets", [])
 
@@ -201,9 +237,7 @@ async def search_navy_documents(
             ],
         }
 
-        response = await asyncio.to_thread(
-            client.search, index=NAVY_OPENSEARCH_INDEX, body=body
-        )
+        response = await _search_with_retry(client, body)
 
         hits = response.get("hits", {}).get("hits", [])
         results = []
@@ -294,9 +328,7 @@ async def vector_search_navy_documents(
         if min_score > 0:
             body["min_score"] = min_score
 
-        response = await asyncio.to_thread(
-            client.search, index=NAVY_OPENSEARCH_INDEX, body=body
-        )
+        response = await _search_with_retry(client, body)
 
         hits = response.get("hits", {}).get("hits", [])
         results = []
