@@ -181,6 +181,57 @@ async def _list_navy_documents_uncached(
         raise
 
 
+def _collapse_navy_hits(
+    hits: List[Dict[str, Any]], limit: int
+) -> List[Dict[str, Any]]:
+    """Convert OpenSearch hits to navy result dicts, collapsing children of the
+    same parent section into a single entry (small-to-big retrieval).
+
+    Hits must arrive best-first (default OpenSearch score order), so keeping the
+    first occurrence of each parent preserves its highest-ranked match. The full
+    parent section (``parent_content``) is returned when present, falling back to
+    the child chunk for documents indexed before parent fields existed. Legacy
+    docs without ``parent_id`` collapse on ``doc_id:section_title`` instead, so a
+    section is never represented more than once.
+    """
+    results: List[Dict[str, Any]] = []
+    seen_parents: set = set()
+    for hit in hits:
+        src = hit.get("_source", {})
+        doc_id = src.get("doc_id", "")
+        section_title = src.get("section_title", "")
+        parent_key = src.get("parent_id") or f"{doc_id}:{section_title}"
+        if parent_key in seen_parents:
+            continue
+        seen_parents.add(parent_key)
+        results.append({
+            "doc_id": doc_id,
+            "content": src.get("parent_content") or src.get("content", ""),
+            "source": src.get("source", ""),
+            "section_title": section_title,
+            "page_start": src.get("page_start"),
+            "page_end": src.get("page_end"),
+            "score": hit.get("_score", 0),
+        })
+        if len(results) >= limit:
+            break
+    return results
+
+
+# Source fields fetched for navy chunk results. parent_id is the dedup key and
+# parent_content is the full section text returned by small-to-big retrieval.
+_NAVY_RESULT_SOURCE = [
+    "doc_id",
+    "content",
+    "source",
+    "section_title",
+    "page_start",
+    "page_end",
+    "parent_id",
+    "parent_content",
+]
+
+
 async def search_navy_documents(
     query: str,
     doc_ids: Optional[List[str]] = None,
@@ -220,40 +271,22 @@ async def search_navy_documents(
             filter_clause.append(acl)
 
         body: Dict[str, Any] = {
-            "size": k,
+            # Over-fetch so that collapsing children of the same parent section
+            # still leaves up to k distinct sections to return.
+            "size": k * 3,
             "query": {
                 "bool": {
                     "must": must_clause,
                     "filter": filter_clause,
                 }
             },
-            "_source": [
-                "doc_id",
-                "content",
-                "source",
-                "section_title",
-                "page_start",
-                "page_end",
-            ],
+            "_source": _NAVY_RESULT_SOURCE,
         }
 
         response = await _search_with_retry(client, body)
 
         hits = response.get("hits", {}).get("hits", [])
-        results = []
-        for hit in hits:
-            src = hit.get("_source", {})
-            results.append({
-                "doc_id": src.get("doc_id", ""),
-                "content": src.get("content", ""),
-                "source": src.get("source", ""),
-                "section_title": src.get("section_title", ""),
-                "page_start": src.get("page_start"),
-                "page_end": src.get("page_end"),
-                "score": hit.get("_score", 0),
-            })
-
-        return results
+        return _collapse_navy_hits(hits, k)
 
     except Exception as e:
         logger.error(f"Navy document search failed: {e}")
@@ -296,9 +329,11 @@ async def vector_search_navy_documents(
 
         client = await get_client()
 
+        # Over-fetch candidates so parent-section dedup still yields up to k.
+        fetch_n = max(k * 3, 1)
         knn_clause: Dict[str, Any] = {
             "vector": embedding,
-            "k": max(k, 1),
+            "k": fetch_n,
         }
 
         from open_notebook.access_control import build_opensearch_filter
@@ -314,16 +349,9 @@ async def vector_search_navy_documents(
             knn_clause["filter"] = {"bool": {"must": knn_filters}}
 
         body: Dict[str, Any] = {
-            "size": k,
+            "size": fetch_n,
             "query": {"knn": {"embedding": knn_clause}},
-            "_source": [
-                "doc_id",
-                "content",
-                "source",
-                "section_title",
-                "page_start",
-                "page_end",
-            ],
+            "_source": _NAVY_RESULT_SOURCE,
         }
         if min_score > 0:
             body["min_score"] = min_score
@@ -331,19 +359,7 @@ async def vector_search_navy_documents(
         response = await _search_with_retry(client, body)
 
         hits = response.get("hits", {}).get("hits", [])
-        results = []
-        for hit in hits:
-            src = hit.get("_source", {})
-            results.append({
-                "doc_id": src.get("doc_id", ""),
-                "content": src.get("content", ""),
-                "source": src.get("source", ""),
-                "section_title": src.get("section_title", ""),
-                "page_start": src.get("page_start"),
-                "page_end": src.get("page_end"),
-                "score": hit.get("_score", 0),
-            })
-        return results
+        return _collapse_navy_hits(hits, k)
 
     except Exception as e:
         logger.error(f"Navy vector search failed, falling back to BM25: {e}")
