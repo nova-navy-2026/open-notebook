@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -20,6 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { conversationToMarkdown, downloadMarkdown } from '@/lib/utils/export-markdown'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
@@ -86,6 +93,9 @@ interface ChatPanelProps {
   visualModelLocked?: boolean
   enableDeepResearch?: boolean
   enableAgentControls?: boolean
+  // Export all conversations (optional). When provided, an "Export all" item is shown.
+  onExportAll?: () => void | Promise<void>
+  exportingAll?: boolean
 }
 
 export function ChatPanel({
@@ -109,7 +119,9 @@ export function ChatPanel({
   enableAttachments = false,
   visualModelLocked = false,
   enableDeepResearch = false,
-  enableAgentControls = false
+  enableAgentControls = false,
+  onExportAll,
+  exportingAll = false,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
@@ -255,28 +267,79 @@ export function ChatPanel({
 
   const hasSessions = onSelectSession && onCreateSession && onDeleteSession
 
+  const resolvedTitle = title || (contextType === 'source'
+    ? t.chat.chatWith.replace('{name}', t.navigation.sources)
+    : t.chat.chatWith.replace('{name}', t.common.notebook))
+
+  const handleExportCurrent = useCallback(() => {
+    if (!messages.length) {
+      toast.info(t.chat.noMessagesToExport ?? 'Não há mensagens para exportar')
+      return
+    }
+    const markdown = conversationToMarkdown({
+      title: resolvedTitle,
+      messages,
+    })
+    downloadMarkdown(markdown, resolvedTitle)
+    toast.success(t.chat.conversationExported ?? 'Conversa exportada')
+  }, [messages, resolvedTitle, t])
+
+  const exportMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 flex-shrink-0"
+          title={t.chat.exportConversation ?? 'Exportar conversa'}
+          disabled={exportingAll}
+        >
+          {exportingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={handleExportCurrent}>
+          <Download className="mr-2 h-4 w-4" />
+          {t.chat.exportCurrentConversation ?? 'Exportar conversa atual'}
+        </DropdownMenuItem>
+        {onExportAll && (
+          <DropdownMenuItem onClick={() => void onExportAll()} disabled={exportingAll}>
+            <Download className="mr-2 h-4 w-4" />
+            {t.chat.exportAllConversations ?? 'Exportar todas as conversas'}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
   return (
     <>
     <Card className="flex flex-col h-full flex-1 overflow-hidden">
       <CardHeader className="pb-3 flex-shrink-0">
         {hasSessions ? (
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'chat' | 'sessions')} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="chat" className="gap-1.5">
-                <MessageSquare className="h-4 w-4" />
-                <span className="truncate">{title || t.common.chat}</span>
-              </TabsTrigger>
-              <TabsTrigger value="sessions" className="gap-1.5">
-                <Clock className="h-4 w-4" />
-                {t.chat.sessions}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-2">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'chat' | 'sessions')} className="flex-1 min-w-0">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="chat" className="gap-1.5">
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="truncate">{title || t.common.chat}</span>
+                </TabsTrigger>
+                <TabsTrigger value="sessions" className="gap-1.5">
+                  <Clock className="h-4 w-4" />
+                  {t.chat.sessions}
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {exportMenu}
+          </div>
         ) : (
-          <CardTitle className="flex items-center gap-2 truncate min-w-0">
-            <Bot className="h-5 w-5 flex-shrink-0" />
-            <span className="truncate">{title || (contextType === 'source' ? t.chat.chatWith.replace('{name}', t.navigation.sources) : t.chat.chatWith.replace('{name}', t.common.notebook))}</span>
-          </CardTitle>
+          <div className="flex items-center gap-2 min-w-0">
+            <CardTitle className="flex items-center gap-2 truncate min-w-0 flex-1">
+              <Bot className="h-5 w-5 flex-shrink-0" />
+              <span className="truncate">{resolvedTitle}</span>
+            </CardTitle>
+            {exportMenu}
+          </div>
         )}
       </CardHeader>
 
@@ -662,7 +725,7 @@ export function ChatPanel({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo,audio/wav,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/flac,audio/ogg,audio/aac,audio/webm"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo,audio/wav,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/flac,audio/ogg,audio/aac,audio/webm,text/csv,text/tab-separated-values,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,.tsv,.json,.xls,.xlsx"
                   className="hidden"
                   onChange={handleFileChange}
                 />

@@ -696,7 +696,11 @@ class ChatSession(ObjectModel):
 
 
 async def text_search(
-    keyword: str, results: int, source: bool = True, note: bool = True
+    keyword: str,
+    results: int,
+    source: bool = True,
+    note: bool = True,
+    user_id: Optional[str] = None,
 ):
     if not keyword:
         raise InvalidInputError("Search keyword cannot be empty")
@@ -708,7 +712,9 @@ async def text_search(
             try:
                 from open_notebook.search.query import opensearch_text_search
 
-                return await opensearch_text_search(keyword, results, source, note)
+                return await opensearch_text_search(
+                    keyword, results, source, note, user_id=user_id
+                )
             except Exception as e:
                 logger.warning(
                     f"OpenSearch text search failed, falling back to SurrealDB: {e}"
@@ -735,6 +741,7 @@ async def vector_search(
     source: bool = True,
     note: bool = True,
     minimum_score=0.2,
+    user_id: Optional[str] = None,
 ):
     if not keyword:
         raise InvalidInputError("Search keyword cannot be empty")
@@ -752,7 +759,7 @@ async def vector_search(
                 from open_notebook.search.query import opensearch_vector_search
 
                 return await opensearch_vector_search(
-                    embed, results, source, note, minimum_score
+                    embed, results, source, note, minimum_score, user_id=user_id
                 )
             except Exception as e:
                 logger.warning(
@@ -785,6 +792,7 @@ async def hybrid_search(
     source: bool = True,
     note: bool = True,
     minimum_score: float = 0.2,
+    user_id: Optional[str] = None,
 ):
     """Hybrid search combining BM25 text matching and vector similarity.
 
@@ -804,7 +812,8 @@ async def hybrid_search(
                 from open_notebook.search.query import opensearch_hybrid_search
 
                 return await opensearch_hybrid_search(
-                    keyword, embed, results, source, note, minimum_score
+                    keyword, embed, results, source, note, minimum_score,
+                    user_id=user_id,
                 )
             except Exception as e:
                 logger.warning(
@@ -812,7 +821,9 @@ async def hybrid_search(
                 )
 
         # Fallback: hybrid is not available on SurrealDB, use vector search
-        return await vector_search(keyword, results, source, note, minimum_score)
+        return await vector_search(
+            keyword, results, source, note, minimum_score, user_id=user_id
+        )
     except Exception as e:
         logger.error(f"Error performing hybrid search: {str(e)}")
         logger.exception(e)

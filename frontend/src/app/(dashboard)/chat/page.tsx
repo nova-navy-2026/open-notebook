@@ -8,12 +8,59 @@ import { ChatPanel } from "@/components/source/ChatPanel";
 import { Badge } from "@/components/ui/badge";
 import { FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { globalChatApi } from "@/lib/api/global-chat";
+import { PageInfoButton } from "@/components/common/PageInfoButton";
+import {
+  conversationsToMarkdown,
+  downloadMarkdown,
+  type ExportableConversation,
+} from "@/lib/utils/export-markdown";
+import { toast } from "sonner";
 
 export default function GlobalChatPage() {
   const { t } = useTranslation();
   const chat = useGlobalChat();
   const { data: models = [] } = useModels();
   const [docsExpanded, setDocsExpanded] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
+
+  const handleExportAll = async () => {
+    if (exportingAll) return;
+    setExportingAll(true);
+    try {
+      const sessions = await globalChatApi.listSessions();
+      if (!sessions.length) {
+        toast.info(t.chat.noConversationsToExport ?? "Não há conversas para exportar");
+        return;
+      }
+      const detailed = await Promise.all(
+        sessions.map((session) => globalChatApi.getSession(session.id).catch(() => null)),
+      );
+      const conversations: ExportableConversation[] = detailed
+        .filter((session): session is NonNullable<typeof session> => Boolean(session))
+        .map((session) => ({
+          title: session.title || "Conversa",
+          messages: session.messages ?? [],
+          createdAt: session.created,
+          updatedAt: session.updated,
+        }));
+      if (!conversations.length) {
+        toast.info(t.chat.noConversationsToExport ?? "Não há conversas para exportar");
+        return;
+      }
+      const markdown = conversationsToMarkdown(
+        conversations,
+        t.chat.exportAllConversations ?? "Conversas exportadas",
+      );
+      downloadMarkdown(markdown, "conversas");
+      toast.success(t.chat.conversationsExported ?? "Conversas exportadas");
+    } catch (error) {
+      console.error("Failed to export conversations:", error);
+      toast.error(t.chat.exportFailed ?? "Falha ao exportar conversas");
+    } finally {
+      setExportingAll(false);
+    }
+  };
 
   const documents = chat.contextStats?.documents ?? [];
   const gemmaModel = models.find((model) => {
@@ -31,7 +78,10 @@ export default function GlobalChatPage() {
   return (
     <div className="app-page-wide flex h-full flex-col">
       <div className="mb-4">
-        <h1 className="text-2xl font-bold">{t.common.chat ?? "Chat"}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold">{t.common.chat ?? "Chat"}</h1>
+          <PageInfoButton pageKey="chat" />
+        </div>
         <p className="text-sm text-muted-foreground mt-1">
           {t.chat.globalChatDescription ?? "Chat with all your indexed documents"}
         </p>
@@ -100,6 +150,8 @@ export default function GlobalChatPage() {
           visualModelLocked={chat.isVisualModelLocked}
           enableDeepResearch
           enableAgentControls
+          onExportAll={handleExportAll}
+          exportingAll={exportingAll}
         />
       </div>
     </div>

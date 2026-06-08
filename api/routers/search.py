@@ -1,10 +1,11 @@
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+from api.auth import get_navy_acl_user_id
 from api.models import AskRequest, AskResponse, SearchRequest, SearchResponse
 from open_notebook.ai.models import Model, model_manager
 from open_notebook.domain.notebook import hybrid_search, text_search, vector_search
@@ -15,9 +16,11 @@ router = APIRouter()
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search_knowledge_base(search_request: SearchRequest):
+async def search_knowledge_base(search_request: SearchRequest, request: Request):
     """Search the knowledge base using text, vector, or hybrid search."""
     try:
+        # Navy ACL identity used to filter access-controlled documents.
+        acl_user_id = get_navy_acl_user_id(request)
         if search_request.type in ("vector", "hybrid"):
             # Check if embedding model is available for vector/hybrid search
             if not await model_manager.get_embedding_model():
@@ -33,6 +36,7 @@ async def search_knowledge_base(search_request: SearchRequest):
                     source=search_request.search_sources,
                     note=search_request.search_notes,
                     minimum_score=search_request.minimum_score,
+                    user_id=acl_user_id,
                 )
             else:
                 results = await vector_search(
@@ -41,6 +45,7 @@ async def search_knowledge_base(search_request: SearchRequest):
                     source=search_request.search_sources,
                     note=search_request.search_notes,
                     minimum_score=search_request.minimum_score,
+                    user_id=acl_user_id,
                 )
         else:
             # Text search
@@ -49,6 +54,7 @@ async def search_knowledge_base(search_request: SearchRequest):
                 results=search_request.limit,
                 source=search_request.search_sources,
                 note=search_request.search_notes,
+                user_id=acl_user_id,
             )
 
         return SearchResponse(
@@ -68,7 +74,11 @@ async def search_knowledge_base(search_request: SearchRequest):
 
 
 async def stream_ask_response(
-    question: str, strategy_model: Model, answer_model: Model, final_answer_model: Model
+    question: str,
+    strategy_model: Model,
+    answer_model: Model,
+    final_answer_model: Model,
+    acl_user_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream the ask response as Server-Sent Events."""
     try:
@@ -81,6 +91,7 @@ async def stream_ask_response(
                     strategy_model=strategy_model.id,
                     answer_model=answer_model.id,
                     final_answer_model=final_answer_model.id,
+                    acl_user_id=acl_user_id,
                 )
             ),
             stream_mode="updates",
@@ -136,9 +147,11 @@ async def stream_ask_response(
 
 
 @router.post("/search/ask")
-async def ask_knowledge_base(ask_request: AskRequest):
+async def ask_knowledge_base(ask_request: AskRequest, request: Request):
     """Ask the knowledge base a question using AI models."""
     try:
+        # Navy ACL identity used to filter access-controlled documents.
+        acl_user_id = get_navy_acl_user_id(request)
         # Validate models exist
         strategy_model = await Model.get(ask_request.strategy_model)
         answer_model = await Model.get(ask_request.answer_model)
@@ -171,7 +184,11 @@ async def ask_knowledge_base(ask_request: AskRequest):
         # proxy buffering so Next.js / nginx forward chunks immediately.
         return StreamingResponse(
             stream_ask_response(
-                ask_request.question, strategy_model, answer_model, final_answer_model
+                ask_request.question,
+                strategy_model,
+                answer_model,
+                final_answer_model,
+                acl_user_id=acl_user_id,
             ),
             media_type="text/event-stream",
             headers={
@@ -189,9 +206,11 @@ async def ask_knowledge_base(ask_request: AskRequest):
 
 
 @router.post("/search/ask/simple", response_model=AskResponse)
-async def ask_knowledge_base_simple(ask_request: AskRequest):
+async def ask_knowledge_base_simple(ask_request: AskRequest, request: Request):
     """Ask the knowledge base a question and return a simple response (non-streaming)."""
     try:
+        # Navy ACL identity used to filter access-controlled documents.
+        acl_user_id = get_navy_acl_user_id(request)
         # Validate models exist
         strategy_model = await Model.get(ask_request.strategy_model)
         answer_model = await Model.get(ask_request.answer_model)
@@ -229,6 +248,7 @@ async def ask_knowledge_base_simple(ask_request: AskRequest):
                     strategy_model=strategy_model.id,
                     answer_model=answer_model.id,
                     final_answer_model=final_answer_model.id,
+                    acl_user_id=acl_user_id,
                 )
             ),
             stream_mode="updates",

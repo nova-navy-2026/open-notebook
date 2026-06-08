@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResearchGeneratePanel } from "@/components/research/ResearchGeneratePanel";
 import { ResearchJobsList } from "@/components/research/ResearchJobsList";
 import { useTranslation } from "@/lib/hooks/use-translation";
+import { PageInfoButton } from "@/components/common/PageInfoButton";
 
 export default function ResearchPage() {
   const { t } = useTranslation();
@@ -14,9 +15,12 @@ export default function ResearchPage() {
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="app-page space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">
-          {t.research?.title ?? "Research"}
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">
+            {t.research?.title ?? "Research"}
+          </h1>
+          <PageInfoButton pageKey="research" />
+        </div>
         <p className="text-muted-foreground">
           {t.research?.subtitle ??
             "Generate in-depth research reports powered by NOVA-Researcher and AMALIA AI."}

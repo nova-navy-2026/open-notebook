@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTranscriptionStore } from "@/lib/stores/transcription-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
+import { PageInfoButton } from "@/components/common/PageInfoButton";
 
 // Stable colour palette for speaker badges (Tailwind classes).
 const SPEAKER_PALETTE = [
@@ -188,7 +189,10 @@ export default function TranscriptionPage() {
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="app-page space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
+          <PageInfoButton pageKey="transcription" />
+        </div>
         <p className="text-muted-foreground">{tp.subtitle}</p>
       </div>
 

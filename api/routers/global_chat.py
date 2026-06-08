@@ -127,10 +127,13 @@ class SuccessResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _search_user_sources(query: str, k: int) -> List[Dict[str, Any]]:
+async def _search_user_sources(
+    query: str, k: int, user_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Hybrid (BM25 + k-NN) search over user-indexed sources for one query.
 
-    Returns normalized chunk dicts. Never raises.
+    Returns normalized chunk dicts. Never raises. ``user_id`` is the navy ACL
+    identity used to filter access-controlled documents that share the index.
     """
     out: List[Dict[str, Any]] = []
     try:
@@ -153,12 +156,15 @@ async def _search_user_sources(query: str, k: int) -> List[Dict[str, Any]]:
             from open_notebook.search.query import opensearch_hybrid_search
 
             results = await opensearch_hybrid_search(
-                query, embedding, results=k, source=True, note=False
+                query, embedding, results=k, source=True, note=False,
+                user_id=user_id,
             )
         else:
             from open_notebook.search.query import opensearch_text_search
 
-            results = await opensearch_text_search(query, k, source=True, note=False)
+            results = await opensearch_text_search(
+                query, k, source=True, note=False, user_id=user_id
+            )
 
         for r in results or []:
             content = r.get("content", "")
@@ -250,7 +256,7 @@ async def _build_global_context(
     # 1+2. Search user sources and navy corpus for every variant in parallel.
     search_tasks = []
     for v in variants:
-        search_tasks.append(_search_user_sources(v, per_query))
+        search_tasks.append(_search_user_sources(v, per_query, user_id))
         search_tasks.append(_search_navy_corpus(v, per_query, user_id))
     results_per_task = await asyncio.gather(*search_tasks, return_exceptions=True)
 

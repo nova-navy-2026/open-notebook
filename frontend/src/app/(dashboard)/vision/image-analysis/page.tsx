@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import { useImageAnalysisStore } from "@/lib/stores/vision-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { AddToNotebookDropdown } from "@/components/vision/AddToNotebookDropdown";
+import { PageInfoButton } from "@/components/common/PageInfoButton";
 
 export default function ImageAnalysisPage() {
   const { t } = useTranslation();
@@ -80,7 +81,10 @@ export default function ImageAnalysisPage() {
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="app-page space-y-6">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight">{tp.title}</h1>
+          <PageInfoButton pageKey="visionImage" />
+        </div>
         <p className="text-muted-foreground">
           {tp.subtitle}
         </p>

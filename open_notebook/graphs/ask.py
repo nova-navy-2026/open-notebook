@@ -174,9 +174,15 @@ async def provide_answer(state: SubGraphState, config: RunnableConfig) -> dict:
         merged: dict = {}
         per_query = max(3, 10 // max(1, len(variants)))
 
+        # Navy ACL identity, threaded from the API layer via the graph config.
+        # When absent, access-controlled documents are excluded (fail closed).
+        acl_user_id = config.get("configurable", {}).get("acl_user_id")
+
         async def _search(v: str):
             try:
-                return await vector_search(v, per_query, True, True)
+                return await vector_search(
+                    v, per_query, True, True, user_id=acl_user_id
+                )
             except Exception:
                 return []
 

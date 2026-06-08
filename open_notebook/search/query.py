@@ -10,10 +10,15 @@ Result format (per item):
 """
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from open_notebook.access_control import (
+    CLASSIFICATION_FIELD,
+    ENTITY_FIELD,
+    build_opensearch_filter,
+)
 from open_notebook.config import OPENSEARCH_INDEX
 from open_notebook.search.client import get_client
 
@@ -34,6 +39,45 @@ def _build_type_filter(
     if not types:
         return []
     return [{"terms": {"doc_type": types}}]
+
+
+def _build_acl_filter(user_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Restrict access-controlled (navy corpus) documents to those the user is
+    cleared to read, while leaving the user's own notebook documents untouched.
+
+    The navy corpus and open-notebook sources/notes live in the same OpenSearch
+    index, so an unfiltered query would surface navy PDFs above the user's
+    clearance. Navy documents carry governance fields (``classification_level``
+    / ``allowed_entities``); regular open-notebook sources and notes do not.
+
+    Returns ``None`` when no restriction applies (access control disabled or an
+    admin user). Otherwise returns a ``bool`` clause admitting a hit when EITHER
+    it carries no governance fields (a regular source/note) OR it satisfies the
+    clearance/entity ACL filter. Unknown/missing users fail closed: navy
+    documents are excluded entirely.
+    """
+    acl = build_opensearch_filter(user_id)
+    if acl is None:
+        # Access control disabled or admin bypass: no restriction.
+        return None
+    return {
+        "bool": {
+            "should": [
+                # Regular open-notebook documents carry no governance fields.
+                {
+                    "bool": {
+                        "must_not": [
+                            {"exists": {"field": CLASSIFICATION_FIELD}},
+                            {"exists": {"field": ENTITY_FIELD}},
+                        ]
+                    }
+                },
+                # Navy documents must satisfy the clearance/entity ACL filter.
+                acl,
+            ],
+            "minimum_should_match": 1,
+        }
+    }
 
 
 def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -139,18 +183,25 @@ async def opensearch_text_search(
     source: bool = True,
     note: bool = True,
     parent_ids: List[str] | None = None,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """BM25 full-text search on *content* and *title* fields.
 
     Returns results in the SurrealDB ``fn::text_search`` format. When
     ``parent_ids`` is provided, only chunks whose ``parent_id`` is in the
     given list are considered (used for RAG over a fixed set of sources).
+
+    ``user_id`` is the navy ACL identity used to filter access-controlled
+    documents; when omitted such documents are excluded (fail closed).
     """
     try:
         client = await get_client()
         filters = _build_type_filter(source, note)
         if parent_ids:
             filters = list(filters) + [{"terms": {"parent_id": parent_ids}}]
+        acl = _build_acl_filter(user_id)
+        if acl is not None:
+            filters = list(filters) + [acl]
 
         body: Dict[str, Any] = {
             "size": results * 3,  # over-fetch for deduplication
@@ -209,18 +260,25 @@ async def opensearch_vector_search(
     note: bool = True,
     min_score: float = 0.2,
     parent_ids: List[str] | None = None,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Approximate nearest-neighbour search using the k-NN plugin.
 
     Returns results in the SurrealDB ``fn::vector_search`` format. When
     ``parent_ids`` is provided, restricts matches to chunks whose
     ``parent_id`` is in the given list.
+
+    ``user_id`` is the navy ACL identity used to filter access-controlled
+    documents; when omitted such documents are excluded (fail closed).
     """
     try:
         client = await get_client()
         filters = _build_type_filter(source, note)
         if parent_ids:
             filters = list(filters) + [{"terms": {"parent_id": parent_ids}}]
+        acl = _build_acl_filter(user_id)
+        if acl is not None:
+            filters = list(filters) + [acl]
 
         # k-NN 'k' must be <= 10000 and >= 1
         k_value = min(max(results * 3, 1), 10000)
@@ -284,6 +342,7 @@ async def opensearch_hybrid_search(
     bm25_weight: float = 0.3,
     vector_weight: float = 0.7,
     parent_ids: List[str] | None = None,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Run BM25 and k-NN in parallel, merge via Reciprocal Rank Fusion.
 
@@ -295,10 +354,11 @@ async def opensearch_hybrid_search(
     try:
         # Run both searches concurrently
         text_task = opensearch_text_search(
-            keyword, results, source, note, parent_ids=parent_ids
+            keyword, results, source, note, parent_ids=parent_ids, user_id=user_id
         )
         vector_task = opensearch_vector_search(
-            embedding, results, source, note, min_score, parent_ids=parent_ids
+            embedding, results, source, note, min_score,
+            parent_ids=parent_ids, user_id=user_id,
         )
         text_results, vector_results = await asyncio.gather(
             text_task, vector_task, return_exceptions=True

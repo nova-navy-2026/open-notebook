@@ -1,16 +1,25 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { sourcesApi } from '@/lib/api/sources'
 import { SourceListResponse } from '@/lib/types/api'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
-import { FileText, Link as LinkIcon, Upload, AlignLeft, Trash2, ArrowUpDown } from 'lucide-react'
+import { FileText, Link as LinkIcon, Upload, AlignLeft, Trash2, ArrowUpDown, Search, LayoutGrid, List as ListIcon, Sparkles, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import { cn } from '@/lib/utils'
@@ -18,6 +27,10 @@ import { toast } from 'sonner'
 import { getApiErrorKey } from '@/lib/utils/error-handler'
 import { useNavyDocuments } from '@/lib/hooks/use-navy-docs'
 import { NavyDocsSection } from '@/components/notebooks/NavyDocsSection'
+import { PageInfoButton } from '@/components/common/PageInfoButton'
+
+type SourceTypeKey = 'link' | 'file' | 'text'
+type SourceStatusKey = 'ready' | 'processing' | 'not_embedded'
 
 export default function SourcesPage() {
   const { t, language } = useTranslation()
@@ -28,6 +41,10 @@ export default function SourcesPage() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [sortBy, setSortBy] = useState<'created' | 'updated'>('updated')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [typeFilter, setTypeFilter] = useState<'all' | SourceTypeKey>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | SourceStatusKey>('all')
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; source: SourceListResponse | null }>({
     open: false,
     source: null
@@ -39,6 +56,35 @@ export default function SourcesPage() {
   const loadingMoreRef = useRef(false)
   const hasMoreRef = useRef(true)
   const PAGE_SIZE = 30
+
+  const getSourceTypeKey = (source: SourceListResponse): SourceTypeKey => {
+    if (source.asset?.url) return 'link'
+    if (source.asset?.file_path) return 'file'
+    return 'text'
+  }
+
+  const getSourceStatusKey = (source: SourceListResponse): SourceStatusKey => {
+    const status = (source.status || '').toLowerCase()
+    if (status && status !== 'completed' && status !== 'done' && status !== 'ready' && status !== 'success') {
+      return 'processing'
+    }
+    if (!source.embedded) return 'not_embedded'
+    return 'ready'
+  }
+
+  const filteredSources = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    return sources.filter((source) => {
+      if (typeFilter !== 'all' && getSourceTypeKey(source) !== typeFilter) return false
+      if (statusFilter !== 'all' && getSourceStatusKey(source) !== statusFilter) return false
+      if (term) {
+        const haystack = `${source.title ?? ''} ${source.asset?.url ?? ''}`.toLowerCase()
+        if (!haystack.includes(term)) return false
+      }
+      return true
+    })
+  }, [sources, searchTerm, typeFilter, statusFilter])
+
 
   // Navy corpus docs (read-only catalog on this page)
   const { data: navyData } = useNavyDocuments()
@@ -104,13 +150,13 @@ export default function SourcesPage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (sources.length === 0) return
+      if (filteredSources.length === 0) return
 
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
           setSelectedIndex((prev) => {
-            const newIndex = Math.min(prev + 1, sources.length - 1)
+            const newIndex = Math.min(prev + 1, filteredSources.length - 1)
             // Scroll to keep selected row visible
             setTimeout(() => scrollToSelectedRow(newIndex), 0)
             return newIndex
@@ -127,8 +173,8 @@ export default function SourcesPage() {
           break
         case 'Enter':
           e.preventDefault()
-          if (sources[selectedIndex]) {
-            router.push(`/sources/${sources[selectedIndex].id}`)
+          if (filteredSources[selectedIndex]) {
+            router.push(`/sources/${filteredSources[selectedIndex].id}`)
           }
           break
         case 'Home':
@@ -138,7 +184,7 @@ export default function SourcesPage() {
           break
         case 'End':
           e.preventDefault()
-          const lastIndex = sources.length - 1
+          const lastIndex = filteredSources.length - 1
           setSelectedIndex(lastIndex)
           setTimeout(() => scrollToSelectedRow(lastIndex), 0)
           break
@@ -147,7 +193,7 @@ export default function SourcesPage() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [sources, selectedIndex, router])
+  }, [filteredSources, selectedIndex, router])
 
   const scrollToSelectedRow = (index: number) => {
     const scrollContainer = scrollContainerRef.current
@@ -205,7 +251,7 @@ export default function SourcesPage() {
         clearTimeout(scrollTimeout)
       }
     }
-  }, [fetchSources, sources.length])
+  }, [fetchSources, sources.length, viewMode])
 
   const toggleSort = (field: 'created' | 'updated') => {
     if (sortBy === field) {
@@ -285,11 +331,167 @@ export default function SourcesPage() {
   return (
     <>
       <div className="app-page-wide flex h-full flex-col">
-        <div className="mb-6 flex-shrink-0">
-          <h1 className="text-3xl font-bold">{t.sources.allSources}</h1>
+        <div className="mb-4 flex-shrink-0 space-y-3">
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold">{t.sources.allSources}</h1>
+            <PageInfoButton pageKey="sources" />
+          </div>
+
+          {sources.length > 0 && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-1 flex-wrap items-center gap-2">
+                <div className="relative w-full sm:max-w-xs">
+                  <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder={t.sources.searchSources}
+                    className="pl-8"
+                    aria-label={t.sources.searchSources}
+                  />
+                </div>
+                <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as 'all' | SourceTypeKey)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder={t.sources.filterByType} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.sources.allTypes}</SelectItem>
+                    <SelectItem value="link">{t.sources.type.link}</SelectItem>
+                    <SelectItem value="file">{t.sources.type.file}</SelectItem>
+                    <SelectItem value="text">{t.sources.type.text}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | SourceStatusKey)}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder={t.sources.filterByStatus} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.sources.allStatuses}</SelectItem>
+                    <SelectItem value="ready">{t.sources.filterReady}</SelectItem>
+                    <SelectItem value="processing">{t.sources.filterProcessing}</SelectItem>
+                    <SelectItem value="not_embedded">{t.sources.filterNotEmbedded}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  {t.sources.showingCount
+                    .replace('{count}', String(filteredSources.length))
+                    .replace('{total}', String(sources.length))}
+                </span>
+                <div className="flex items-center rounded-md border">
+                  <Button
+                    variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                    size="icon"
+                    className="h-8 w-8 rounded-r-none"
+                    onClick={() => setViewMode('list')}
+                    aria-label={t.sources.listView}
+                    title={t.sources.listView}
+                  >
+                    <ListIcon className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                    size="icon"
+                    className="h-8 w-8 rounded-l-none"
+                    onClick={() => setViewMode('grid')}
+                    aria-label={t.sources.gridView}
+                    title={t.sources.gridView}
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {sources.length > 0 && (
+        {sources.length > 0 && filteredSources.length === 0 && (
+          <div className="flex flex-1 items-center justify-center rounded-md border text-sm text-muted-foreground">
+            {t.sources.noMatchingSources}
+          </div>
+        )}
+
+        {sources.length > 0 && filteredSources.length > 0 && viewMode === 'grid' && (
+          <div ref={scrollContainerRef} className="flex-1 overflow-auto rounded-md">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredSources.map((source, index) => {
+                const statusKey = getSourceStatusKey(source)
+                return (
+                  <Card
+                    key={source.id}
+                    onClick={() => handleRowClick(index, source.id)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                    className={cn(
+                      'group flex cursor-pointer flex-col gap-3 p-4 transition-colors',
+                      selectedIndex === index ? 'ring-2 ring-primary' : 'hover:bg-muted/50'
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        {getSourceIcon(source)}
+                        <Badge variant="secondary" className="text-xs">
+                          {getSourceType(source)}
+                        </Badge>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => handleDeleteClick(e, source)}
+                        className="h-7 w-7 text-destructive opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="min-h-[2.5rem]">
+                      <p className="line-clamp-2 font-medium" title={source.title || t.sources.untitledSource}>
+                        {source.title || t.sources.untitledSource}
+                      </p>
+                      {source.asset?.url && (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground" title={source.asset.url}>
+                          {source.asset.url}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        variant={statusKey === 'ready' ? 'default' : 'secondary'}
+                        className="gap-1 text-xs"
+                      >
+                        {statusKey === 'processing' && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {statusKey === 'ready'
+                          ? t.sources.filterReady
+                          : statusKey === 'processing'
+                            ? t.sources.filterProcessing
+                            : t.sources.filterNotEmbedded}
+                      </Badge>
+                      {(source.insights_count || 0) > 0 && (
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          <Sparkles className="h-3 w-3" />
+                          {source.insights_count}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-auto text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(source.created), {
+                        addSuffix: true,
+                        locale: getDateLocale(language),
+                      })}
+                    </p>
+                  </Card>
+                )
+              })}
+            </div>
+            {loadingMore && (
+              <div className="flex items-center justify-center py-6">
+                <LoadingSpinner />
+                <span className="ml-2 text-muted-foreground">{t.sources.loadingMore}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {sources.length > 0 && filteredSources.length > 0 && viewMode === 'list' && (
         <div ref={scrollContainerRef} className="flex-1 rounded-md border overflow-auto">
           <table
             ref={tableRef}
@@ -343,7 +545,7 @@ export default function SourcesPage() {
               </tr>
             </thead>
             <tbody>
-              {sources.map((source, index) => (
+              {filteredSources.map((source, index) => (
                 <tr
                   key={source.id}
                   onClick={() => handleRowClick(index, source.id)}

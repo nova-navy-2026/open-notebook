@@ -38,6 +38,22 @@ const VIDEO_EXTENSIONS = new Set([
   'webm',
 ])
 
+const DATA_EXTENSIONS = new Set([
+  'csv',
+  'tsv',
+  'json',
+  'xls',
+  'xlsx',
+])
+
+const DATA_MIME_TYPES = new Set([
+  'text/csv',
+  'text/tab-separated-values',
+  'application/json',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+])
+
 function extensionForName(name?: string): string {
   const match = (name || '').toLowerCase().match(/\.([a-z0-9]+)$/)
   return match?.[1] ?? ''
@@ -70,6 +86,11 @@ export function isVisualLikeFile(file?: File | null): file is File {
   return isImageLikeFile(file) || isVideoLikeFile(file)
 }
 
+export function isDataLikeFile(file?: File | null): file is File {
+  if (!file) return false
+  return DATA_MIME_TYPES.has(typeForFile(file)) || DATA_EXTENSIONS.has(extensionForName(file.name))
+}
+
 export function getAttachmentKind(file?: File | null): AttachmentKind {
   if (isAudioLikeFile(file)) return 'audio'
   if (isImageLikeFile(file)) return 'image'
@@ -84,5 +105,14 @@ export function getAgentFileType(file?: File | null): string | undefined {
   if (kind === 'audio') return type.startsWith('audio/') ? file.type : 'audio/*'
   if (kind === 'image') return type.startsWith('image/') ? file.type : 'image/*'
   if (kind === 'video') return type.startsWith('video/') ? file.type : 'video/*'
+  if (isDataLikeFile(file)) {
+    if (DATA_MIME_TYPES.has(type)) return file.type
+    const ext = extensionForName(file.name)
+    if (ext === 'csv') return 'text/csv'
+    if (ext === 'tsv') return 'text/tab-separated-values'
+    if (ext === 'json') return 'application/json'
+    if (ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    if (ext === 'xls') return 'application/vnd.ms-excel'
+  }
   return file.type || undefined
 }

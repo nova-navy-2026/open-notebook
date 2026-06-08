@@ -538,6 +538,7 @@ async def build_context(
                             source=True,
                             note=False,
                             parent_ids=rag_source_ids,
+                            user_id=navy_user_id,
                         )
                     else:
                         from open_notebook.search.query import (
@@ -550,6 +551,7 @@ async def build_context(
                             source=True,
                             note=False,
                             parent_ids=rag_source_ids,
+                            user_id=navy_user_id,
                         )
 
                     for r in rag_results or []:

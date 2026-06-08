@@ -17,6 +17,7 @@ import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
 import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
+import { runGraphAgent } from '@/lib/chat-agents/graph-agent'
 import {
   createChatAgentRunId,
   fileMetadata,
@@ -368,6 +369,31 @@ export function useGlobalChat() {
             assistant_message: content,
           }).catch((persistError) => {
             console.error('Failed to persist route exchange:', persistError)
+          })
+          return
+        }
+      }
+
+      if (file) {
+        const content = await runGraphAgent(
+          message,
+          file,
+          agentContext,
+          preferredAgent === 'graph_generator',
+        )
+        if (content) {
+          const aiMessage: NotebookChatMessage = {
+            id: `ai-${Date.now()}`,
+            type: 'ai',
+            content,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          }).catch((persistError) => {
+            console.error('Failed to persist graph exchange:', persistError)
           })
           return
         }

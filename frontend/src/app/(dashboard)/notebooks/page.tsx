@@ -9,6 +9,7 @@ import { useNotebooks } from '@/lib/hooks/use-notebooks'
 import { CreateNotebookDialog } from '@/components/notebooks/CreateNotebookDialog'
 import { Input } from '@/components/ui/input'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { PageInfoButton } from '@/components/common/PageInfoButton'
 
 export default function NotebooksPage() {
   const { t } = useTranslation()
@@ -53,6 +54,7 @@ export default function NotebooksPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 sm:gap-4">
             <h1 className="text-xl sm:text-2xl font-bold">{t.notebooks.title}</h1>
+            <PageInfoButton pageKey="notebooks" />
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4" />
             </Button>
