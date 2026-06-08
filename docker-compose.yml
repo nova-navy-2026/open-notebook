@@ -12,6 +12,12 @@ services:
       - marinha-net
     restart: always
     pull_policy: always
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   nn-notebook:
     container_name: nn-notebook
@@ -37,13 +43,18 @@ services:
       # Reach NOVA-Researcher services by their container names on the
       # shared ``marinha-net`` network.
       - NOVA_RESEARCHER_URL=http://nova-researcher:3800
-      - GPT_RESEARCHER_URL=http://nova-researcher:3800
       - WHISPER_API_URL=http://nova-whisper:4805
       - SAM3_API_URL=http://nova-sam3:4800
       - NOMIC_SERVER_URL=http://nova-nomic:4801
       - RFDETR_API_URL=http://nova-rf-detr:4802
       - BGE_M3_SERVER_URL=http://nova-bge-m3:4803
       - CLIP_SERVER_URL=http://nova-clip:4804
+      # ── Chart generator tunables (POST /api/charts/generate) ─────────
+      # pandas/matplotlib/openpyxl/tabulate are bundled in the image.
+      # Increase these if you need to handle larger data files.
+      - CHART_MAX_FILE_SIZE_MB=${CHART_MAX_FILE_SIZE_MB:-25}
+      - CHART_MAX_ROWS=${CHART_MAX_ROWS:-100000}
+      - CHART_MAX_SERIES=${CHART_MAX_SERIES:-6}
       # ── Uvicorn production settings ──────────────────────────────────
       # Workers: WAL mode makes 2 safe; keep ≤ 4 (SQLite checkpoint store limit)
       - API_WORKERS=${API_WORKERS:-4}
@@ -53,10 +64,17 @@ services:
     volumes:
       - ./notebook_data:/app/data
     depends_on:
-      - surrealdb
+      surrealdb:
+        condition: service_healthy
     networks:
       - marinha-net
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5055/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
 volumes:
   surrealdb_data:
