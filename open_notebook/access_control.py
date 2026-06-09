@@ -30,15 +30,11 @@ A user may read a document iff::
           OR user_id       in document.allowed_entities   # individual docs
           OR any department in document.allowed_entities ) # departmental docs
 
-IMPORTANT \u2014 index field names:
-    The navy OpenSearch corpus has **not** yet been reindexed to this
-    richer template. It still stores ``document_classification`` and
-    ``allowed_departments`` and has no ``document_status`` field. To avoid a
-    breaking reindex, the live OpenSearch filter keeps querying the original
-    field names (see ``ENTITY_FIELD`` / ``CLASSIFICATION_FIELD`` below) and
-    treats a missing ``document_status`` as active. When the corpus is
-    rebuilt with the new schema, switch the three field-name constants and
-    nothing else.
+IMPORTANT: index field names:
+    The navy OpenSearch corpus uses the richer template documented above:
+    ``classification_level``, ``allowed_entities``, ``document_status``,
+    ``access_scope`` and ``creator_department``. The live OpenSearch filter
+    queries those field names directly and fails closed for unknown users.
 
 This module is navy-specific: it lives in open-notebook, not in
 NOVA-Researcher. open-notebook is responsible for translating the
@@ -87,6 +83,8 @@ ACTIVE_STATUS = "active"
 ENTITY_FIELD = "allowed_entities"
 CLASSIFICATION_FIELD = "classification_level"
 STATUS_FIELD = "document_status"
+ACCESS_SCOPE_FIELD = "access_scope"
+CREATOR_DEPARTMENT_FIELD = "creator_department"
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +210,17 @@ def _document_entities(document: Dict[str, Any]) -> List[str]:
 
 
 def _document_is_active(document: Dict[str, Any]) -> bool:
-    """Return True when the document is active (missing status == active)."""
+    """Return True when the document is active."""
     status = document.get("document_status")
-    if status is None:
-        return True
-    return str(status).strip().lower() == ACTIVE_STATUS
+    return str(status or "").strip().lower() == ACTIVE_STATUS
+
+
+def _document_creator_department(document: Dict[str, Any]) -> Optional[str]:
+    raw = document.get("creator_department")
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
 
 
 # ---------------------------------------------------------------------------
@@ -251,11 +255,19 @@ def build_opensearch_filter(
     clearance = user_clearance(user)
     departments = user_departments(user)
 
-    # Entities the user is allowed to match:
+    # Entities/departments the user is allowed to match:
     #   - the user's own navy id  → individual documents,
     #   - each of the user's departments → departmental documents,
     #   - the "general" wildcard → general documents.
     entities = [user_id, *departments, WILDCARD_DEPARTMENT]
+    access_should: List[Dict[str, Any]] = [
+        {"terms": {ENTITY_FIELD: entities}},
+        {"term": {ACCESS_SCOPE_FIELD: WILDCARD_DEPARTMENT}},
+    ]
+    if departments:
+        # Current corpus rows may carry the department in creator_department
+        # instead of repeating it in allowed_entities.
+        access_should.append({"terms": {CREATOR_DEPARTMENT_FIELD: departments}})
 
     return {
         "bool": {
@@ -266,28 +278,12 @@ def build_opensearch_filter(
                     }
                 },
                 {
-                    "terms": {
-                        ENTITY_FIELD: entities
-                    }
-                },
-                # Exclude expired/archived documents. The current corpus has
-                # no document_status field, so a missing field is treated as
-                # active to avoid filtering everything out before the reindex.
-                {
                     "bool": {
-                        "should": [
-                            {"term": {STATUS_FIELD: ACTIVE_STATUS}},
-                            {
-                                "bool": {
-                                    "must_not": {
-                                        "exists": {"field": STATUS_FIELD}
-                                    }
-                                }
-                            },
-                        ],
+                        "should": access_should,
                         "minimum_should_match": 1,
                     }
                 },
+                {"term": {STATUS_FIELD: ACTIVE_STATUS}},
             ]
         }
     }
@@ -329,7 +325,13 @@ def is_document_allowed(
         return True
     if user_id in allowed:  # individual documents
         return True
-    return any(dept in allowed for dept in user_departments(user))
+    departments = user_departments(user)
+    if any(dept in allowed for dept in departments):
+        return True
+    creator_department = _document_creator_department(document)
+    if creator_department and creator_department in departments:
+        return True
+    return str(document.get("access_scope", "")).strip().lower() == WILDCARD_DEPARTMENT
 
 
 __all__ = [
@@ -339,6 +341,8 @@ __all__ = [
     "ENTITY_FIELD",
     "CLASSIFICATION_FIELD",
     "STATUS_FIELD",
+    "ACCESS_SCOPE_FIELD",
+    "CREATOR_DEPARTMENT_FIELD",
     "access_enabled",
     "build_opensearch_filter",
     "get_user",

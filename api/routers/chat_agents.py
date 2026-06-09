@@ -271,6 +271,11 @@ Agentes disponíveis:
 Regras:
 - Se houver ficheiro de imagem/vídeo, prefere multimodal/ocr/image_detection/video_tracking conforme a intenção.
 - Se houver ficheiro de áudio, prefere transcription.
+- Se houver ficheiro tabular (CSV/TSV/TXT/Excel/JSON/JSONL/NDJSON) e o utilizador pedir perfil/análise/qualidade/colunas/outliers, usa data_profiler.
+- Se houver ficheiro tabular (CSV/TSV/TXT/Excel/JSON/JSONL/NDJSON) e o utilizador pedir gráfico/plot/visualização, usa graph_generator.
+- Se o utilizador pedir para transformar texto/contexto em tabela/CSV sem ficheiro tabular, usa table_extraction.
+- Só usa save_note quando a intenção principal for guardar uma resposta anterior como nota; não uses por uma menção genérica a "notebook".
+- Só usa deep_research quando deep_research_enabled=true ou o utilizador pedir explicitamente pesquisa profunda.
 - Se a intenção for ambígua, usa normal_chat.
 - Não inventes ferramentas.
 - Devolve APENAS JSON válido.

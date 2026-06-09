@@ -74,6 +74,12 @@ class ChartResponse(BaseModel):
     table_preview: Optional[str] = None
 
 
+class DataProfileResponse(BaseModel):
+    text: str
+    table_preview: Optional[str] = None
+    profile: Dict[str, Any]
+
+
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
@@ -521,6 +527,99 @@ def _summary_text(df, spec: ChartSpec) -> str:
     )
 
 
+def _profile_table(df) -> DataProfileResponse:
+    """Return a compact, deterministic profile for uploaded tabular data."""
+    import pandas as pd
+
+    rows = len(df)
+    cols = len(df.columns)
+    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+    datetime_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
+    text_cols = [col for col in df.columns if col not in numeric_cols and col not in datetime_cols]
+
+    column_profiles: List[Dict[str, Any]] = []
+    for col in df.columns:
+        series = df[col]
+        missing = int(series.isna().sum())
+        unique = int(series.nunique(dropna=True))
+        profile: Dict[str, Any] = {
+            "name": str(col),
+            "dtype": str(series.dtype),
+            "missing": missing,
+            "missing_pct": round((missing / rows) * 100, 2) if rows else 0.0,
+            "unique": unique,
+        }
+        if col in numeric_cols:
+            profile.update(
+                {
+                    "min": float(series.min()) if series.dropna().size else None,
+                    "max": float(series.max()) if series.dropna().size else None,
+                    "mean": float(series.mean()) if series.dropna().size else None,
+                }
+            )
+        else:
+            top = series.dropna().astype(str).value_counts().head(5)
+            profile["top_values"] = top.to_dict()
+        column_profiles.append(profile)
+
+    suggestions: List[str] = []
+    if numeric_cols and text_cols:
+        suggestions.append(
+            f"Gráfico de barras/linhas: {numeric_cols[0]} por {text_cols[0]}."
+        )
+    if len(numeric_cols) >= 2:
+        suggestions.append(
+            f"Dispersão/correlação: {numeric_cols[0]} vs {numeric_cols[1]}."
+        )
+    if numeric_cols:
+        suggestions.append(f"Histograma: distribuição de {numeric_cols[0]}.")
+    if text_cols:
+        suggestions.append(f"Tabela agregada: contagem por {text_cols[0]}.")
+
+    lines = [
+        "## Perfil dos dados",
+        "",
+        f"- Linhas: {rows}",
+        f"- Colunas: {cols}",
+        f"- Colunas numéricas: {len(numeric_cols)}"
+        + (f" ({', '.join(str(c) for c in numeric_cols[:8])})" if numeric_cols else ""),
+        f"- Colunas categóricas/texto: {len(text_cols)}"
+        + (f" ({', '.join(str(c) for c in text_cols[:8])})" if text_cols else ""),
+        "",
+        "## Qualidade",
+    ]
+
+    missing_cols = [p for p in column_profiles if p["missing"] > 0]
+    if missing_cols:
+        for item in missing_cols[:8]:
+            lines.append(f"- {item['name']}: {item['missing']} em falta ({item['missing_pct']}%)")
+    else:
+        lines.append("- Não encontrei valores em falta nas colunas lidas.")
+
+    lines.extend(["", "## Sugestões"])
+    lines.extend(f"- {suggestion}" for suggestion in suggestions[:6])
+
+    table_preview = None
+    try:
+        table_preview = df.head(10).to_markdown(index=False)
+    except Exception:
+        pass
+
+    return DataProfileResponse(
+        text="\n".join(lines),
+        table_preview=table_preview,
+        profile={
+            "rows": rows,
+            "columns": cols,
+            "numeric_columns": [str(col) for col in numeric_cols],
+            "datetime_columns": [str(col) for col in datetime_cols],
+            "text_columns": [str(col) for col in text_cols],
+            "column_profiles": column_profiles,
+            "suggestions": suggestions,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -637,3 +736,90 @@ async def generate_chart(
         spec=json.loads(spec.model_dump_json()),
         table_preview=table_preview,
     )
+
+
+@router.post("/charts/profile", response_model=DataProfileResponse)
+async def profile_chart_data(
+    data: Optional[str] = Form(None),
+    surface: str = Form("global_chat"),
+    run_id: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    notebook_id: Optional[str] = Form(None),
+    model_id: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Profile uploaded/inline tabular data before charting."""
+    started_at = perf_counter()
+    content = b""
+    if file and file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported file type '{ext}'. Allowed: "
+                    f"{', '.join(sorted(ALLOWED_EXTENSIONS))}"
+                ),
+            )
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {MAX_FILE_SIZE // (1024 * 1024)} MB limit.",
+            )
+
+    if not content and not (data and data.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a tabular file (CSV/TSV/JSON/Excel) or inline CSV data.",
+        )
+
+    try:
+        import pandas  # noqa: F401
+    except Exception:
+        raise HTTPException(
+            status_code=501,
+            detail="Data profiling dependencies (pandas) are not installed on the server.",
+        )
+
+    try:
+        df = _read_table(file.filename if file else None, content, data)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not parse the data: {e}")
+
+    if df is None or df.empty:
+        raise HTTPException(status_code=422, detail="The provided data is empty.")
+    if len(df) > MAX_ROWS:
+        df = df.head(MAX_ROWS)
+
+    response = _profile_table(df)
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    try:
+        await write_chat_agent_event(
+            build_chat_agent_event(
+                source="backend",
+                user_id=user_id,
+                surface=surface or "global_chat",
+                run_id=run_id,
+                session_id=session_id,
+                notebook_id=notebook_id,
+                model_id=model_id,
+                agent="data_profiler",
+                event="tool_call",
+                status="success",
+                file={
+                    "name": file.filename if file else None,
+                    "type": file.content_type if file else "text/csv",
+                    "size": len(content) if content else None,
+                },
+                duration_ms=duration_ms,
+                details={
+                    "rows": response.profile["rows"],
+                    "columns": response.profile["columns"],
+                },
+            )
+        )
+    except Exception:
+        pass
+    return response

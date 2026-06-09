@@ -18,8 +18,8 @@ import httpx
 from loguru import logger
 from pydantic import BaseModel
 
-from open_notebook.config import DATA_FOLDER, NAVY_OPENSEARCH_INDEX
 from open_notebook.access_control import build_opensearch_filter
+from open_notebook.config import DATA_FOLDER, NAVY_OPENSEARCH_INDEX
 
 # NOVA-Researcher API base URL
 NOVA_RESEARCHER_URL = os.environ.get("NOVA_RESEARCHER_URL", "http://localhost:3800").rstrip("/")
@@ -593,6 +593,7 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
             "query": request.query,
             "source_urls": request.source_urls,
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
+            "retriever_filter": build_opensearch_filter(request.user_id),
         }
         params: Dict[str, Any] = {"stream": "true"}
         if provider:
@@ -699,6 +700,7 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
             "query": request.query,
             "source_urls": request.source_urls,
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
+            "retriever_filter": build_opensearch_filter(request.user_id),
         }
         params: Dict[str, Any] = {"stream": "true"}
         if provider:

@@ -14,15 +14,12 @@ AGENT = make_agent(
     ),
     instruction=(
         "[Modo agente: Acompanhamento de procedimento]\n"
-        "Atuas como um guia interativo. Quando detetares um procedimento passo a passo, "
-        "acompanha o utilizador do início ao fim:\n"
-        "1. Apresenta primeiro uma visão geral curta e o número total de passos.\n"
-        "2. Apresenta APENAS um passo de cada vez, de forma clara e acionável, com "
-        "pré-condições, ação a executar e como confirmar que ficou concluído.\n"
-        "3. No fim de cada passo, pergunta se o utilizador concluiu ou se precisa de ajuda, "
-        "e só avança para o passo seguinte após confirmação.\n"
-        "4. Se o utilizador relatar um problema, ajuda a resolver antes de continuar.\n"
-        "5. Indica sempre o progresso (ex.: 'Passo 2 de 7'). Mantém pt-PT."
+        "Atuas como um guia interativo com estado conversacional. Usa a conversa recente "
+        "para perceber que passo já foi confirmado e nunca reinicies o procedimento sem "
+        "necessidade. Mostra apenas o próximo passo acionável, com pré-condições, ação, "
+        "validação de conclusão e pergunta se podes avançar. Se o utilizador relatar um "
+        "problema, ajuda a resolver antes de continuar. Indica sempre progresso "
+        "(ex.: 'Passo 2 de 7'). Mantém pt-PT."
     ),
     fallback_keywords=(
         "guia-me", "guia me", "acompanha", "acompanhar", "passo a passo",

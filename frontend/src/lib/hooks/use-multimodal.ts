@@ -9,11 +9,18 @@ import { SourceListResponse, NoteResponse } from '@/lib/types/api'
 import { ContextSelections } from '@/app/(dashboard)/notebooks/[id]/page'
 import { NotebookChatMessage } from '@/lib/types/api'
 import type { MultimodalResponse } from '@/lib/api/multimodal'
-import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
+import {
+  formatDeepResearchFailure,
+  formatDeepResearchProgress,
+  formatDeepResearchResult,
+  pollDeepResearchJob,
+  runDeepResearchAgent,
+} from '@/lib/chat-agents/deep-research-agent'
 import { runNotebookSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
 import { runGraphAgent } from '@/lib/chat-agents/graph-agent'
+import { runDataProfilerAgent } from '@/lib/chat-agents/data-profiler-agent'
 import {
   createChatAgentRunId,
   fileMetadata,
@@ -24,6 +31,7 @@ import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
 import {
   applyTextAgentInstruction,
   detectTextAgentInstruction,
+  instructionForVisualMode,
   instructionForAgent,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
@@ -107,6 +115,21 @@ function buildVisualContext(previousResponse: string): string | undefined {
   return `Última análise visual:\n${previousResponse.trim()}`
 }
 
+function buildRecentChatContext(messages: NotebookChatMessage[]): string | undefined {
+  const recent = messages.slice(-8)
+  if (recent.length === 0) return undefined
+
+  const transcript = recent
+    .map((message) => {
+      const role = message.type === 'human' ? 'Utilizador' : 'Assistente'
+      return `${role}:\n${message.content.trim()}`
+    })
+    .join('\n\n')
+    .slice(-12000)
+
+  return transcript.trim() ? `Conversa recente:\n${transcript}` : undefined
+}
+
 async function formatMultimodalResponse(result: MultimodalResponse): Promise<string> {
   const parts = [result.text]
 
@@ -139,8 +162,10 @@ export function useMultimodalChat({
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
   const storageReadyRef = useRef(false)
+  const notebookIdRef = useRef(notebookId)
 
   useEffect(() => {
+    notebookIdRef.current = notebookId
     storageReadyRef.current = false
     lastVisualFileRef.current = null
     lastVisualQueryRef.current = ''
@@ -233,7 +258,10 @@ export function useMultimodalChat({
     ) => {
       const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
       const visualFile = file ?? (isVisualFollowUp ? lastVisualFileRef.current ?? undefined : undefined)
-      const visualQuery = message
+      const visualModeInstruction = instructionForVisualMode(agentOptions?.vision?.mode)
+      const visualQuery = visualModeInstruction
+        ? `${message.trim()}\n\n${visualModeInstruction}`
+        : message
 
       const userMessage: NotebookChatMessage = {
         id: `temp-${Date.now()}`,
@@ -283,13 +311,40 @@ export function useMultimodalChat({
             context: agentContext,
           })
           if (content) {
+            const aiMessageId = `ai-research-${content.jobId}`
             const aiMessage: NotebookChatMessage = {
-              id: `ai-${Date.now()}`,
+              id: aiMessageId,
               type: 'ai',
-              content,
+              content: content.initialContent,
               timestamp: new Date().toISOString(),
             }
             setMessages((prev) => [...prev, aiMessage])
+            void pollDeepResearchJob({
+              jobId: content.jobId,
+              queryClient,
+              onUpdate: (_content, job) => {
+                if (notebookIdRef.current !== notebookId) return
+                const nextContent = formatDeepResearchProgress(message, deepResearch!, content.jobId, job)
+                setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: nextContent } : m))
+              },
+              onComplete: (_content, job) => {
+                if (notebookIdRef.current !== notebookId) return
+                const finalContent = formatDeepResearchResult(message, deepResearch!, job)
+                setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: finalContent } : m))
+              },
+              onFailure: (_content, job) => {
+                if (notebookIdRef.current !== notebookId) return
+                const failureContent = formatDeepResearchFailure(
+                  message,
+                  deepResearch!,
+                  content.jobId,
+                  job?.error ?? (typeof _content === 'string' ? _content : undefined),
+                )
+                setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: failureContent } : m))
+              },
+            }).catch((pollError) => {
+              console.error('Failed to poll deep research job:', pollError)
+            })
             return
           }
         }
@@ -320,6 +375,25 @@ export function useMultimodalChat({
             message,
             agentContext,
             preferredAgent === 'route' ? routerDecision?.parameters : undefined,
+          )
+          if (content) {
+            const aiMessage: NotebookChatMessage = {
+              id: `ai-${Date.now()}`,
+              type: 'ai',
+              content,
+              timestamp: new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, aiMessage])
+            return
+          }
+        }
+
+        if (file) {
+          const content = await runDataProfilerAgent(
+            message,
+            file,
+            agentContext,
+            preferredAgent === 'data_profiler',
           )
           if (content) {
             const aiMessage: NotebookChatMessage = {
@@ -405,6 +479,7 @@ export function useMultimodalChat({
             details: {
               follow_up: isVisualFollowUp,
               has_context: Boolean(isVisualFollowUp && lastVisualContextRef.current),
+              mode: agentOptions?.vision?.mode ?? 'auto',
             },
           })
         }
@@ -415,6 +490,7 @@ export function useMultimodalChat({
         const rawContext = await buildContext(agentQuery)
         const contextText = [
           formatContext(rawContext),
+          buildRecentChatContext(messages),
           isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
         ].filter(Boolean).join('\n\n')
 

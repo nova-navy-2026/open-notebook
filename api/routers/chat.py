@@ -4,19 +4,19 @@ import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-
-from api.auth import get_navy_acl_user_id
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.auth import get_current_user_id, get_navy_acl_user_id
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Note, Notebook, Source
 from open_notebook.exceptions import (
     NotFoundError,
 )
-from open_notebook.graphs.chat import astream_chat_response, graph as chat_graph
+from open_notebook.graphs.chat import astream_chat_response
+from open_notebook.graphs.chat import graph as chat_graph
 from open_notebook.utils.graph_utils import get_session_message_count
 
 router = APIRouter()
@@ -98,14 +98,56 @@ class SuccessResponse(BaseModel):
     message: str = Field(..., description="Success message")
 
 
+def _full_session_id(session_id: str) -> str:
+    return (
+        session_id
+        if session_id.startswith("chat_session:")
+        else f"chat_session:{session_id}"
+    )
+
+
+def _ensure_notebook_access(notebook: Notebook, user_id: str) -> None:
+    owner = getattr(notebook, "owner", None)
+    if owner is not None and owner != user_id:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+
+def _ensure_owned_object(obj: Any, user_id: str) -> bool:
+    owner = getattr(obj, "owner", None)
+    return owner is None or owner == user_id
+
+
+async def _get_session_notebook_id(full_session_id: str) -> Optional[str]:
+    notebook_query = await repo_query(
+        "SELECT out FROM refers_to WHERE in = $session_id",
+        {"session_id": ensure_record_id(full_session_id)},
+    )
+    return notebook_query[0]["out"] if notebook_query else None
+
+
+async def _ensure_session_access(full_session_id: str, user_id: str) -> Optional[str]:
+    notebook_id = await _get_session_notebook_id(full_session_id)
+    if not notebook_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    notebook = await Notebook.get(str(notebook_id))
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_notebook_access(notebook, user_id)
+    return str(notebook_id)
+
+
 @router.get("/chat/sessions", response_model=List[ChatSessionResponse])
-async def get_sessions(notebook_id: str = Query(..., description="Notebook ID")):
+async def get_sessions(
+    notebook_id: str = Query(..., description="Notebook ID"),
+    user_id: str = Depends(get_current_user_id),
+):
     """Get all chat sessions for a notebook."""
     try:
         # Get notebook to verify it exists
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
+        _ensure_notebook_access(notebook, user_id)
 
         # Get sessions for this notebook
         sessions_list = await notebook.get_chat_sessions()
@@ -140,19 +182,24 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
 
 
 @router.post("/chat/sessions", response_model=ChatSessionResponse)
-async def create_session(request: CreateSessionRequest):
+async def create_session(
+    request: CreateSessionRequest,
+    user_id: str = Depends(get_current_user_id),
+):
     """Create a new chat session."""
     try:
         # Verify notebook exists
         notebook = await Notebook.get(request.notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
+        _ensure_notebook_access(notebook, user_id)
 
         # Create new session
         session = ChatSession(
             title=request.title
             or f"Chat Session {asyncio.get_event_loop().time():.0f}",
             model_override=request.model_override,
+            owner=user_id,
         )
         await session.save()
 
@@ -180,19 +227,19 @@ async def create_session(request: CreateSessionRequest):
 @router.get(
     "/chat/sessions/{session_id}", response_model=ChatSessionWithMessagesResponse
 )
-async def get_session(session_id: str):
+async def get_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """Get a specific session with its messages."""
     try:
         # Get session
         # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
+        full_session_id = _full_session_id(session_id)
         session = await ChatSession.get(full_session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        notebook_id = await _ensure_session_access(full_session_id, user_id)
 
         # Get session state from LangGraph to retrieve messages
         # Use sync get_state() in a thread since SqliteSaver doesn't support async
@@ -214,27 +261,6 @@ async def get_session(session_id: str):
                     )
                 )
 
-        # Find notebook_id (we need to query the relationship)
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-
-        notebook_query = await repo_query(
-            "SELECT out FROM refers_to WHERE in = $session_id",
-            {"session_id": ensure_record_id(full_session_id)},
-        )
-
-        notebook_id = notebook_query[0]["out"] if notebook_query else None
-
-        if not notebook_id:
-            # This might be an old session created before API migration
-            logger.warning(
-                f"No notebook relationship found for session {session_id} - may be an orphaned session"
-            )
-
         return ChatSessionWithMessagesResponse(
             id=session.id or "",
             title=session.title or "Untitled Session",
@@ -253,18 +279,19 @@ async def get_session(session_id: str):
 
 
 @router.put("/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-async def update_session(session_id: str, request: UpdateSessionRequest):
+async def update_session(
+    session_id: str,
+    request: UpdateSessionRequest,
+    user_id: str = Depends(get_current_user_id),
+):
     """Update session title."""
     try:
         # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
+        full_session_id = _full_session_id(session_id)
         session = await ChatSession.get(full_session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        notebook_id = await _ensure_session_access(full_session_id, user_id)
 
         update_data = request.model_dump(exclude_unset=True)
 
@@ -275,19 +302,6 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
             session.model_override = update_data["model_override"]
 
         await session.save()
-
-        # Find notebook_id
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        notebook_query = await repo_query(
-            "SELECT out FROM refers_to WHERE in = $session_id",
-            {"session_id": ensure_record_id(full_session_id)},
-        )
-        notebook_id = notebook_query[0]["out"] if notebook_query else None
 
         # Get message count from LangGraph state
         msg_count = await get_session_message_count(chat_graph, full_session_id)
@@ -309,18 +323,18 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
 
 
 @router.delete("/chat/sessions/{session_id}", response_model=SuccessResponse)
-async def delete_session(session_id: str):
+async def delete_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """Delete a chat session."""
     try:
         # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
+        full_session_id = _full_session_id(session_id)
         session = await ChatSession.get(full_session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        await _ensure_session_access(full_session_id, user_id)
 
         await session.delete()
 
@@ -333,19 +347,19 @@ async def delete_session(session_id: str):
 
 
 @router.post("/chat/execute", response_model=ExecuteChatResponse)
-async def execute_chat(request: ExecuteChatRequest):
+async def execute_chat(
+    request: ExecuteChatRequest,
+    user_id: str = Depends(get_current_user_id),
+):
     """Execute a chat request and get AI response."""
     try:
         # Verify session exists
         # Ensure session_id has proper table prefix
-        full_session_id = (
-            request.session_id
-            if request.session_id.startswith("chat_session:")
-            else f"chat_session:{request.session_id}"
-        )
+        full_session_id = _full_session_id(request.session_id)
         session = await ChatSession.get(full_session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        await _ensure_session_access(full_session_id, user_id)
 
         # Determine model override (per-request override takes precedence over session-level)
         model_override = (
@@ -437,16 +451,16 @@ async def _stream_chat_sse(
 
 
 @router.post("/chat/execute/stream")
-async def execute_chat_stream(request: ExecuteChatRequest):
+async def execute_chat_stream(
+    request: ExecuteChatRequest,
+    user_id: str = Depends(get_current_user_id),
+):
     """Execute a chat request with token-by-token SSE streaming."""
-    full_session_id = (
-        request.session_id
-        if request.session_id.startswith("chat_session:")
-        else f"chat_session:{request.session_id}"
-    )
+    full_session_id = _full_session_id(request.session_id)
     session = await ChatSession.get(full_session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    await _ensure_session_access(full_session_id, user_id)
 
     model_override = (
         request.model_override
@@ -476,6 +490,7 @@ async def execute_chat_stream(request: ExecuteChatRequest):
 async def build_context(
     request: BuildContextRequest,
     navy_user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
 ):
     """Build context for a notebook based on context configuration."""
     try:
@@ -483,6 +498,7 @@ async def build_context(
         notebook = await Notebook.get(request.notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
+        _ensure_notebook_access(notebook, auth_user_id)
 
         context_data: dict[str, list[dict[str, str]]] = {"sources": [], "notes": []}
         total_content = ""
@@ -513,9 +529,10 @@ async def build_context(
         rag_used = False
         if request.query and rag_source_ids:
             try:
+                from open_notebook.config import INDEX_USER_SOURCES_TO_OPENSEARCH
                 from open_notebook.search import is_opensearch_enabled
 
-                if is_opensearch_enabled():
+                if is_opensearch_enabled() and INDEX_USER_SOURCES_TO_OPENSEARCH:
                     from open_notebook.utils.embedding import generate_embedding
 
                     try:
@@ -566,7 +583,7 @@ async def build_context(
                         }
                         context_data["sources"].append(item)  # type: ignore[arg-type]
                         total_content += content
-                    rag_used = True
+                    rag_used = bool(rag_results)
                     logger.info(
                         f"Notebook chat RAG: returned {len(rag_results or [])} "
                         f"chunks for {len(rag_source_ids)} allowed sources "
@@ -597,6 +614,8 @@ async def build_context(
                         source = await Source.get(full_source_id)
                     except Exception:
                         continue
+                    if not source or not _ensure_owned_object(source, auth_user_id):
+                        continue
 
                     if "insights" in status:
                         source_context = await source.get_context(context_size="short")
@@ -621,7 +640,7 @@ async def build_context(
                         note_id if note_id.startswith("note:") else f"note:{note_id}"
                     )
                     note = await Note.get(full_note_id)
-                    if not note:
+                    if not note or not _ensure_owned_object(note, auth_user_id):
                         continue
 
                     if "full content" in status:
@@ -636,6 +655,8 @@ async def build_context(
             sources = await notebook.get_sources()
             for source in sources:
                 try:
+                    if not _ensure_owned_object(source, auth_user_id):
+                        continue
                     source_context = await source.get_context(context_size="short")
                     context_data["sources"].append(source_context)
                     total_content += str(source_context)
@@ -646,6 +667,8 @@ async def build_context(
             notes = await notebook.get_notes()
             for note in notes:
                 try:
+                    if not _ensure_owned_object(note, auth_user_id):
+                        continue
                     note_context = note.get_context(context_size="short")
                     context_data["notes"].append(note_context)
                     total_content += str(note_context)
@@ -666,7 +689,7 @@ async def build_context(
                         note_id if note_id.startswith("note:") else f"note:{note_id}"
                     )
                     note = await Note.get(full_note_id)
-                    if not note:
+                    if not note or not _ensure_owned_object(note, auth_user_id):
                         continue
                     if "full content" in status:
                         note_context = note.get_context(context_size="long")

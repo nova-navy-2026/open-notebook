@@ -13,11 +13,18 @@ import {
   UpdateGlobalChatSessionRequest,
   GlobalChatContextStats,
 } from '@/lib/types/api'
-import { runDeepResearchAgent } from '@/lib/chat-agents/deep-research-agent'
+import {
+  formatDeepResearchFailure,
+  formatDeepResearchProgress,
+  formatDeepResearchResult,
+  pollDeepResearchJob,
+  runDeepResearchAgent,
+} from '@/lib/chat-agents/deep-research-agent'
 import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
 import { runGraphAgent } from '@/lib/chat-agents/graph-agent'
+import { runDataProfilerAgent } from '@/lib/chat-agents/data-profiler-agent'
 import {
   createChatAgentRunId,
   fileMetadata,
@@ -27,6 +34,7 @@ import {
 import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
 import {
   detectTextAgentInstruction,
+  instructionForVisualMode,
   instructionForAgent,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
@@ -105,6 +113,7 @@ export function useGlobalChat() {
   const lastVisualFileRef = useRef<File | null>(null)
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
+  const currentSessionIdRef = useRef<string | null>(currentSessionId)
 
   // Fetch all global chat sessions
   const {
@@ -139,6 +148,10 @@ export function useGlobalChat() {
       setIsVisualModelLocked(messagesContainVisualExchange(currentSession.messages))
     }
   }, [currentSession, isSending, messages.length])
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId
+  }, [currentSessionId])
 
   // Auto-select most recent session — only on the very first load.
   useEffect(() => {
@@ -306,18 +319,57 @@ export function useGlobalChat() {
           context: agentContext,
         })
         if (content) {
+          const aiMessageId = `ai-research-${content.jobId}`
           const aiMessage: NotebookChatMessage = {
-            id: `ai-${Date.now()}`,
+            id: aiMessageId,
             type: 'ai',
-            content,
+            content: content.initialContent,
             timestamp: new Date().toISOString()
           }
           setMessages(prev => [...prev, aiMessage])
-          void globalChatApi.persistExchange(sessionId, {
-            user_message: userMessage.content,
-            assistant_message: content,
-          }).catch((persistError) => {
-            console.error('Failed to persist deep research exchange:', persistError)
+          void pollDeepResearchJob({
+            jobId: content.jobId,
+            queryClient,
+            onUpdate: (_content, job) => {
+              if (currentSessionIdRef.current !== sessionId) return
+              const nextContent = formatDeepResearchProgress(message, deepResearch!, content.jobId, job)
+              setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: nextContent } : m))
+            },
+            onComplete: (_content, job) => {
+              const finalContent = formatDeepResearchResult(message, deepResearch!, job)
+              if (currentSessionIdRef.current === sessionId) {
+                localMessagesDirtyRef.current = true
+                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: finalContent } : m))
+              }
+              void globalChatApi.persistExchange(sessionId, {
+                user_message: userMessage.content,
+                assistant_message: finalContent,
+              }).then(() => {
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+              }).catch((persistError) => {
+                console.error('Failed to persist deep research exchange:', persistError)
+              })
+            },
+            onFailure: (_content, job) => {
+              const failureContent = formatDeepResearchFailure(
+                message,
+                deepResearch!,
+                content.jobId,
+                job?.error ?? (typeof _content === 'string' ? _content : undefined),
+              )
+              if (currentSessionIdRef.current === sessionId) {
+                localMessagesDirtyRef.current = true
+                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: failureContent } : m))
+              }
+              void globalChatApi.persistExchange(sessionId, {
+                user_message: userMessage.content,
+                assistant_message: failureContent,
+              }).catch((persistError) => {
+                console.error('Failed to persist failed deep research exchange:', persistError)
+              })
+            },
+          }).catch((pollError) => {
+            console.error('Failed to poll deep research job:', pollError)
           })
           return
         }
@@ -369,6 +421,31 @@ export function useGlobalChat() {
             assistant_message: content,
           }).catch((persistError) => {
             console.error('Failed to persist route exchange:', persistError)
+          })
+          return
+        }
+      }
+
+      if (file) {
+        const content = await runDataProfilerAgent(
+          message,
+          file,
+          agentContext,
+          preferredAgent === 'data_profiler',
+        )
+        if (content) {
+          const aiMessage: NotebookChatMessage = {
+            id: `ai-${Date.now()}`,
+            type: 'ai',
+            content,
+            timestamp: new Date().toISOString()
+          }
+          setMessages(prev => [...prev, aiMessage])
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          }).catch((persistError) => {
+            console.error('Failed to persist data profile exchange:', persistError)
           })
           return
         }
@@ -429,7 +506,10 @@ export function useGlobalChat() {
         const startedAt = performance.now()
         hasLocalMultimodalMessagesRef.current = true
         setIsVisualModelLocked(true)
-        const visualQuery = message
+        const visualModeInstruction = instructionForVisualMode(agentOptions?.vision?.mode)
+        const visualQuery = visualModeInstruction
+          ? `${message.trim()}\n\n${visualModeInstruction}`
+          : message
         logChatAgentEvent({
           surface: 'global_chat',
           agent: 'multimodal',
@@ -441,6 +521,7 @@ export function useGlobalChat() {
           details: {
             follow_up: isVisualFollowUp,
             has_context: Boolean(isVisualFollowUp && lastVisualContextRef.current),
+            mode: agentOptions?.vision?.mode ?? 'auto',
           },
         })
         const result = await multimodalApi.chat({

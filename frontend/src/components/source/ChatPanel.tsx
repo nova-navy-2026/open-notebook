@@ -135,6 +135,7 @@ export function ChatPanel({
   const [transcriptionDiarize, setTranscriptionDiarize] = useState(false)
   const [transcriptionSpeakers, setTranscriptionSpeakers] = useState('auto')
   const [visionEngine, setVisionEngine] = useState<'auto' | 'sam3' | 'rfdetr'>('auto')
+  const [visionMode, setVisionMode] = useState<'auto' | 'describe' | 'ocr' | 'detect' | 'track'>('auto')
   const [saveNoteNotebookId, setSaveNoteNotebookId] = useState('')
   const [activeTab, setActiveTab] = useState<'chat' | 'sessions'>('chat')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -225,7 +226,7 @@ export function ChatPanel({
             }
             : undefined,
           vision: showVisionControls
-            ? { engine: visionEngine }
+            ? { engine: visionEngine, mode: visionMode }
             : undefined,
           saveNote: saveNoteNotebookId
             ? { notebookId: saveNoteNotebookId }
@@ -650,8 +651,24 @@ export function ChatPanel({
               )}
 
               {showVisionControls && (
+                <>
                 <div className="space-y-1">
-                  <Label className="text-xs">Motor visual</Label>
+                  <Label className="text-xs">Modo visual</Label>
+                  <Select value={visionMode} onValueChange={(value) => setVisionMode(value as 'auto' | 'describe' | 'ocr' | 'detect' | 'track')} disabled={isStreaming}>
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="describe">Descrever</SelectItem>
+                      <SelectItem value="ocr">OCR</SelectItem>
+                      <SelectItem value="detect">Detetar</SelectItem>
+                      <SelectItem value="track">Seguir</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Motor</Label>
                   <Select value={visionEngine} onValueChange={(value) => setVisionEngine(value as 'auto' | 'sam3' | 'rfdetr')} disabled={isStreaming}>
                     <SelectTrigger className="h-8">
                       <SelectValue />
@@ -663,6 +680,7 @@ export function ChatPanel({
                     </SelectContent>
                   </Select>
                 </div>
+                </>
               )}
 
               {showSaveNoteControls && (

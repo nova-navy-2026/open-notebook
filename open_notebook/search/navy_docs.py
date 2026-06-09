@@ -119,6 +119,15 @@ async def _list_navy_documents_uncached(
     user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     try:
+        from open_notebook.access_control import (
+            access_enabled,
+            build_opensearch_filter,
+        )
+
+        if user_id is None and access_enabled():
+            logger.debug("Skipping anonymous navy document listing (ACL enabled)")
+            return []
+
         client = await get_client()
 
         body: Dict[str, Any] = {
@@ -133,7 +142,14 @@ async def _list_navy_documents_uncached(
                         "sample_source": {
                             "top_hits": {
                                 "size": 1,
-                                "_source": ["source", "section_title", "page_start"],
+                                "_source": [
+                                    "source",
+                                    "document_name",
+                                    "document_path",
+                                    "document_type",
+                                    "section_title",
+                                    "page_start",
+                                ],
                             }
                         }
                     },
@@ -141,14 +157,12 @@ async def _list_navy_documents_uncached(
             },
         }
 
-        # Apply navy access-control filter so the aggregation only
-        # considers documents the user is allowed to see.
-        if user_id is not None:
-            from open_notebook.access_control import build_opensearch_filter
-
-            acl_filter = build_opensearch_filter(user_id)
-            if acl_filter is not None:
-                body["query"] = acl_filter
+        # Apply navy access-control filter so the aggregation only considers
+        # documents the user is allowed to see. Missing/unknown users fail
+        # closed inside build_opensearch_filter.
+        acl_filter = build_opensearch_filter(user_id)
+        if acl_filter is not None:
+            body["query"] = acl_filter
 
         response = await _search_with_retry(client, body)
 
@@ -166,7 +180,7 @@ async def _list_navy_documents_uncached(
             documents.append({
                 "doc_id": doc_id,
                 "chunk_count": chunk_count,
-                "source": sample.get("source", ""),
+                "source": sample.get("document_name") or sample.get("source", ""),
                 "sample_section": sample.get("section_title", ""),
             })
 
@@ -207,7 +221,7 @@ def _collapse_navy_hits(
         results.append({
             "doc_id": doc_id,
             "content": src.get("parent_content") or src.get("content", ""),
-            "source": src.get("source", ""),
+            "source": src.get("document_name") or src.get("source", ""),
             "section_title": section_title,
             "page_start": src.get("page_start"),
             "page_end": src.get("page_end"),
@@ -222,8 +236,16 @@ def _collapse_navy_hits(
 # parent_content is the full section text returned by small-to-big retrieval.
 _NAVY_RESULT_SOURCE = [
     "doc_id",
+    "chunk_id",
     "content",
     "source",
+    "document_name",
+    "document_path",
+    "document_type",
+    "document_status",
+    "access_scope",
+    "classification_level",
+    "creator_department",
     "section_title",
     "page_start",
     "page_end",

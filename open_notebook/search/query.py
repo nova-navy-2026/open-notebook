@@ -15,22 +15,52 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from open_notebook.access_control import (
+    ACCESS_SCOPE_FIELD,
     CLASSIFICATION_FIELD,
-    ENTITY_FIELD,
+    STATUS_FIELD,
     build_opensearch_filter,
 )
 from open_notebook.config import OPENSEARCH_INDEX
 from open_notebook.search.client import get_client
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+_INDEX_FIELDS_CACHE: Optional[set[str]] = None
+
+
+async def _get_index_fields(client: Any) -> set[str]:
+    """Return top-level mapped fields for the configured OpenSearch index."""
+    global _INDEX_FIELDS_CACHE
+    if _INDEX_FIELDS_CACHE is not None:
+        return _INDEX_FIELDS_CACHE
+    try:
+        mapping = await asyncio.to_thread(
+            client.indices.get_mapping, index=OPENSEARCH_INDEX
+        )
+        props = (
+            mapping.get(OPENSEARCH_INDEX, {})
+            .get("mappings", {})
+            .get("properties", {})
+        )
+        _INDEX_FIELDS_CACHE = set(props.keys())
+    except Exception as exc:
+        logger.warning(f"Could not inspect OpenSearch mapping: {exc}")
+        _INDEX_FIELDS_CACHE = set()
+    return _INDEX_FIELDS_CACHE
+
 
 def _build_type_filter(
-    source: bool, note: bool
+    source: bool, note: bool, index_fields: set[str]
 ) -> List[Dict[str, Any]]:
     """Build a doc_type terms filter clause."""
+    if "doc_type" not in index_fields:
+        # Current navy corpus index does not have doc_type. Treat its rows as
+        # source documents; note-only searches should not return navy files.
+        if source:
+            return []
+        return [{"bool": {"must_not": {"match_all": {}}}}]
+
     types: List[str] = []
     if source:
         types.extend(["source_embedding", "source_insight", "pdf"])
@@ -42,42 +72,8 @@ def _build_type_filter(
 
 
 def _build_acl_filter(user_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Restrict access-controlled (navy corpus) documents to those the user is
-    cleared to read, while leaving the user's own notebook documents untouched.
-
-    The navy corpus and open-notebook sources/notes live in the same OpenSearch
-    index, so an unfiltered query would surface navy PDFs above the user's
-    clearance. Navy documents carry governance fields (``classification_level``
-    / ``allowed_entities``); regular open-notebook sources and notes do not.
-
-    Returns ``None`` when no restriction applies (access control disabled or an
-    admin user). Otherwise returns a ``bool`` clause admitting a hit when EITHER
-    it carries no governance fields (a regular source/note) OR it satisfies the
-    clearance/entity ACL filter. Unknown/missing users fail closed: navy
-    documents are excluded entirely.
-    """
-    acl = build_opensearch_filter(user_id)
-    if acl is None:
-        # Access control disabled or admin bypass: no restriction.
-        return None
-    return {
-        "bool": {
-            "should": [
-                # Regular open-notebook documents carry no governance fields.
-                {
-                    "bool": {
-                        "must_not": [
-                            {"exists": {"field": CLASSIFICATION_FIELD}},
-                            {"exists": {"field": ENTITY_FIELD}},
-                        ]
-                    }
-                },
-                # Navy documents must satisfy the clearance/entity ACL filter.
-                acl,
-            ],
-            "minimum_should_match": 1,
-        }
-    }
+    """Return the mandatory navy ACL filter for OpenSearch-backed search."""
+    return build_opensearch_filter(user_id)
 
 
 def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -97,8 +93,14 @@ def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         parent_id_raw = src.get("parent_id")
         doc_id = src.get("doc_id")
         section_title = src.get("section_title")
-        source_name = src.get("source")
-        is_navy = not parent_id_raw and (doc_id or section_title or source_name)
+        source_name = src.get("document_name") or src.get("source")
+        is_navy = bool(
+            doc_id
+            or src.get("document_name")
+            or src.get(STATUS_FIELD)
+            or src.get(CLASSIFICATION_FIELD) is not None
+            or src.get(ACCESS_SCOPE_FIELD)
+        )
 
         if is_navy:
             # Use a stable prefixed key so the frontend's "type:id" split works
@@ -119,7 +121,7 @@ def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 else:
                     chunk_label_parts.append(f"pp. {page_start}-{page_end}")
             chunk_prefix = " · ".join(chunk_label_parts)
-            content = src.get("content", "")
+            content = src.get("parent_content") or src.get("content", "")
             match_text = (
                 f"[{chunk_prefix}] {content}" if chunk_prefix else content
             )
@@ -136,7 +138,7 @@ def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "relevance": score,
             "matches": [match_text] if match_text else [],
         }
-        file_path = src.get("file_path")
+        file_path = src.get("document_path") or src.get("file_path")
         if file_path:
             item["file_path"] = file_path
         results.append(item)
@@ -196,7 +198,8 @@ async def opensearch_text_search(
     """
     try:
         client = await get_client()
-        filters = _build_type_filter(source, note)
+        index_fields = await _get_index_fields(client)
+        filters = _build_type_filter(source, note, index_fields)
         if parent_ids:
             filters = list(filters) + [{"terms": {"parent_id": parent_ids}}]
         acl = _build_acl_filter(user_id)
@@ -211,7 +214,13 @@ async def opensearch_text_search(
                         {
                             "multi_match": {
                                 "query": keyword,
-                                "fields": ["title^2", "section_title^2", "source", "content"],
+                                "fields": [
+                                    "document_name^3",
+                                    "title^2",
+                                    "section_title^2",
+                                    "source^2",
+                                    "content",
+                                ],
                                 "type": "best_fields",
                                 "fuzziness": "AUTO",
                             }
@@ -228,10 +237,19 @@ async def opensearch_text_search(
                 "insight_type",
                 # Navy PDF document fields
                 "doc_id",
+                "chunk_id",
                 "section_title",
                 "source",
+                "document_name",
+                "document_path",
+                "document_type",
+                "document_status",
+                "access_scope",
+                "classification_level",
+                "creator_department",
                 "page_start",
                 "page_end",
+                "parent_content",
                 # Shared file system path
                 "file_path",
             ],
@@ -273,7 +291,8 @@ async def opensearch_vector_search(
     """
     try:
         client = await get_client()
-        filters = _build_type_filter(source, note)
+        index_fields = await _get_index_fields(client)
+        filters = _build_type_filter(source, note, index_fields)
         if parent_ids:
             filters = list(filters) + [{"terms": {"parent_id": parent_ids}}]
         acl = _build_acl_filter(user_id)
@@ -307,10 +326,19 @@ async def opensearch_vector_search(
                 "insight_type",
                 # Navy PDF document fields
                 "doc_id",
+                "chunk_id",
                 "section_title",
                 "source",
+                "document_name",
+                "document_path",
+                "document_type",
+                "document_status",
+                "access_scope",
+                "classification_level",
+                "creator_department",
                 "page_start",
                 "page_end",
+                "parent_content",
                 # Shared file system path
                 "file_path",
             ],
@@ -384,13 +412,13 @@ async def opensearch_hybrid_search(
         scores: Dict[str, Dict[str, Any]] = {}
 
         for rank, result in enumerate(text_results):
-            key = result["id"]
+            key = result.get("parent_id") or result["id"]
             if key not in scores:
                 scores[key] = {**result, "_rrf": 0.0}
             scores[key]["_rrf"] += bm25_weight / (k + rank + 1)
 
         for rank, result in enumerate(vector_results):
-            key = result["id"]
+            key = result.get("parent_id") or result["id"]
             if key not in scores:
                 scores[key] = {**result, "_rrf": 0.0}
             scores[key]["_rrf"] += vector_weight / (k + rank + 1)

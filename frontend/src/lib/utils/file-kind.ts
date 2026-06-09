@@ -41,6 +41,7 @@ const VIDEO_EXTENSIONS = new Set([
 const DATA_EXTENSIONS = new Set([
   'csv',
   'tsv',
+  'txt',
   'json',
   'jsonl',
   'ndjson',
@@ -51,6 +52,7 @@ const DATA_EXTENSIONS = new Set([
 const DATA_MIME_TYPES = new Set([
   'text/csv',
   'text/tab-separated-values',
+  'text/plain',
   'application/json',
   'application/jsonl',
   'application/x-ndjson',
@@ -114,6 +116,7 @@ export function getAgentFileType(file?: File | null): string | undefined {
     const ext = extensionForName(file.name)
     if (ext === 'csv') return 'text/csv'
     if (ext === 'tsv') return 'text/tab-separated-values'
+    if (ext === 'txt') return 'text/plain'
     if (ext === 'json') return 'application/json'
     if (ext === 'jsonl' || ext === 'ndjson') return 'application/x-ndjson'
     if (ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'

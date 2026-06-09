@@ -20,17 +20,17 @@ import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-
-from api.auth import get_current_user_id, get_navy_acl_user_id
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.auth import get_current_user_id, get_navy_acl_user_id
 from open_notebook.database.repository import repo_query
 from open_notebook.domain.notebook import ChatSession
 from open_notebook.exceptions import NotFoundError
-from open_notebook.graphs.chat import astream_chat_response, graph as chat_graph
+from open_notebook.graphs.chat import astream_chat_response
+from open_notebook.graphs.chat import graph as chat_graph
 from open_notebook.utils.graph_utils import get_session_message_count
 
 router = APIRouter()
@@ -137,9 +137,10 @@ async def _search_user_sources(
     """
     out: List[Dict[str, Any]] = []
     try:
+        from open_notebook.config import INDEX_USER_SOURCES_TO_OPENSEARCH
         from open_notebook.search import is_opensearch_enabled
 
-        if not is_opensearch_enabled():
+        if not is_opensearch_enabled() or not INDEX_USER_SOURCES_TO_OPENSEARCH:
             return out
 
         from open_notebook.utils.embedding import generate_embedding

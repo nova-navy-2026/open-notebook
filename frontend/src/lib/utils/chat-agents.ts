@@ -17,6 +17,7 @@ export interface ChatAgentUiOptions {
   }
   vision?: {
     engine?: 'auto' | 'sam3' | 'rfdetr'
+    mode?: 'auto' | 'describe' | 'ocr' | 'detect' | 'track'
   }
   saveNote?: {
     notebookId?: string
@@ -106,6 +107,21 @@ export function formatTranscriptionResponse(result: TranscriptionResult): string
   return `${parts.join('\n')}\n\n${transcript}`.trim()
 }
 
+export function instructionForVisualMode(mode?: ChatAgentUiOptions['vision'] extends infer V ? V extends { mode?: infer M } ? M : never : never): string | undefined {
+  switch (mode) {
+    case 'describe':
+      return 'Modo visual selecionado: descreve e explica o conteúdo visual de forma estruturada.'
+    case 'ocr':
+      return 'Modo visual selecionado: faz OCR; extrai texto, tabelas, rótulos, placas e conteúdo escrito. Preserva estrutura quando possível.'
+    case 'detect':
+      return 'Modo visual selecionado: deteta, identifica, conta e localiza objetos/alvos visíveis. Indica incerteza.'
+    case 'track':
+      return 'Modo visual selecionado: acompanha/segue objetos ou alvos no vídeo, resumindo movimento, localização e eventos.'
+    default:
+      return undefined
+  }
+}
+
 export function lastAssistantMessage(messages: NotebookChatMessage[]): NotebookChatMessage | undefined {
   return [...messages].reverse().find((message) => message.type === 'ai' && message.content.trim())
 }
@@ -147,6 +163,10 @@ export function detectTextAgentInstruction(message: string): string | undefined 
     return '[Modo agente: Checklist/Procedimento]\nTransforma a resposta num procedimento operacional claro. Usa passos numerados, pré-condições, verificações, riscos/atenções e resultado esperado. Mantém pt-PT.'
   }
 
+  if (/\b(guia-me|guia me|acompanha|acompanhar|passo a passo|step by step|guide me|tutorial|orienta-me|orienta me)\b/.test(text)) {
+    return '[Modo agente: Acompanhamento de procedimento]\nGuia o utilizador de forma interativa. Usa a conversa recente para saber o último passo confirmado. Mostra apenas o próximo passo acionável, com como validar conclusão, e pergunta se pode avançar. Se ainda não houver procedimento definido, primeiro identifica objetivo, pré-condições e número de passos.'
+  }
+
   if (/\b(entidades|entities|extrair entidades|entity extraction|pessoas|locais|organizacoes|organizações|datas|navios|ships)\b/.test(text)) {
     return '[Modo agente: Extração de entidades]\nExtrai entidades relevantes e organiza por tipo: pessoas, organizações, locais, navios/meios, datas, documentos, códigos, coordenadas e outros identificadores. Inclui evidência curta quando possível.'
   }
@@ -157,6 +177,10 @@ export function detectTextAgentInstruction(message: string): string | undefined 
 
   if (/\b(relatorio|relatório|report)\b/.test(text)) {
     return '[Modo agente: Relatório]\nProduz uma estrutura de relatório real, compatível com índice: título, resumo executivo, introdução, metodologia/âmbito, secções H2/H3, análise, conclusões e recomendações. Usa headings Markdown.'
+  }
+
+  if (/\b(auditar fontes|auditoria de fontes|verificar fontes|qualidade das fontes|source quality|citations|citacoes|citações|evidencia|evidência|sem suporte|unsupported|fiabilidade|confianca|confiança|validar|fact-check|fact check)\b/.test(text)) {
+    return '[Modo agente: Auditoria de qualidade de fontes]\nAudita a resposta/relatório/contexto disponível. Organiza por: claims principais, evidência disponível, claims sem suporte, fontes fracas ou desatualizadas, contradições, lacunas de informação, nível de confiança e recomendações de validação. Não inventes fontes. Se falta evidência, diz explicitamente.'
   }
 
   return undefined
@@ -170,12 +194,16 @@ export function instructionForAgent(agent?: string): string | undefined {
       return '[Modo agente: Comparação documental]\nCompara os documentos, notas ou excertos relevantes. Estrutura por semelhanças, diferenças, alterações críticas, impacto prático e pontos que exigem validação.'
     case 'checklist_procedure':
       return '[Modo agente: Checklist/Procedimento]\nTransforma a resposta num procedimento operacional claro. Usa passos numerados, pré-condições, verificações, riscos/atenções e resultado esperado. Mantém pt-PT.'
+    case 'procedure_following':
+      return '[Modo agente: Acompanhamento de procedimento]\nGuia o utilizador de forma interativa. Usa a conversa recente para saber o último passo confirmado. Mostra apenas o próximo passo acionável, com como validar conclusão, e pergunta se pode avançar. Se ainda não houver procedimento definido, primeiro identifica objetivo, pré-condições e número de passos.'
     case 'entity_extraction':
       return '[Modo agente: Extração de entidades]\nExtrai entidades relevantes e organiza por tipo: pessoas, organizações, locais, navios/meios, datas, documentos, códigos, coordenadas e outros identificadores. Inclui evidência curta quando possível.'
     case 'timeline':
       return '[Modo agente: Timeline]\nConstrói uma cronologia em ordem temporal. Para cada evento inclui data/hora se existir, evento, atores/entidades e fonte/evidência curta. Indica incertezas.'
     case 'report_builder':
       return '[Modo agente: Relatório]\nProduz uma estrutura de relatório real, compatível com índice: título, resumo executivo, introdução, metodologia/âmbito, secções H2/H3, análise, conclusões e recomendações. Usa headings Markdown.'
+    case 'source_quality_audit':
+      return '[Modo agente: Auditoria de qualidade de fontes]\nAudita a resposta/relatório/contexto disponível. Organiza por: claims principais, evidência disponível, claims sem suporte, fontes fracas ou desatualizadas, contradições, lacunas de informação, nível de confiança e recomendações de validação. Não inventes fontes. Se falta evidência, diz explicitamente.'
     default:
       return undefined
   }

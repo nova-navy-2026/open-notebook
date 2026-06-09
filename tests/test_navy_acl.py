@@ -45,40 +45,51 @@ def test_acl_filter_requires_clearance_and_department(monkeypatch):
         "bool": {
             "must": [
                 {"range": {"classification_level": {"lte": 2}}},
-                {"terms": {"allowed_entities": ["m1", "OPS", "general"]}},
                 {
                     "bool": {
                         "should": [
-                            {"term": {"document_status": "active"}},
-                            {
-                                "bool": {
-                                    "must_not": {
-                                        "exists": {"field": "document_status"}
-                                    }
-                                }
-                            },
+                            {"terms": {"allowed_entities": ["m1", "OPS", "general"]}},
+                            {"term": {"access_scope": "general"}},
+                            {"terms": {"creator_department": ["OPS"]}},
                         ],
                         "minimum_should_match": 1,
                     }
                 },
+                {"term": {"document_status": "active"}},
             ]
         }
     }
 
     assert is_document_allowed(
-        {"document_classification": 2, "allowed_departments": ["OPS"]},
+        {
+            "document_status": "active",
+            "document_classification": 2,
+            "allowed_departments": ["OPS"],
+        },
         "m1",
     )
     assert is_document_allowed(
-        {"document_classification": 2, "allowed_departments": ["general"]},
+        {
+            "document_status": "active",
+            "document_classification": 2,
+            "allowed_departments": ["general"],
+        },
         "m1",
     )
     assert not is_document_allowed(
-        {"document_classification": 3, "allowed_departments": ["OPS"]},
+        {
+            "document_status": "active",
+            "document_classification": 3,
+            "allowed_departments": ["OPS"],
+        },
         "m1",
     )
     assert not is_document_allowed(
-        {"document_classification": 1, "allowed_departments": ["ENG"]},
+        {
+            "document_status": "active",
+            "document_classification": 1,
+            "allowed_departments": ["ENG"],
+        },
         "m1",
     )
 
@@ -95,10 +106,17 @@ def test_acl_filter_supports_new_user_template(monkeypatch):
     )
 
     flt = build_opensearch_filter("m24409")
-    assert flt["bool"]["must"][1] == {
-        "terms": {
-            "allowed_entities": ["m24409", "SI-DAGI", "COMNAV", "general"]
-        }
+    assert flt["bool"]["must"][1]["bool"] == {
+        "should": [
+            {
+                "terms": {
+                    "allowed_entities": ["m24409", "SI-DAGI", "COMNAV", "general"]
+                }
+            },
+            {"term": {"access_scope": "general"}},
+            {"terms": {"creator_department": ["SI-DAGI", "COMNAV"]}},
+        ],
+        "minimum_should_match": 1,
     }
 
 
@@ -175,6 +193,27 @@ def test_is_document_allowed_new_template(monkeypatch):
             "access_scope": "general",
             "allowed_entities": ["general"],
             "classification_level": 4,
+        },
+        "m24409",
+    )
+
+    # Department ownership is honoured when allowed_entities is missing.
+    assert is_document_allowed(
+        {
+            "document_status": "active",
+            "access_scope": "departmental",
+            "creator_department": "SI-DAGI",
+            "classification_level": 2,
+        },
+        "m24409",
+    )
+
+    # Missing status fails closed for the current navy index.
+    assert not is_document_allowed(
+        {
+            "access_scope": "departmental",
+            "allowed_entities": ["SI-DAGI"],
+            "classification_level": 1,
         },
         "m24409",
     )

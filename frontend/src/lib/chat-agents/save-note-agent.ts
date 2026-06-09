@@ -40,6 +40,65 @@ function findNotebookForSave(
   })
 }
 
+function parseRequestedTitle(message: string): string | undefined {
+  const patterns = [
+    /\b(?:titulo|título|title)\s*[:=]\s*["“”']?([^"“”'\n]+)["“”']?/i,
+    /\b(?:como|as)\s+["“”']([^"“”']+)["“”']/i,
+    /\b(?:chamada|chamado|called|named)\s+["“”']([^"“”']+)["“”']/i,
+  ]
+  for (const pattern of patterns) {
+    const match = message.match(pattern)
+    const title = match?.[1]?.trim()
+    if (title) return title.slice(0, 120)
+  }
+  return undefined
+}
+
+function firstMarkdownTable(content: string): string | undefined {
+  const lines = content.split(/\r?\n/)
+  for (let index = 0; index < lines.length - 1; index++) {
+    if (
+      lines[index].trim().startsWith('|') &&
+      lines[index + 1].trim().startsWith('|') &&
+      /-{3,}/.test(lines[index + 1])
+    ) {
+      const table: string[] = []
+      for (let cursor = index; cursor < lines.length; cursor++) {
+        const line = lines[cursor]
+        if (!line.trim().startsWith('|')) break
+        table.push(line)
+      }
+      return table.join('\n')
+    }
+  }
+  return undefined
+}
+
+function extractReportBody(content: string): string | undefined {
+  const marker = '## Deep Research concluído'
+  const start = content.indexOf(marker)
+  if (start < 0) return undefined
+  const sources = content.indexOf('\n## Fontes', start + marker.length)
+  return content.slice(start, sources > 0 ? sources : undefined).trim()
+}
+
+function selectContentForSave(message: string, previous: NotebookChatMessage): string {
+  const text = normaliseForAgentMatching(message)
+  if (/\b(tabela|table|csv)\b/.test(text)) {
+    const table = firstMarkdownTable(previous.content)
+    if (table) return table
+  }
+  if (/\b(relatorio|relatório|report|deep research)\b/.test(text)) {
+    const report = extractReportBody(previous.content)
+    if (report) return report
+  }
+  return previous.content
+}
+
+function noteTitleForSave(message: string, fallback: string): string {
+  return parseRequestedTitle(message) || fallback
+}
+
 export async function runGlobalSaveNoteAgent({
   message,
   messages,
@@ -110,10 +169,11 @@ export async function runGlobalSaveNoteAgent({
 
   let note
   try {
+    const content = selectContentForSave(message, previous)
     note = await notesApi.create({
       notebook_id: targetNotebook.id,
-      title: 'Nota criada a partir do chat',
-      content: previous.content,
+      title: noteTitleForSave(message, 'Nota criada a partir do chat'),
+      content,
       note_type: 'ai',
     })
   } catch (error) {
@@ -186,10 +246,11 @@ export async function runNotebookSaveNoteAgent({
 
   let note
   try {
+    const content = selectContentForSave(message, previous)
     note = await notesApi.create({
       notebook_id: notebookId,
-      title: 'Nota criada a partir do chat',
-      content: previous.content,
+      title: noteTitleForSave(message, 'Nota criada a partir do chat'),
+      content,
       note_type: 'ai',
     })
   } catch (error) {

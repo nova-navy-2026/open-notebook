@@ -41,8 +41,10 @@ export function routedAgentIsTextInstruction(agent?: string): boolean {
     'table_extraction',
     'document_comparison',
     'checklist_procedure',
+    'procedure_following',
     'entity_extraction',
     'timeline',
     'report_builder',
+    'source_quality_audit',
   ].includes(agent))
 }

@@ -266,31 +266,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"whisper model seeding encountered an error: {e}")
 
-    # Background task: keep the navy documents listing warm by refreshing
-    # it from OpenSearch on a fixed interval. This way the /api/navy-docs
-    # endpoint always serves a recent cached result (no user request ever
-    # pays the cold aggregation cost), while still picking up changes to
-    # the corpus without requiring an API restart.
+    # Background task: expire the per-user navy documents listing cache on a
+    # fixed interval. The listing is ACL-filtered, so it cannot be safely or
+    # usefully warmed without a concrete navy user id.
     import asyncio as _asyncio
+
     from open_notebook.search import navy_docs as _navy_docs_mod
 
     _NAVY_REFRESH_INTERVAL = float(os.environ.get("NAVY_DOCS_REFRESH_SECONDS", "300"))
 
     async def _refresh_navy_docs_loop():
-        # Prime once on startup so the very first user request is warm.
-        try:
-            docs = await _navy_docs_mod.list_navy_documents()
-            logger.info(f"Navy docs cache primed ({len(docs)} documents)")
-        except Exception as e:
-            logger.warning(f"Initial navy docs cache prime failed: {e}")
+        logger.info("Navy docs per-user cache expiration task started")
 
         while True:
             try:
                 await _asyncio.sleep(_NAVY_REFRESH_INTERVAL)
                 _navy_docs_mod.invalidate_navy_documents_cache()
-                docs = await _navy_docs_mod.list_navy_documents()
                 logger.debug(
-                    f"Navy docs cache refreshed in background ({len(docs)} documents)"
+                    "Navy docs per-user cache expired in background"
                 )
             except _asyncio.CancelledError:
                 raise
