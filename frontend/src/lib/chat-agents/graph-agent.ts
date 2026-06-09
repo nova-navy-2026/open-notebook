@@ -1,6 +1,7 @@
 import { chartsApi } from '@/lib/api/charts'
 import { multimodalApi } from '@/lib/api/multimodal'
 import { isDataLikeFile } from '@/lib/utils/file-kind'
+import { formatApiError } from '@/lib/utils/error-handler'
 import {
   fileMetadata,
   logChatAgentEvent,
@@ -13,6 +14,24 @@ function normalise(text: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+}
+
+function looksLikeInlineTable(message: string): boolean {
+  const lines = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length < 2) return false
+
+  const separators = [',', ';', '\t', '|']
+  return separators.some((separator) => {
+    const counts = lines.slice(0, 5).map((line) => line.split(separator).length)
+    return counts[0] > 1 && counts.filter((count) => count === counts[0]).length >= 2
+  })
+}
+
+function isHttpStatus(error: unknown, status: number): boolean {
+  return (error as { response?: { status?: number } })?.response?.status === status
 }
 
 export function isGraphRequest(message: string): boolean {
@@ -49,14 +68,11 @@ export async function runGraphAgent(
   force = false,
 ): Promise<string | null> {
   const hasData = isDataLikeFile(file)
-  if (!hasData && !(force && file)) {
-    // No tabular file: only run when explicitly forced by the router AND there
-    // is some inline data in the message (very long, comma/newline separated).
-    if (!force || !isGraphRequest(message)) {
-      return null
-    }
+  const hasInlineTable = !file && looksLikeInlineTable(message)
+  if (file && !hasData) {
+    return null
   }
-  if (!file && !(force && isGraphRequest(message))) {
+  if (!hasData && !hasInlineTable) {
     return null
   }
 
@@ -69,6 +85,7 @@ export async function runGraphAgent(
     context,
     message_preview: previewMessage(message),
     file: fileMetadata(file),
+    details: { forced: force },
   })
 
   try {
@@ -97,6 +114,7 @@ export async function runGraphAgent(
     })
     return formatChartResponse(result.text, result.image_base64, result.table_preview)
   } catch (error) {
+    const errorMessage = formatApiError(error)
     logChatAgentEvent({
       surface: context?.surface ?? 'global_chat',
       agent: 'graph_generator',
@@ -105,8 +123,15 @@ export async function runGraphAgent(
       context,
       duration_ms: Math.round(performance.now() - startedAt),
       file: fileMetadata(file),
-      details: { error: error instanceof Error ? error.message : String(error) },
+      details: { error: errorMessage },
     })
+    if (isHttpStatus(error, 400) || isHttpStatus(error, 422)) {
+      return [
+        'Não consegui gerar o gráfico porque os dados enviados não parecem ser uma tabela válida.',
+        `Detalhe: ${errorMessage}`,
+        'Envia um ficheiro CSV, TSV, Excel ou JSON com colunas bem definidas, ou cola dados tabulares em formato CSV.',
+      ].join('\n\n')
+    }
     throw error
   }
 }

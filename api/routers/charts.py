@@ -41,7 +41,16 @@ MAX_ROWS = 100_000  # rows considered for aggregation/plotting
 MAX_SERIES = 6  # max number of y-series plotted at once
 MAX_PIE_SLICES = 20
 
-ALLOWED_EXTENSIONS = {".csv", ".tsv", ".txt", ".json", ".xlsx", ".xls"}
+ALLOWED_EXTENSIONS = {
+    ".csv",
+    ".tsv",
+    ".txt",
+    ".json",
+    ".jsonl",
+    ".ndjson",
+    ".xlsx",
+    ".xls",
+}
 CHART_TYPES = {"bar", "line", "scatter", "pie", "hist", "box", "area"}
 AGGREGATIONS = {"none", "sum", "mean", "median", "count", "min", "max"}
 
@@ -70,27 +79,228 @@ class ChartResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _read_table(filename: Optional[str], content: bytes, inline_data: Optional[str]):
-    """Parse uploaded bytes (or inline CSV text) into a pandas DataFrame."""
+    """Parse uploaded bytes (or inline table text) into a pandas DataFrame.
+
+    The chart agent needs tabular data, but users upload data exported from many
+    tools. We therefore try several conservative pandas readers and keep the
+    candidate that looks most like a real table.
+    """
     import pandas as pd
+
+    def decode_bytes(raw: bytes) -> str:
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin1"):
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("utf-8", errors="replace")
+
+    def clean_dataframe(df):
+        df = df.copy()
+        df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+        if df.empty:
+            return df
+        df.columns = [
+            " ".join(str(part).strip() for part in col if str(part).strip() and not str(part).startswith("Unnamed:"))
+            if isinstance(col, tuple)
+            else str(col).strip()
+            for col in df.columns
+        ]
+        df.columns = [
+            f"column_{idx + 1}" if not column or column.lower().startswith("unnamed:") else column
+            for idx, column in enumerate(df.columns)
+        ]
+        return df.reset_index(drop=True)
+
+    def maybe_promote_header(df):
+        df = clean_dataframe(df)
+        if df.empty or len(df.columns) <= 1:
+            return df
+
+        generated_columns = sum(str(col).startswith("column_") for col in df.columns)
+        if generated_columns < len(df.columns) * 0.6:
+            return df
+
+        for idx in range(min(6, len(df))):
+            row = [str(value).strip() for value in df.iloc[idx].tolist()]
+            non_empty = [value for value in row if value and value.lower() != "nan"]
+            if len(non_empty) >= max(2, len(df.columns) // 2) and len(set(non_empty)) == len(non_empty):
+                promoted = df.iloc[idx + 1:].copy()
+                promoted.columns = [
+                    value if value and value.lower() != "nan" else f"column_{col_idx + 1}"
+                    for col_idx, value in enumerate(row)
+                ]
+                return clean_dataframe(promoted)
+        return df
+
+    def recover_single_quoted_column(df):
+        """Handle CSVs where every full row was exported as one quoted field."""
+        df = clean_dataframe(df)
+        if df is None or df.empty or len(df.columns) != 1:
+            return df
+
+        first_col = str(df.columns[0])
+        samples = [first_col] + [str(value) for value in df.iloc[:5, 0].dropna().tolist()]
+        delimiters = [",", ";", "\t", "|"]
+        delimiter = max(delimiters, key=lambda sep: first_col.count(sep))
+        expected_columns = first_col.count(delimiter) + 1
+        if expected_columns < 2:
+            return df
+
+        matching_samples = sum(
+            1 for sample in samples if sample.count(delimiter) + 1 == expected_columns
+        )
+        if matching_samples < min(2, len(samples)):
+            return df
+
+        rows = "\n".join(samples[:1] + [str(value) for value in df.iloc[:, 0].tolist()])
+        recovered = pd.read_csv(io.StringIO(rows), sep=delimiter)
+        if len(recovered.columns) > 1:
+            return recovered
+        return df
+
+    def coerce_numeric_columns(df):
+        df = clean_dataframe(df)
+        for column in df.columns:
+            if pd.api.types.is_numeric_dtype(df[column]):
+                continue
+            series = df[column]
+            if not pd.api.types.is_object_dtype(series) and not pd.api.types.is_string_dtype(series):
+                continue
+            cleaned = (
+                series.astype(str)
+                .str.strip()
+                .str.replace("\u00a0", "", regex=False)
+                .str.replace(" ", "", regex=False)
+                .str.replace("%", "", regex=False)
+                .str.replace(r"^\((.*)\)$", r"-\1", regex=True)
+                .str.replace(r"^[^\d,.\-+]+", "", regex=True)
+                .str.replace(r"[^\d,.\-+]+$", "", regex=True)
+            )
+
+            comma_count = cleaned.str.count(",").sum()
+            dot_count = cleaned.str.count(r"\.").sum()
+            if comma_count and dot_count:
+                comma_last = cleaned.str.rfind(",").median()
+                dot_last = cleaned.str.rfind(".").median()
+                if comma_last > dot_last:
+                    cleaned = cleaned.str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+                else:
+                    cleaned = cleaned.str.replace(",", "", regex=False)
+            elif comma_count:
+                decimal_comma = cleaned.str.contains(r",\d{1,2}$", regex=True).sum()
+                if decimal_comma >= max(1, int(series.notna().sum() * 0.5)):
+                    cleaned = cleaned.str.replace(",", ".", regex=False)
+                else:
+                    cleaned = cleaned.str.replace(",", "", regex=False)
+
+            numeric = pd.to_numeric(cleaned, errors="coerce")
+            if numeric.notna().sum() and numeric.notna().sum() >= max(1, int(series.notna().sum() * 0.8)):
+                df[column] = numeric
+        return df
+
+    def finish(df):
+        return coerce_numeric_columns(recover_single_quoted_column(maybe_promote_header(df)))
+
+    def score_table(df) -> int:
+        df = finish(df)
+        if df is None or df.empty:
+            return -1
+        numeric_cols = sum(pd.api.types.is_numeric_dtype(df[col]) for col in df.columns)
+        text_cols = len(df.columns) - numeric_cols
+        score = len(df.columns) * 10 + min(len(df), 100) + numeric_cols * 20 + text_cols * 3
+        if len(df.columns) == 1:
+            score -= 50
+        return score
+
+    def best_candidate(candidates):
+        valid = []
+        for candidate in candidates:
+            try:
+                df = finish(candidate)
+                if df is not None and not df.empty:
+                    valid.append((score_table(df), df))
+            except Exception:
+                continue
+        if not valid:
+            raise ValueError("No readable tabular data found.")
+        valid.sort(key=lambda item: item[0], reverse=True)
+        return valid[0][1]
+
+    def read_delimited_candidates(text: str, preferred_sep: Optional[str] = None):
+        candidates = []
+        separators = [preferred_sep] if preferred_sep else []
+        separators.extend([None, ",", ";", "\t", "|"])
+        for separator in dict.fromkeys(separators):
+            for header in range(0, 6):
+                try:
+                    kwargs: Dict[str, Any] = {
+                        "skip_blank_lines": True,
+                        "on_bad_lines": "skip",
+                    }
+                    if separator is None:
+                        kwargs.update({"sep": None, "engine": "python"})
+                    else:
+                        kwargs["sep"] = separator
+                    candidates.append(pd.read_csv(io.StringIO(text), header=header, **kwargs))
+                except Exception:
+                    continue
+                try:
+                    kwargs = {"header": header, "skip_blank_lines": True, "on_bad_lines": "skip"}
+                    if separator is None:
+                        kwargs.update({"sep": None, "engine": "python"})
+                    else:
+                        kwargs["sep"] = separator
+                    candidates.append(pd.read_csv(io.StringIO(text), decimal=",", thousands=".", **kwargs))
+                except Exception:
+                    continue
+        return candidates
+
+    def read_json_candidates(text: str):
+        candidates = []
+        for lines in (False, True):
+            try:
+                candidates.append(pd.read_json(io.StringIO(text), lines=lines))
+            except Exception:
+                pass
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, list):
+                candidates.append(pd.json_normalize(payload))
+            elif isinstance(payload, dict):
+                list_values = [value for value in payload.values() if isinstance(value, list)]
+                if list_values:
+                    candidates.extend(pd.json_normalize(value) for value in list_values)
+                else:
+                    candidates.append(pd.json_normalize(payload))
+        except Exception:
+            pass
+        return candidates
+
+    def read_excel_candidates(raw: bytes):
+        candidates = []
+        for header in range(0, 6):
+            try:
+                sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None, header=header)
+                candidates.extend(sheets.values())
+            except Exception:
+                continue
+        return candidates
 
     if content:
         ext = Path(filename or "").suffix.lower()
-        bio = io.BytesIO(content)
-        try:
-            if ext == ".tsv":
-                return pd.read_csv(bio, sep="\t")
-            if ext == ".json":
-                return pd.read_json(bio)
-            if ext in {".xlsx", ".xls"}:
-                return pd.read_excel(bio)
-            # .csv / .txt / unknown → try comma-separated, then auto-sniff.
-            return pd.read_csv(bio)
-        except Exception:
-            bio.seek(0)
-            return pd.read_csv(bio, sep=None, engine="python")
+        text = decode_bytes(content)
+        if ext in {".xlsx", ".xls"}:
+            return best_candidate(read_excel_candidates(content))
+        if ext in {".json", ".jsonl", ".ndjson"}:
+            candidates = read_json_candidates(text) + read_delimited_candidates(text)
+            return best_candidate(candidates)
+        preferred_sep = "\t" if ext == ".tsv" else None
+        return best_candidate(read_delimited_candidates(text, preferred_sep=preferred_sep))
 
     if inline_data and inline_data.strip():
-        return pd.read_csv(io.StringIO(inline_data))
+        candidates = read_json_candidates(inline_data) + read_delimited_candidates(inline_data)
+        return best_candidate(candidates)
 
     raise ValueError("No tabular data provided.")
 
@@ -231,6 +441,11 @@ def _aggregate(df, spec: ChartSpec):
 
 def _render_chart(df, spec: ChartSpec) -> bytes:
     """Render the chart to PNG bytes using a non-interactive matplotlib backend."""
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+    os.environ.setdefault("XDG_CACHE_HOME", "/tmp/.cache")
+    os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
+    os.makedirs(os.environ["XDG_CACHE_HOME"], exist_ok=True)
+
     import matplotlib
 
     matplotlib.use("Agg")

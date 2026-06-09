@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -775,6 +775,157 @@ export function ChatPanel({
   )
 }
 
+function extractChartArtifacts(content: string): {
+  imageSrc?: string
+  tableMarkdown?: string
+} {
+  const imageMatch = content.match(/!\[(?:Gráfico gerado|Grafico gerado|Generated chart)\]\(([^)]+)\)/i)
+  const detailsMatch = content.match(/<details>\s*<summary>[^<]*<\/summary>\s*([\s\S]*?)\s*<\/details>/i)
+  const tableMarkdown = detailsMatch?.[1]?.trim()
+
+  return {
+    imageSrc: imageMatch?.[1]?.trim(),
+    tableMarkdown: tableMarkdown && tableMarkdown.includes('|') ? tableMarkdown : undefined,
+  }
+}
+
+function markdownTableToCsv(markdown: string): string {
+  const rows = markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('|') && line.endsWith('|'))
+    .map((line) => line.slice(1, -1).split('|').map((cell) => cell.trim()))
+    .filter((cells) => !cells.every((cell) => /^:?-{3,}:?$/.test(cell)))
+
+  return rows
+    .map((cells) =>
+      cells
+        .map((cell) => `"${cell.replaceAll('"', '""')}"`)
+        .join(',')
+    )
+    .join('\n')
+}
+
+function downloadText(content: string, filename: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function copyImageToClipboard(src: string): Promise<void> {
+  if (!navigator.clipboard) {
+    throw new Error('Clipboard unavailable')
+  }
+
+  if ('ClipboardItem' in window && navigator.clipboard.write) {
+    const response = await fetch(src)
+    const blob = await response.blob()
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type || 'image/png']: blob }),
+    ])
+    return
+  }
+
+  await navigator.clipboard.writeText(src)
+}
+
+function downloadImage(src: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = src
+  anchor.download = 'chart.png'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+function ChartArtifactActions({ content }: { content: string }) {
+  const { t } = useTranslation()
+  const { imageSrc, tableMarkdown } = extractChartArtifacts(content)
+  if (!imageSrc && !tableMarkdown) return null
+
+  const tableCsv = tableMarkdown ? markdownTableToCsv(tableMarkdown) : ''
+
+  return (
+    <div className="mb-3 flex flex-wrap gap-2">
+      {imageSrc && (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            title="Copiar gráfico"
+            aria-label="Copiar gráfico"
+            onClick={async () => {
+              try {
+                await copyImageToClipboard(imageSrc)
+                toast.success(t.common.copyToClipboard)
+              } catch {
+                toast.error(t.common.error)
+              }
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            Copiar gráfico
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            title="Transferir gráfico"
+            aria-label="Transferir gráfico"
+            onClick={() => downloadImage(imageSrc)}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Transferir gráfico
+          </Button>
+        </>
+      )}
+      {tableMarkdown && (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            title="Copiar tabela"
+            aria-label="Copiar tabela"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(tableCsv || tableMarkdown)
+                toast.success(t.common.copyToClipboard)
+              } catch {
+                toast.error(t.common.error)
+              }
+            }}
+          >
+            <Table2 className="h-3.5 w-3.5" />
+            Copiar tabela
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            title="Transferir tabela"
+            aria-label="Transferir tabela"
+            onClick={() => downloadText(tableCsv || tableMarkdown, 'chart-data.csv', 'text/csv;charset=utf-8')}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Transferir tabela
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
 // Helper component to render AI messages with clickable references
 function AIMessageContent({
   content,
@@ -819,6 +970,7 @@ function AIMessageContent({
 
   return (
     <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-a:text-blue-600 prose-a:break-all prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
+      <ChartArtifactActions content={content} />
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

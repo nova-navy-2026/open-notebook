@@ -42,6 +42,8 @@ const DATA_EXTENSIONS = new Set([
   'csv',
   'tsv',
   'json',
+  'jsonl',
+  'ndjson',
   'xls',
   'xlsx',
 ])
@@ -50,6 +52,8 @@ const DATA_MIME_TYPES = new Set([
   'text/csv',
   'text/tab-separated-values',
   'application/json',
+  'application/jsonl',
+  'application/x-ndjson',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ])
@@ -111,6 +115,7 @@ export function getAgentFileType(file?: File | null): string | undefined {
     if (ext === 'csv') return 'text/csv'
     if (ext === 'tsv') return 'text/tab-separated-values'
     if (ext === 'json') return 'application/json'
+    if (ext === 'jsonl' || ext === 'ndjson') return 'application/x-ndjson'
     if (ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     if (ext === 'xls') return 'application/vnd.ms-excel'
   }

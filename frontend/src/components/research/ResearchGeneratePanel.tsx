@@ -26,6 +26,10 @@ import {
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { ModelSelector } from "@/components/common/ModelSelector";
 import { useModelDefaults } from "@/lib/hooks/use-models";
+import type { ReportTypeInfo, ToneInfo } from "@/lib/types/research";
+
+const EMPTY_REPORT_TYPES: ReportTypeInfo[] = [];
+const EMPTY_TONES: ToneInfo[] = [];
 
 interface ResearchGeneratePanelProps {
   onJobStarted?: () => void;
@@ -46,16 +50,20 @@ export function ResearchGeneratePanel({
   const [modelId, setModelId] = useState("");
   const [fromTranscript, setFromTranscript] = useState(false);
 
-  const availableReportTypes = useMemo(() => reportTypes ?? [], [reportTypes]);
-  const availableTones = useMemo(() => tones ?? [], [tones]);
+  const availableReportTypes = reportTypes ?? EMPTY_REPORT_TYPES;
+  const availableTones = tones ?? EMPTY_TONES;
   const selectedReportTypeInfo = useMemo(
-    () => availableReportTypes.find((rt) => rt.value === reportType),
+    () =>
+      availableReportTypes.find((rt) => rt.value === reportType) ??
+      availableReportTypes[0],
     [availableReportTypes, reportType],
   );
   const selectedToneInfo = useMemo(
-    () => availableTones.find((tn) => tn.value === tone),
+    () => availableTones.find((tn) => tn.value === tone) ?? availableTones[0],
     [availableTones, tone],
   );
+  const selectedReportTypeValue = selectedReportTypeInfo?.value ?? "";
+  const selectedToneValue = selectedToneInfo?.value ?? "";
 
   const handleReportTypeChange = useCallback((value: string) => {
     setReportType((current) => (current === value ? current : value));
@@ -114,33 +122,18 @@ export function ResearchGeneratePanel({
     }
   }, [modelDefaults?.default_chat_model, modelId]);
 
-  useEffect(() => {
-    if (
-      availableReportTypes.length > 0 &&
-      !availableReportTypes.some((rt) => rt.value === reportType)
-    ) {
-      setReportType(availableReportTypes[0].value);
-    }
-  }, [availableReportTypes, reportType]);
-
-  useEffect(() => {
-    if (availableTones.length > 0 && !availableTones.some((tn) => tn.value === tone)) {
-      setTone(availableTones[0].value);
-    }
-  }, [availableTones, tone]);
-
   const isLoading = typesLoading || tonesLoading;
   const isSubmitting = generateMutation.isPending;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!query.trim() || !selectedReportTypeValue || !selectedToneValue) return;
 
     await generateMutation.mutateAsync({
       query: query.trim(),
-      report_type: reportType,
+      report_type: selectedReportTypeValue,
       report_source: "local",
-      tone,
+      tone: selectedToneValue,
       source_urls: [],
       model_id: modelId || undefined,
       // When the query was seeded from a meeting transcript we want
@@ -199,7 +192,7 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent className="space-y-3">
             <Select
-              value={selectedReportTypeInfo ? reportType : undefined}
+              value={selectedReportTypeValue}
               onValueChange={handleReportTypeChange}
               disabled={isSubmitting || availableReportTypes.length === 0}
             >
@@ -232,7 +225,7 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent>
             <Select
-              value={selectedToneInfo ? tone : undefined}
+              value={selectedToneValue}
               onValueChange={handleToneChange}
               disabled={isSubmitting || availableTones.length === 0}
             >
@@ -281,7 +274,13 @@ export function ResearchGeneratePanel({
         <Button
           type="submit"
           size="lg"
-          disabled={!query.trim() || isSubmitting || isLoading}
+          disabled={
+            !query.trim() ||
+            isSubmitting ||
+            isLoading ||
+            !selectedReportTypeValue ||
+            !selectedToneValue
+          }
           className="min-w-[200px]"
         >
           {isSubmitting ? (
