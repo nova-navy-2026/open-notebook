@@ -43,9 +43,13 @@ class ResearchReportType(str, Enum):
     DEEP_RESEARCH = "deep"
     TTD_DR = "ttd_dr"
     REACT_DEEP = "react_deep"
+<<<<<<< HEAD
     # Meeting minutes (ATA): generated purely from a supplied transcript,
     # with no OpenSearch / web retrieval. Used by the transcription flow.
     MEETING_MINUTES = "meeting_minutes"
+=======
+    PLAN_AND_EXECUTE_DR = "plan_and_execute_dr"
+>>>>>>> cafc26c882df2dd48c84d8b5181294e8579845d6
 
 
 class ResearchReportSource(str, Enum):
@@ -683,30 +687,37 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
             report="",
             status="failed",
             error=str(e),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.utcnow().isoformat(),
         )
 
 
-async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback=None) -> ResearchResult:
-    """Execute research using the ReAct-DR flow via the NOVA-Researcher API."""
+async def _run_plan_and_execute_dr(request: ResearchRequest, job_id: str, progress_callback=None) -> ResearchResult:
+    """Execute research using the Plan-and-Execute DR flow via the NOVA-Researcher API."""
 
-    provider = await _resolve_model_provider(request.model_id)
+    provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
 
     try:
         logger.info(
-            f"Starting ReAct-DR research job {job_id}: "
-            f"query='{request.query[:80]}...', provider={provider or 'amalia(default)'}"
+            f"Starting Plan-and-Execute DR research job {job_id}: "
+            f"query='{request.query[:80]}...', provider={provider or 'gemma(default)'}"
         )
 
         if progress_callback:
-            await progress_callback(5, "A iniciar ReAct-DR...")
+            await progress_callback(5, "A iniciar Plan-and-Execute DR...")
+
+        # As with TTD-DR / ReAct-DR, we do NOT pre-fetch from OpenSearch: the
+        # flow runs its own plan-bounded retrieval against the same index via
+        # CustomRetriever and returns the full source set on the `done` event.
 
         if progress_callback:
-            await progress_callback(15, "A executar ReAct-DR...")
+            await progress_callback(15, "A executar Plan-and-Execute DR...")
 
+        # Call the NOVA-Researcher Plan-and-Execute DR endpoint via SSE so we
+        # can forward real-time progress events (pct + message) to the UI.
         payload = {
             "query": request.query,
             "source_urls": request.source_urls,
+            "language": RESPONSE_LANGUAGE_POLICY,
             "opensearch_index": NAVY_OPENSEARCH_INDEX,
             "retriever_filter": build_opensearch_filter(request.user_id),
         }
@@ -720,7 +731,7 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
 
         async with _http_client.stream(
             "POST",
-            f"{NOVA_RESEARCHER_URL}/research/react-dr",
+            f"{NOVA_RESEARCHER_URL}/research/plan-and-execute-dr",
             json=payload,
             params=params,
             headers={"Accept": "text/event-stream"},
@@ -728,7 +739,7 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
             resp.raise_for_status()
             async for raw_line in resp.aiter_lines():
                 if not raw_line or not raw_line.startswith("data:"):
-                    continue
+                    continue  # skip heartbeats / blank separators
                 try:
                     event = json.loads(raw_line[5:].strip())
                 except json.JSONDecodeError:
@@ -737,6 +748,8 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
                 etype = event.get("type")
                 if etype == "progress":
                     if progress_callback:
+                        # Server pct is 0-100 over the flow. Map it into the
+                        # 15-95 band so the bookend steps stay monotonic.
                         server_pct = int(event.get("pct", 0))
                         mapped = 15 + int(server_pct * 0.80)
                         await progress_callback(
@@ -744,10 +757,13 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
                             str(event.get("message", "")),
                         )
                 elif etype == "done":
-                    report = _strip_references(event.get("report", ""))
+                    report = _normalize_report_headings(
+                        _strip_references(event.get("report", "")),
+                        fallback_title=request.query,
+                    )
                     source_urls = event.get("source_urls", []) or []
                 elif etype == "error":
-                    stream_error = str(event.get("detail", "Unknown ReAct-DR error"))
+                    stream_error = str(event.get("detail", "Unknown Plan-and-Execute DR error"))
 
         if stream_error:
             raise RuntimeError(stream_error)
@@ -764,33 +780,33 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
         result = ResearchResult(
             id=job_id,
             query=request.query,
-            report_type="react_deep",
+            report_type="plan_and_execute_dr",
             report=report,
             source_urls=source_urls,
             research_costs=0.0,
             status="completed",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             tone=request.tone.value,
             model_id=request.model_id,
             retrieved_documents=retrieved_docs,
         )
 
         logger.success(
-            f"Job {job_id}: ReAct-DR research completed. "
+            f"Job {job_id}: Plan-and-Execute DR research completed. "
             f"Report length: {len(report)} chars, Sources: {len(source_urls)}"
         )
         return result
 
     except Exception as e:
-        logger.error(f"Job {job_id}: ReAct-DR research failed: {e}")
+        logger.error(f"Job {job_id}: Plan-and-Execute DR research failed: {e}")
         return ResearchResult(
             id=job_id,
             query=request.query,
-            report_type="react_deep",
+            report_type="plan_and_execute_dr",
             report="",
             status="failed",
             error=str(e),
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
 
@@ -872,16 +888,21 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
     """
     job_id = str(uuid.uuid4())[:8]
 
-    # ── TTD-DR and ReAct-DR use their own endpoints ───────────────────
+    # ── TTD-DR, ReAct-DR and Plan-and-Execute DR use their own endpoints ──
     if request.report_type == ResearchReportType.TTD_DR:
         return await _run_ttd_dr(request, job_id, progress_callback=progress_callback)
 
     if request.report_type == ResearchReportType.REACT_DEEP:
         return await _run_react_dr(request, job_id, progress_callback=progress_callback)
 
+<<<<<<< HEAD
     # ── Meeting minutes (ATA): retrieval-free, transcript-only ────────
     if request.report_type == ResearchReportType.MEETING_MINUTES:
         return await _run_meeting_minutes(request, job_id, progress_callback=progress_callback)
+=======
+    if request.report_type == ResearchReportType.PLAN_AND_EXECUTE_DR:
+        return await _run_plan_and_execute_dr(request, job_id, progress_callback=progress_callback)
+>>>>>>> cafc26c882df2dd48c84d8b5181294e8579845d6
 
     provider = await _resolve_model_provider(request.model_id)
     provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
@@ -1150,6 +1171,12 @@ def get_report_type_info() -> List[Dict[str, str]]:
             "value": "react_deep",
             "label": "ReAct Deep Research",
             "description": "ReAct (Reason + Act) loop — interleaved thought/retrieval/observation cycles before writing the final report",
+            "speed": "slow",
+        },
+        {
+            "value": "plan_and_execute_dr",
+            "label": "Plan-and-Execute Deep Research",
+            "description": "Plan-first — builds a complete hierarchical plan, researches every item in parallel, fills gaps, then synthesises a plan-grounded report (pt-PT)",
             "speed": "slow",
         },
     ]
