@@ -6,6 +6,12 @@ export interface NavyDocument {
   chunk_count: number
   source: string
   sample_section: string
+  // Governance metadata for hierarchical grouping in the UI.
+  document_type?: string
+  document_status?: string
+  access_scope?: string
+  classification_level?: number | null
+  creator_department?: string
 }
 
 export interface NavyDocumentListResponse {

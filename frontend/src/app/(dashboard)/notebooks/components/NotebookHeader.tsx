@@ -1,10 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import Image from 'next/image'
+import { useRouter } from 'next/navigation'
+import { useTheme } from 'next-themes'
 import { NotebookResponse } from '@/lib/types/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Archive, ArchiveRestore, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, Trash2, FolderCog } from 'lucide-react'
 import { useUpdateNotebook } from '@/lib/hooks/use-notebooks'
 import { NotebookDeleteDialog } from './NotebookDeleteDialog'
 import { formatDistanceToNow } from 'date-fns'
@@ -14,13 +17,21 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 
 interface NotebookHeaderProps {
   notebook: NotebookResponse
+  /** Opens the "edit sources" panel (sources are hidden by default). */
+  onEditSources?: () => void
 }
 
-export function NotebookHeader({ notebook }: NotebookHeaderProps) {
+export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps) {
   const { t, language } = useTranslation()
+  const router = useRouter()
+  const { resolvedTheme } = useTheme()
   const dfLocale = getDateLocale(language)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  
+
+  const logoSrc = resolvedTheme === 'dark' ? '/logo_dark.png' : '/logo_light.png'
+
+  const goBack = () => router.push('/notebooks')
+
   const updateNotebook = useUpdateNotebook()
 
   const handleUpdateName = async (name: string) => {
@@ -53,7 +64,23 @@ export function NotebookHeader({ notebook }: NotebookHeaderProps) {
       <div className="border-b pb-6">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 flex-1">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              {/* Navy logo — returns to the notebooks list (immersive exit). */}
+              <button
+                type="button"
+                onClick={goBack}
+                aria-label={t.notebooks.backToNotebooks}
+                title={t.notebooks.backToNotebooks}
+                className="shrink-0 rounded-md p-1 hover:bg-accent/50 transition-colors"
+              >
+                <Image
+                  src={logoSrc}
+                  alt="NNBook"
+                  width={32}
+                  height={32}
+                  style={{ width: 'auto', height: 'auto' }}
+                />
+              </button>
               <InlineEdit
                 id="notebook-name"
                 name="notebook-name"
@@ -68,6 +95,12 @@ export function NotebookHeader({ notebook }: NotebookHeaderProps) {
               )}
             </div>
             <div className="flex gap-2">
+              {onEditSources && (
+                <Button variant="outline" size="sm" onClick={onEditSources}>
+                  <FolderCog className="h-4 w-4 mr-2" />
+                  {t.notebooks.editSources}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

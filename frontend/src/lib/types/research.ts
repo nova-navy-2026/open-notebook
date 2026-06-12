@@ -31,6 +31,9 @@ export interface ResearchGenerateRequest {
   model_id?: string;
   use_amalia: boolean;
   run_in_background: boolean;
+  // Optional human-readable response language (e.g. "English"). Used by
+  // retrieval-free flows such as meeting minutes (ATA).
+  language?: string;
 }
 
 export interface ResearchJobSubmitResponse {

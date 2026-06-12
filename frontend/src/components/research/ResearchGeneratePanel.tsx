@@ -31,6 +31,23 @@ import type { ReportTypeInfo, ToneInfo } from "@/lib/types/research";
 const EMPTY_REPORT_TYPES: ReportTypeInfo[] = [];
 const EMPTY_TONES: ToneInfo[] = [];
 
+// Map an i18n locale code to a human-readable language name the backend
+// prompt can embed (e.g. "Write the minutes in {language}").
+function toLanguageName(locale: string): string {
+  switch (locale) {
+    case "pt-PT":
+      return "português europeu (pt-PT)";
+    case "en-US":
+      return "English";
+    case "it-IT":
+      return "italiano (it-IT)";
+    case "zh-TW":
+      return "繁體中文 (zh-TW)";
+    default:
+      return locale;
+  }
+}
+
 interface ResearchGeneratePanelProps {
   onJobStarted?: () => void;
 }
@@ -38,7 +55,7 @@ interface ResearchGeneratePanelProps {
 export function ResearchGeneratePanel({
   onJobStarted,
 }: ResearchGeneratePanelProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { data: reportTypes, isLoading: typesLoading } = useReportTypes();
   const { data: tones, isLoading: tonesLoading } = useResearchTones();
   const generateMutation = useGenerateResearch();
@@ -87,25 +104,11 @@ export function ResearchGeneratePanel({
       if (!raw) return;
       const parsed = JSON.parse(raw) as { query?: string; source?: string };
       if (parsed?.query && parsed.query.trim().length > 0) {
-        // Wrap the raw transcript with explicit instructions so the
-        // researcher writes a report ABOUT the meeting itself rather
-        // than treating the transcript as a generic research topic.
-        const transcript = parsed.query.trim();
-        const wrapped =
-          "You are writing a detailed report on the meeting whose " +
-          "transcript is provided below. Base the report strictly on " +
-          "the content of this transcript: summarize the topics that " +
-          "were actually discussed, the decisions made, the action " +
-          "items, the participants and their positions, and any open " +
-          "questions. Do NOT introduce unrelated background material, " +
-          "external references, or speculative information that is " +
-          "not grounded in the transcript. Organize the report with " +
-          "clear sections (e.g. Overview, Key Topics Discussed, " +
-          "Decisions, Action Items, Open Questions).\n\n" +
-          "--- MEETING TRANSCRIPT ---\n" +
-          transcript +
-          "\n--- END OF TRANSCRIPT ---";
-        setQuery(wrapped);
+        // Use the raw transcript as-is. The dedicated meeting-minutes (ATA)
+        // backend path summarises it directly with a specialised prompt and
+        // does NOT run any OpenSearch / web retrieval, so there's no need to
+        // wrap it with research instructions here.
+        setQuery(parsed.query.trim());
         setFromTranscript(true);
       }
       // Consume the draft so a manual refresh doesn't re-apply it.
@@ -131,15 +134,19 @@ export function ResearchGeneratePanel({
 
     await generateMutation.mutateAsync({
       query: query.trim(),
-      report_type: selectedReportTypeValue,
+      // A meeting transcript is turned into structured minutes (ATA) via a
+      // dedicated, retrieval-free backend path. Otherwise honour the
+      // selected report type.
+      report_type: fromTranscript ? "meeting_minutes" : selectedReportTypeValue,
       report_source: "local",
       tone: selectedToneValue,
       source_urls: [],
       model_id: modelId || undefined,
-      // When the query was seeded from a meeting transcript we want
-      // the report to stay focused on the transcript itself, so skip
-      // pulling unrelated OpenSearch / Amália navy-doc context.
-      use_amalia: !fromTranscript,
+      // Meeting minutes never touch OpenSearch (the report type forces a
+      // retrieval-free path), so keep the AMALIA writer for quality output.
+      use_amalia: true,
+      // Write the minutes in the active conversation language.
+      language: fromTranscript ? toLanguageName(language) : undefined,
       run_in_background: true,
     });
 
@@ -163,9 +170,8 @@ export function ResearchGeneratePanel({
         <CardContent>
           {fromTranscript && (
             <div className="mb-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
-              Pre-filled from the latest transcription. The report will focus on
-              the meeting content itself (no OpenSearch context will be added).
-              Edit before generating if needed.
+              {t.research?.transcriptAtaNotice ??
+                "Pre-filled from the latest transcription. A meeting-minutes (ATA) document will be generated directly from the transcript in the conversation language — no OpenSearch context is used. Edit before generating if needed."}
             </div>
           )}
           <Textarea

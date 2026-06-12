@@ -43,6 +43,9 @@ class ResearchReportType(str, Enum):
     DEEP_RESEARCH = "deep"
     TTD_DR = "ttd_dr"
     REACT_DEEP = "react_deep"
+    # Meeting minutes (ATA): generated purely from a supplied transcript,
+    # with no OpenSearch / web retrieval. Used by the transcription flow.
+    MEETING_MINUTES = "meeting_minutes"
 
 
 class ResearchReportSource(str, Enum):
@@ -86,6 +89,11 @@ class ResearchRequest(BaseModel):
     # Authenticated user id (e.g. "m24409"). Used to build the navy
     # OpenSearch access-control filter (classification + department).
     user_id: Optional[str] = None
+    # Optional response language (human-readable, e.g. "English" or
+    # "português europeu (pt-PT)"). Used by retrieval-free flows such as the
+    # meeting-minutes (ATA) path so the output matches the conversation
+    # language. When None, falls back to RESPONSE_LANGUAGE_POLICY.
+    language: Optional[str] = None
 
 
 class RetrievedDocument(BaseModel):
@@ -786,6 +794,72 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
         )
 
 
+async def _run_meeting_minutes(
+    request: ResearchRequest, job_id: str, progress_callback=None
+) -> ResearchResult:
+    """Generate meeting minutes (ATA) from the query transcript.
+
+    This path is fully retrieval-free: it does NOT touch OpenSearch or the
+    web. It calls the NOVA-Researcher ``/meeting-minutes`` endpoint, which
+    performs a single LLM summarisation of the transcript in the requested
+    conversation language.
+    """
+    provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
+    language = request.language or RESPONSE_LANGUAGE_POLICY
+
+    try:
+        logger.info(
+            f"Starting meeting-minutes job {job_id}: "
+            f"transcript_len={len(request.query)}, language='{language}', "
+            f"provider={provider or 'gemma(default)'}"
+        )
+        if progress_callback:
+            await progress_callback(20, "A redigir a ATA da reunião...")
+
+        resp = await _http_client.post(
+            f"{NOVA_RESEARCHER_URL}/meeting-minutes",
+            json={"transcript": request.query, "language": language},
+            params={"provider": provider} if provider else {},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if progress_callback:
+            await progress_callback(90, "A finalizar a ATA...")
+
+        report = _normalize_report_headings(
+            data.get("report", ""),
+            fallback_title="Ata da Reunião",
+        )
+
+        return ResearchResult(
+            id=job_id,
+            query=request.query,
+            report_type=ResearchReportType.MEETING_MINUTES.value,
+            report=report,
+            source_urls=[],
+            research_costs=data.get("costs", 0.0),
+            images=[],
+            status="completed",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            tone=request.tone.value,
+            model_id=request.model_id,
+            retrieved_documents=[],
+        )
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: Meeting minutes generation failed: {e}")
+        return ResearchResult(
+            id=job_id,
+            query=request.query,
+            report_type=ResearchReportType.MEETING_MINUTES.value,
+            report="",
+            status="failed",
+            error=str(e),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
 async def run_research(request: ResearchRequest, progress_callback=None) -> ResearchResult:
     """
     Execute a research query via the NOVA-Researcher API.
@@ -804,6 +878,10 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
 
     if request.report_type == ResearchReportType.REACT_DEEP:
         return await _run_react_dr(request, job_id, progress_callback=progress_callback)
+
+    # ── Meeting minutes (ATA): retrieval-free, transcript-only ────────
+    if request.report_type == ResearchReportType.MEETING_MINUTES:
+        return await _run_meeting_minutes(request, job_id, progress_callback=progress_callback)
 
     provider = await _resolve_model_provider(request.model_id)
     provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)

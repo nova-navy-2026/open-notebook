@@ -1,11 +1,19 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavyDocuments } from "@/lib/hooks/use-navy-docs";
+import type { NavyDocument } from "@/lib/api/navy-docs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Collapsible,
   CollapsibleContent,
@@ -18,12 +26,24 @@ import {
   Database,
   Search,
   Loader2,
+  FileText,
+  Building2,
+  ShieldCheck,
+  Tag,
 } from "lucide-react";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { cn } from "@/lib/utils";
 
 const MAX_SELECTED = 15;
 const PAGE_SIZE = 20;
+
+type GroupByKey = "department" | "classification" | "type" | "none";
+
+interface DocGroup {
+  key: string;
+  label: string;
+  docs: NavyDocument[];
+}
 
 interface NavyDocsSectionProps {
   /** Set of selected doc_ids (all selected by default) */
@@ -47,8 +67,26 @@ export function NavyDocsSection({
   const [isOpen, setIsOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [groupBy, setGroupBy] = useState<GroupByKey>("department");
+  // Track which groups the user has explicitly OPENED (empty = all collapsed).
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  const documents = data?.documents ?? [];
+  // Collapse all groups whenever the grouping dimension changes.
+  useEffect(() => {
+    setExpandedGroups(new Set());
+  }, [groupBy]);
+
+  const documents = useMemo(() => data?.documents ?? [], [data]);
+
+  const classificationLabel = useCallback(
+    (level: number | null | undefined): string => {
+      if (level === null || level === undefined) {
+        return t.navyDocs?.unclassified ?? "Unclassified";
+      }
+      return `${t.navyDocs?.classificationLevel ?? "Level"} ${level}`;
+    },
+    [t],
+  );
 
   const filteredDocs = useMemo(() => {
     if (!searchQuery.trim()) return documents;
@@ -57,9 +95,55 @@ export function NavyDocsSection({
       (d) =>
         d.doc_id.toLowerCase().includes(q) ||
         d.source.toLowerCase().includes(q) ||
-        d.sample_section.toLowerCase().includes(q),
+        d.sample_section.toLowerCase().includes(q) ||
+        (d.creator_department ?? "").toLowerCase().includes(q) ||
+        (d.document_type ?? "").toLowerCase().includes(q),
     );
   }, [documents, searchQuery]);
+
+  // Build the hierarchical groups for the current grouping dimension.
+  const groups = useMemo<DocGroup[]>(() => {
+    if (groupBy === "none") return [];
+
+    const buckets = new Map<string, DocGroup>();
+    for (const doc of filteredDocs) {
+      let key: string;
+      let label: string;
+      if (groupBy === "department") {
+        key = doc.creator_department ?? "";
+        label = key || (t.navyDocs?.noDepartment ?? "No department");
+      } else if (groupBy === "classification") {
+        key =
+          doc.classification_level === null ||
+          doc.classification_level === undefined
+            ? ""
+            : String(doc.classification_level);
+        label = classificationLabel(doc.classification_level);
+      } else {
+        key = doc.document_type ?? "";
+        label = key || (t.navyDocs?.otherType ?? "Other");
+      }
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.docs.push(doc);
+      } else {
+        buckets.set(key, { key, label, docs: [doc] });
+      }
+    }
+
+    const sorted = Array.from(buckets.values());
+    if (groupBy === "classification") {
+      sorted.sort((a, b) => {
+        const av = a.key === "" ? Number.POSITIVE_INFINITY : Number(a.key);
+        const bv = b.key === "" ? Number.POSITIVE_INFINITY : Number(b.key);
+        return av - bv;
+      });
+    } else {
+      sorted.sort((a, b) => a.label.localeCompare(b.label));
+    }
+    return sorted;
+  }, [filteredDocs, groupBy, t, classificationLabel]);
+
 
   // Reset to page 1 when search changes
   const totalPages = Math.max(1, Math.ceil(filteredDocs.length / PAGE_SIZE));
@@ -77,6 +161,75 @@ export function NavyDocsSection({
     filteredDocs.every((d) => selectedDocIds?.has(d.doc_id));
   const someSelected =
     !readOnly && filteredDocs.some((d) => selectedDocIds?.has(d.doc_id));
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Renders one document row (icon + optional checkbox + label + metadata).
+  const renderDocRow = (doc: NavyDocument) => {
+    const isSelected = selectedDocIds?.has(doc.doc_id) ?? false;
+    const label = doc.doc_id.replace(/_/g, " ").replace(/\.pdf$/i, "");
+    const disabledByLimit = !isSelected && atLimit;
+
+    return (
+      <div
+        key={doc.doc_id}
+        className={cn(
+          "flex items-start gap-2 px-2 py-1.5 rounded transition-colors",
+          readOnly
+            ? ""
+            : disabledByLimit
+              ? "opacity-50 cursor-not-allowed"
+              : "hover:bg-accent/50 cursor-pointer",
+        )}
+      >
+        {!readOnly && onSelectionChange && (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) =>
+              onSelectionChange(doc.doc_id, !!checked)
+            }
+            disabled={disabledByLimit}
+            className="mt-0.5"
+          />
+        )}
+        <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium truncate" title={doc.doc_id}>
+            {label}
+          </div>
+          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+            {doc.creator_department && groupBy !== "department" && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5">
+                <Building2 className="h-2.5 w-2.5" />
+                {doc.creator_department}
+              </Badge>
+            )}
+            {doc.classification_level !== null &&
+              doc.classification_level !== undefined &&
+              groupBy !== "classification" && (
+                <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5">
+                  <ShieldCheck className="h-2.5 w-2.5" />
+                  {classificationLabel(doc.classification_level)}
+                </Badge>
+              )}
+            {doc.document_type && groupBy !== "type" && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5">
+                <Tag className="h-2.5 w-2.5" />
+                {doc.document_type}
+              </Badge>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -146,6 +299,28 @@ export function NavyDocsSection({
                 </span>
               )}
               <div className="flex-1" />
+              <Select
+                value={groupBy}
+                onValueChange={(v) => setGroupBy(v as GroupByKey)}
+              >
+                <SelectTrigger className="h-7 w-36 text-xs">
+                  <SelectValue placeholder={t.navyDocs?.groupBy ?? "Group by"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="department">
+                    {t.navyDocs?.groupByDepartment ?? "Department"}
+                  </SelectItem>
+                  <SelectItem value="classification">
+                    {t.navyDocs?.groupByClassification ?? "Classification"}
+                  </SelectItem>
+                  <SelectItem value="type">
+                    {t.navyDocs?.groupByType ?? "Type"}
+                  </SelectItem>
+                  <SelectItem value="none">
+                    {t.navyDocs?.groupByNone ?? "None"}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <div className="relative w-40">
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                 <Input
@@ -160,79 +335,87 @@ export function NavyDocsSection({
               </div>
             </div>
 
-            {/* Document list — paginated */}
-            <div className="space-y-1">
-              {pagedDocs.map((doc) => {
-                const isSelected = selectedDocIds?.has(doc.doc_id) ?? false;
-                const label = doc.doc_id
-                  .replace(/_/g, " ")
-                  .replace(/\.pdf$/i, "");
-                const disabledByLimit = !isSelected && atLimit;
-
-                return (
-                  <div
-                    key={doc.doc_id}
-                    className={cn(
-                      "flex items-start gap-2 px-2 py-1.5 rounded transition-colors",
-                      readOnly
-                        ? ""
-                        : disabledByLimit
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:bg-accent/50 cursor-pointer",
-                    )}
-                  >
-                    {!readOnly && onSelectionChange && (
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={(checked) =>
-                          onSelectionChange(doc.doc_id, !!checked)
-                        }
-                        disabled={disabledByLimit}
-                        className="mt-0.5"
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div
-                        className="text-sm font-medium truncate"
-                        title={doc.doc_id}
+            {/* Grouped document tree (hierarchical) */}
+            {groupBy !== "none" ? (
+              <div className="space-y-1">
+                {groups.map((group) => {
+                  const groupCollapsed = !expandedGroups.has(group.key);
+                  return (
+                    <div key={group.key || "__none__"}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.key)}
+                        className="flex items-center gap-1.5 w-full px-1 py-1 rounded hover:bg-accent/50 transition-colors"
                       >
-                        {label}
-                      </div>
+                        {groupCollapsed ? (
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                        {groupBy === "department" ? (
+                          <Building2 className="h-3.5 w-3.5 text-primary" />
+                        ) : groupBy === "classification" ? (
+                          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                        ) : (
+                          <Tag className="h-3.5 w-3.5 text-primary" />
+                        )}
+                        <span className="text-xs font-semibold truncate">
+                          {group.label}
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] px-1 py-0 ml-1"
+                        >
+                          {group.docs.length}
+                        </Badge>
+                      </button>
+                      {!groupCollapsed && (
+                        <div className="ml-4 border-l pl-2 space-y-0.5">
+                          {group.docs.map((doc) => renderDocRow(doc))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={safePage <= 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="h-3 w-3 mr-1" />
-                  Prev
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {safePage} / {totalPages}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={safePage >= totalPages}
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                >
-                  Next
-                  <ChevronRight className="h-3 w-3 ml-1" />
-                </Button>
+                  );
+                })}
               </div>
+            ) : (
+              <>
+                {/* Flat list — paginated */}
+                <div className="space-y-1">
+                  {pagedDocs.map((doc) => renderDocRow(doc))}
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      disabled={safePage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft className="h-3 w-3 mr-1" />
+                      {t.navyDocs?.prev ?? "Prev"}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      {safePage} / {totalPages}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      disabled={safePage >= totalPages}
+                      onClick={() =>
+                        setCurrentPage((p) => Math.min(totalPages, p + 1))
+                      }
+                    >
+                      {t.navyDocs?.next ?? "Next"}
+                      <ChevronRight className="h-3 w-3 ml-1" />
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </CollapsibleContent>

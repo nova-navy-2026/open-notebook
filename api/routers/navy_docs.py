@@ -27,6 +27,12 @@ class NavyDocument(BaseModel):
     chunk_count: int
     source: str = ""
     sample_section: str = ""
+    # Governance metadata for hierarchical grouping in the UI.
+    document_type: str = ""
+    document_status: str = ""
+    access_scope: str = ""
+    classification_level: Optional[int] = None
+    creator_department: str = ""
 
 
 class NavyDocumentListResponse(BaseModel):

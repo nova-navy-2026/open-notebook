@@ -374,38 +374,41 @@ export default function SearchPage() {
               >
                 {t.searchPage.searchIn}
               </span>
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="sources"
-                    name="sources"
-                    checked={searchSources}
-                    onCheckedChange={(checked) =>
-                      setSearchSources(checked as boolean)
-                    }
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {([
+                  {
+                    key: "sources" as const,
+                    label: t.searchPage.searchSources,
+                    desc: t.searchPage.searchSourcesDesc,
+                    active: searchSources,
+                    toggle: () => setSearchSources(!searchSources),
+                  },
+                  {
+                    key: "notes" as const,
+                    label: t.searchPage.searchNotes,
+                    desc: t.searchPage.searchNotesDesc,
+                    active: searchNotes,
+                    toggle: () => setSearchNotes(!searchNotes),
+                  },
+                ]).map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    aria-pressed={option.active}
                     disabled={searchMutation.isPending}
-                  />
-                  <Label
-                    htmlFor="sources"
-                    className="font-normal cursor-pointer"
+                    onClick={option.toggle}
+                    className={`flex flex-col items-start gap-0.5 rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      option.active
+                        ? "border-primary bg-primary/5 ring-1 ring-primary"
+                        : "hover:bg-muted/50"
+                    }`}
                   >
-                    {t.searchPage.searchSources}
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="notes"
-                    name="notes"
-                    checked={searchNotes}
-                    onCheckedChange={(checked) =>
-                      setSearchNotes(checked as boolean)
-                    }
-                    disabled={searchMutation.isPending}
-                  />
-                  <Label htmlFor="notes" className="font-normal cursor-pointer">
-                    {t.searchPage.searchNotes}
-                  </Label>
-                </div>
+                    <span className="text-sm font-medium">{option.label}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {option.desc}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
           </div>

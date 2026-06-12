@@ -48,7 +48,9 @@ class GenerateResearchRequest(BaseModel):
     model_id: Optional[str] = None
     use_amalia: bool = True
     run_in_background: bool = True
-
+    # Optional human-readable response language (e.g. "English"). Used by
+    # retrieval-free flows such as meeting minutes (ATA).
+    language: Optional[str] = None
 
 class ResearchJobResponse(BaseModel):
     """Response for a submitted research job."""
@@ -131,6 +133,7 @@ async def generate_research(
             notebook_id=request.notebook_id,
             model_id=request.model_id,
             use_amalia=request.use_amalia,
+            language=request.language,
             # ``user_id`` on the internal request is used both as the ACL
             # filter for the navy OpenSearch index and as the owner tag
             # stored on the ResearchJob so the user can only see their own

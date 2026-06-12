@@ -147,6 +147,10 @@ async def _list_navy_documents_uncached(
                                     "document_name",
                                     "document_path",
                                     "document_type",
+                                    "document_status",
+                                    "access_scope",
+                                    "classification_level",
+                                    "creator_department",
                                     "section_title",
                                     "page_start",
                                 ],
@@ -182,6 +186,13 @@ async def _list_navy_documents_uncached(
                 "chunk_count": chunk_count,
                 "source": sample.get("document_name") or sample.get("source", ""),
                 "sample_section": sample.get("section_title", ""),
+                # Governance metadata used by the UI to group the corpus
+                # hierarchically (by department / classification / type).
+                "document_type": sample.get("document_type") or "",
+                "document_status": sample.get("document_status") or "",
+                "access_scope": sample.get("access_scope") or "",
+                "classification_level": sample.get("classification_level"),
+                "creator_department": sample.get("creator_department") or "",
             })
 
         logger.info(

@@ -113,7 +113,7 @@ function ContentSelectionPanel({
   handleNoteToggle,
   queryClient,
 }: ContentSelectionPanelProps) {
-  const { t, language } = useTranslation()
+  const { t } = useTranslation()
 
   // Cache all translation strings at render time to avoid repeated Proxy accesses in loops
   // This prevents the infinite loop detection from triggering

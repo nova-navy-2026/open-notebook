@@ -16,6 +16,12 @@ import { useIsDesktop } from "@/lib/hooks/use-media-query";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FileText, StickyNote, MessageSquare } from "lucide-react";
 
 export type ContextMode = "off" | "insights" | "full";
@@ -45,7 +51,7 @@ export default function NotebookPage() {
   const { data: notes, isLoading: notesLoading } = useNotes(notebookId);
 
   // Get collapse states for dynamic layout
-  const { sourcesCollapsed, notesCollapsed } = useNotebookColumnsStore();
+  const { notesCollapsed } = useNotebookColumnsStore();
 
   // Detect desktop to avoid double-mounting ChatColumn
   const isDesktop = useIsDesktop();
@@ -54,6 +60,10 @@ export default function NotebookPage() {
   const [mobileActiveTab, setMobileActiveTab] = useState<
     "sources" | "notes" | "chat"
   >("chat");
+
+  // Sources are hidden by default in the immersive view; the "Edit sources"
+  // button in the header opens this panel to manage / pick sources.
+  const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false);
 
   // Context selection state
   const [contextSelections, setContextSelections] = useState<ContextSelections>(
@@ -229,7 +239,10 @@ export default function NotebookPage() {
     // boxes resize when the Knowledge Base panel expanded/collapsed.
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-shrink-0 p-6 pb-0">
-        <NotebookHeader notebook={notebook} />
+        <NotebookHeader
+          notebook={notebook}
+          onEditSources={() => setSourcesDialogOpen(true)}
+        />
       </div>
 
       <div className="flex-1 min-h-0 p-6 pt-6 overflow-hidden flex flex-col">
@@ -305,27 +318,51 @@ export default function NotebookPage() {
           </>
         )}
 
-        {/* Desktop: Collapsible columns layout */}
-        <div
-          className={cn(
-            "hidden lg:grid h-full min-h-0 grid-rows-1 gap-4 transition-all duration-150",
-            sourcesCollapsed && notesCollapsed
-              ? "grid-cols-[auto_auto_1fr]"
-              : sourcesCollapsed
-                ? "grid-cols-[auto_1fr_1fr]"
-                : notesCollapsed
-                  ? "grid-cols-[1fr_auto_1fr]"
-                  : "grid-cols-3",
-          )}
-        >
-          {/* Sources Column */}
+        {/* Desktop: Chat-predominant layout (NotebookLM-style).
+            Sources are no longer a persistent column — they live behind the
+            "Edit sources" button. The remaining columns are the Chat (wide)
+            and the Agent Collaboration / Notes panel (thin, collapsible). */}
+        <div className="hidden lg:flex h-full min-h-0 gap-4">
+          {/* Chat Column — predominant, takes remaining space */}
+          <div className="h-full min-h-0 min-w-0 overflow-hidden flex-1">
+            <ChatColumn
+              notebookId={notebookId}
+              contextSelections={contextSelections}
+              sources={sources}
+              sourcesLoading={sourcesLoading}
+              selectedNavyDocIds={selectedNavyDocIds}
+            />
+          </div>
+
+          {/* Agent Collaboration (Notes) — thinner side panel */}
           <div
             className={cn(
-              "h-full min-h-0 transition-all duration-150 min-w-0 overflow-hidden",
-              sourcesCollapsed && "w-12",
+              "h-full min-h-0 overflow-hidden transition-all duration-150 flex-shrink-0",
+              notesCollapsed ? "w-12" : "w-80",
             )}
           >
+            <NotesColumn
+              notes={notes}
+              isLoading={notesLoading}
+              notebookId={notebookId}
+              contextSelections={contextSelections.notes}
+              onContextModeChange={(noteId, mode) =>
+                handleContextModeChange(noteId, mode, "note")
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Edit sources — hidden by default, opened from the header button. */}
+      <Dialog open={sourcesDialogOpen} onOpenChange={setSourcesDialogOpen}>
+        <DialogContent className="max-w-3xl h-[80vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-0">
+            <DialogTitle>{t.notebooks.editSources}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-hidden px-6 pb-6 pt-2">
             <SourcesColumn
+              embedded
               sources={sources}
               isLoading={sourcesLoading}
               notebookId={notebookId}
@@ -343,37 +380,8 @@ export default function NotebookPage() {
               onNavyDocSelectAll={handleNavySelectAll}
             />
           </div>
-
-          {/* Notes Column */}
-          <div
-            className={cn(
-              "h-full min-h-0 transition-all duration-150 min-w-0 overflow-hidden",
-              notesCollapsed && "w-12",
-            )}
-          >
-            <NotesColumn
-              notes={notes}
-              isLoading={notesLoading}
-              notebookId={notebookId}
-              contextSelections={contextSelections.notes}
-              onContextModeChange={(noteId, mode) =>
-                handleContextModeChange(noteId, mode, "note")
-              }
-            />
-          </div>
-
-          {/* Chat Column - always expanded, takes remaining space */}
-          <div className="h-full min-h-0 transition-all duration-150 min-w-0 overflow-hidden">
-            <ChatColumn
-              notebookId={notebookId}
-              contextSelections={contextSelections}
-              sources={sources}
-              sourcesLoading={sourcesLoading}
-              selectedNavyDocIds={selectedNavyDocIds}
-            />
-          </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

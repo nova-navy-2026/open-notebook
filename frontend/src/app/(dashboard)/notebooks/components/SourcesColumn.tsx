@@ -49,6 +49,9 @@ interface SourcesColumnProps {
   selectedNavyDocIds?: Set<string>;
   onNavyDocSelectionChange?: (docId: string, selected: boolean) => void;
   onNavyDocSelectAll?: (selected: boolean) => void;
+  /** When true, render as a plain panel (no collapsible strip), e.g. inside
+   * the "edit sources" dialog. */
+  embedded?: boolean;
 }
 
 export function SourcesColumn({
@@ -64,6 +67,7 @@ export function SourcesColumn({
   selectedNavyDocIds,
   onNavyDocSelectionChange,
   onNavyDocSelectAll,
+  embedded = false,
 }: SourcesColumnProps) {
   const { t } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -162,14 +166,7 @@ export function SourcesColumn({
     openModal("source", sourceId);
   };
 
-  return (
-    <>
-      <CollapsibleColumn
-        isCollapsed={sourcesCollapsed}
-        onToggle={toggleSources}
-        collapsedIcon={FileText}
-        collapsedLabel={t.navigation.sources}
-      >
+  const cardContent = (
         <Card className="h-full flex flex-col flex-1 overflow-hidden">
           <CardHeader className="pb-3 flex-shrink-0">
             <div className="flex items-center justify-between gap-2 min-w-0">
@@ -218,7 +215,7 @@ export function SourcesColumn({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                {collapseButton}
+                {!embedded && collapseButton}
               </div>
             </div>
           </CardHeader>
@@ -280,7 +277,22 @@ export function SourcesColumn({
               )}
           </CardContent>
         </Card>
-      </CollapsibleColumn>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        cardContent
+      ) : (
+        <CollapsibleColumn
+          isCollapsed={sourcesCollapsed}
+          onToggle={toggleSources}
+          collapsedIcon={FileText}
+          collapsedLabel={t.navigation.sources}
+        >
+          {cardContent}
+        </CollapsibleColumn>
+      )}
 
       <AddSourceDialog
         open={addDialogOpen}
