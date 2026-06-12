@@ -43,13 +43,10 @@ class ResearchReportType(str, Enum):
     DEEP_RESEARCH = "deep"
     TTD_DR = "ttd_dr"
     REACT_DEEP = "react_deep"
-<<<<<<< HEAD
+    PLAN_AND_EXECUTE_DR = "plan_and_execute_dr"
     # Meeting minutes (ATA): generated purely from a supplied transcript,
     # with no OpenSearch / web retrieval. Used by the transcription flow.
     MEETING_MINUTES = "meeting_minutes"
-=======
-    PLAN_AND_EXECUTE_DR = "plan_and_execute_dr"
->>>>>>> cafc26c882df2dd48c84d8b5181294e8579845d6
 
 
 class ResearchReportSource(str, Enum):
@@ -895,16 +892,13 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
     if request.report_type == ResearchReportType.REACT_DEEP:
         return await _run_react_dr(request, job_id, progress_callback=progress_callback)
 
-<<<<<<< HEAD
     # ── Meeting minutes (ATA): retrieval-free, transcript-only ────────
     if request.report_type == ResearchReportType.MEETING_MINUTES:
         return await _run_meeting_minutes(request, job_id, progress_callback=progress_callback)
-=======
+
     if request.report_type == ResearchReportType.PLAN_AND_EXECUTE_DR:
         return await _run_plan_and_execute_dr(request, job_id, progress_callback=progress_callback)
->>>>>>> cafc26c882df2dd48c84d8b5181294e8579845d6
 
-    provider = await _resolve_model_provider(request.model_id)
     provider = await _resolve_model_provider(request.model_id) or _provider_for_request(request)
 
     try:
