@@ -99,6 +99,7 @@ function ReportTypeLabel({ type }: { type: string }) {
     deep: "Deep Research",
     ttd_dr: "TTD-DR Deep Research",
     react_deep: "ReAct Deep Research",
+    plan_and_execute_dr: "Plan-and-Execute Deep Research",
   };
   return (
     <span className="text-xs text-muted-foreground">
