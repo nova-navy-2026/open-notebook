@@ -4,6 +4,13 @@ const nextConfig: NextConfig = {
   // Enable standalone output for optimized Docker deployment
   output: "standalone",
 
+  // Pin the workspace root to this directory.
+  // An orphan package-lock.json in the parent (open-notebook/) makes Next.js
+  // infer the wrong root, breaking module resolution (e.g. tailwindcss).
+  turbopack: {
+    root: __dirname,
+  },
+
   // Experimental features
   // Type assertion needed: proxyClientMaxBodySize is valid in Next.js 15 but types lag behind
   experimental: {
