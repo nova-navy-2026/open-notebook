@@ -211,6 +211,33 @@ class ModelManager:
                 config=config,
             )
         elif model.type == "embedding":
+            # Route bge-m3 embeddings to the warm embedding server when one is
+            # configured. The in-process transformers provider reloads the
+            # model weights on every call (several seconds of latency); the
+            # warm server keeps the model resident and answers in tens of ms.
+            # Falls back transparently to the in-process provider if the
+            # server is unreachable.
+            if self._should_use_bge_m3_server(provider, model.name):
+                import os
+
+                from open_notebook.ai.bge_m3_server_embedding import (
+                    BgeM3ServerEmbeddingModel,
+                )
+
+                def _build_fallback() -> "object":
+                    return AIFactory.create_embedding(
+                        model_name=model.name,
+                        provider=provider,
+                        config=config,
+                    )
+
+                return BgeM3ServerEmbeddingModel(
+                    model_name=model.name,
+                    server_url=os.environ.get("BGE_M3_SERVER_URL"),
+                    fallback_factory=_build_fallback,
+                    config=config,
+                )
+
             return AIFactory.create_embedding(
                 model_name=model.name,
                 provider=provider,
@@ -230,6 +257,34 @@ class ModelManager:
             )
         else:
             raise ConfigurationError(f"Invalid model type: {model.type}")
+
+    @staticmethod
+    def _should_use_bge_m3_server(provider: str, model_name: str) -> bool:
+        """Decide whether to route embeddings through the warm bge-m3 server.
+
+        Enabled only for the local bge-m3 transformers model and only when the
+        server is configured. Can be disabled by setting
+        ``BGE_M3_USE_SERVER=false``.
+        """
+        import os
+
+        if os.environ.get("BGE_M3_USE_SERVER", "true").strip().lower() in (
+            "false",
+            "0",
+            "no",
+        ):
+            return False
+
+        if provider != "transformers":
+            return False
+
+        if "bge-m3" not in (model_name or "").lower():
+            return False
+
+        return bool(
+            os.environ.get("BGE_M3_SERVER_URL")
+            or os.environ.get("BGE_M3_USE_SERVER")
+        )
 
     async def get_defaults(self) -> DefaultModels:
         """Get the default models configuration from database"""

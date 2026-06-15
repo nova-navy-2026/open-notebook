@@ -1,0 +1,219 @@
+{
+  "generated_at": "2026-06-15T14:26:28.977482+00:00",
+  "base_url": "http://127.0.0.1:5055",
+  "iterations": 5,
+  "notes": [
+    "Métricas calculadas exclusivamente a partir de endpoints e logs observáveis.",
+    "Sem inventar resultados; valores indisponíveis são marcados como N/D."
+  ],
+  "health": {
+    "health": {
+      "status_code": 200,
+      "latency_ms": 5.604883655905724,
+      "payload": {
+        "status": "healthy"
+      }
+    },
+    "api_health": {
+      "status_code": 200,
+      "latency_ms": 5.113815888762474,
+      "payload": {
+        "status": "healthy",
+        "message": "API is running"
+      }
+    },
+    "api_config": {
+      "status_code": 200,
+      "latency_ms": 49.521537497639656,
+      "payload": {
+        "version": "0.0.1",
+        "latestVersion": null,
+        "hasUpdate": false,
+        "dbStatus": "online"
+      }
+    },
+    "auth_status": {
+      "status_code": 200,
+      "latency_ms": 3.7992652505636215,
+      "payload": {
+        "auth_enabled": true,
+        "oauth_enabled": false,
+        "has_azure": false,
+        "has_google": false,
+        "has_github": false,
+        "local_login_available": true,
+        "message": "Multiple authentication methods available"
+      }
+    }
+  },
+  "entities": {
+    "models": 10,
+    "credentials": 4,
+    "notebooks": 1,
+    "notes": 1,
+    "sources": 0
+  },
+  "audit": {
+    "request_status": 200,
+    "request_latency_ms": 183.64432081580162,
+    "total_logs": 1000,
+    "actions": {
+      "login": 28,
+      "token_refresh": 934,
+      "note_created": 7,
+      "notebook_created": 8,
+      "notebook_deleted": 10,
+      "notebook_updated": 4,
+      "logout": 7,
+      "note_deleted": 2
+    },
+    "status_distribution": {
+      "success": 924,
+      "failure": 76
+    },
+    "success_rate": "92.40%",
+    "duration_ms": {
+      "min": 0.629425048828125,
+      "avg": 3932.4963779449463,
+      "median": 66.35689735412598,
+      "p95": 15065.613913536035,
+      "max": 393760.53166389465,
+      "samples": 1000
+    },
+    "duration_ms_excl_token_refresh": {
+      "min": 2.850055694580078,
+      "avg": 106.5917123447765,
+      "median": 53.88164520263672,
+      "p95": 361.9341850280762,
+      "max": 381.9572925567627,
+      "samples": 66
+    },
+    "duration_ms_by_action": {
+      "login": {
+        "min": 45.728206634521484,
+        "avg": 109.17482205799648,
+        "median": 54.18097972869873,
+        "p95": 371.1790919303894,
+        "max": 381.9572925567627,
+        "samples": 28
+      },
+      "logout": {
+        "min": 2.850055694580078,
+        "avg": 3.7086691175188338,
+        "median": 3.4487247467041016,
+        "p95": 5.211377143859862,
+        "max": 5.672931671142578,
+        "samples": 7
+      },
+      "note_created": {
+        "min": 187.34383583068848,
+        "avg": 195.688077381679,
+        "median": 193.74895095825195,
+        "p95": 205.93340396881104,
+        "max": 208.01615715026855,
+        "samples": 7
+      },
+      "note_deleted": {
+        "min": 92.66328811645508,
+        "avg": 106.79233074188232,
+        "median": 106.79233074188232,
+        "p95": 119.50846910476685,
+        "max": 120.92137336730957,
+        "samples": 2
+      },
+      "notebook_created": {
+        "min": 48.789262771606445,
+        "avg": 50.84672570228577,
+        "median": 50.54831504821777,
+        "p95": 53.19575071334839,
+        "max": 53.50041389465332,
+        "samples": 8
+      },
+      "notebook_deleted": {
+        "min": 45.95828056335449,
+        "avg": 138.81196975708008,
+        "median": 48.92373085021973,
+        "p95": 286.8248224258423,
+        "max": 298.9966869354248,
+        "samples": 10
+      },
+      "notebook_updated": {
+        "min": 141.45922660827637,
+        "avg": 143.47565174102783,
+        "median": 142.59958267211914,
+        "p95": 146.6826319694519,
+        "max": 147.24421501159668,
+        "samples": 4
+      },
+      "token_refresh": {
+        "min": 0.629425048828125,
+        "avg": 4202.849384293567,
+        "median": 71.59984111785889,
+        "p95": 16700.967574119568,
+        "max": 393760.53166389465,
+        "samples": 934
+      }
+    }
+  },
+  "search_benchmark": {
+    "text": {
+      "iterations": 5,
+      "status_codes": {
+        "200": 5
+      },
+      "min_ms": 103.66957262158394,
+      "avg_ms": 231.6767666488886,
+      "median_ms": 112.87657171487808,
+      "p95_ms": 581.8539168685674,
+      "max_ms": 690.75932726264,
+      "samples_ms": [
+        690.75932726264,
+        146.23227529227734,
+        112.87657171487808,
+        104.84608635306358,
+        103.66957262158394
+      ]
+    },
+    "vector": {
+      "iterations": 5,
+      "status_codes": {
+        "200": 5
+      },
+      "min_ms": 336.56872250139713,
+      "avg_ms": 347.3329197615385,
+      "median_ms": 340.8567328006029,
+      "p95_ms": 364.31984938681126,
+      "max_ms": 367.67913959920406,
+      "samples_ms": [
+        340.6773153692484,
+        367.67913959920406,
+        340.8567328006029,
+        336.56872250139713,
+        350.88268853724
+      ]
+    },
+    "hybrid": {
+      "iterations": 5,
+      "status_codes": {
+        "200": 5
+      },
+      "min_ms": 370.2028449624777,
+      "avg_ms": 406.03869929909706,
+      "median_ms": 406.87584318220615,
+      "p95_ms": 440.6886976212263,
+      "max_ms": 441.8510366231203,
+      "samples_ms": [
+        436.0393416136503,
+        441.8510366231203,
+        370.2028449624777,
+        406.87584318220615,
+        375.22443011403084
+      ]
+    }
+  },
+  "chart_status": {
+    "benchmark_search_latency.png": "ok",
+    "audit_actions_top10.png": "ok",
+    "audit_status_ratio.png": "ok"
+  }
+}
