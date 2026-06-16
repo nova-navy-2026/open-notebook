@@ -1,6 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { researchApi } from '@/lib/api/research'
-import { multimodalApi } from '@/lib/api/multimodal'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { MODEL_QUERY_KEYS } from '@/lib/hooks/use-models'
 import { normaliseForAgentMatching, type ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
@@ -274,16 +273,22 @@ export function optionsFromJob(job: ResearchJob, queryClient?: QueryClient): Cha
   }
 }
 
-const REPORT_EDIT_VERB = /\b(altera|alterar|muda|mudar|modifica|modificar|reescreve|reescrever|reformula|reformular|edita|editar|ajusta|ajustar|adiciona|adicionar|acrescenta|acrescentar|remove|remover|retira|retirar|encurta|encurtar|resume|resumir|expande|expandir|melhora|melhorar|corrige|corrigir|atualiza|atualizar|traduz|traduzir|translate|rewrite|edit|change|modify|update|shorten|expand|improve|revise|add|remove)\b/
+const REPORT_EDIT_VERB = /\b(altera|alterar|muda|mudar|modifica|modificar|reescreve|reescrever|reformula|reformular|edita|editar|ajusta|ajustar|adiciona|adicionar|acrescenta|acrescentar|inclui|incluir|junta|juntar|remove|remover|retira|retirar|tira|tirar|apaga|apagar|elimina|eliminar|corta|cortar|encurta|encurtar|resume|resumir|simplifica|simplificar|expande|expandir|detalha|detalhar|desenvolve|desenvolver|aumenta|aumentar|diminui|diminuir|melhora|melhorar|corrige|corrigir|atualiza|atualizar|substitui|substituir|transforma|transformar|torna|tornar|poe|poem|coloca|colocar|foca|focar|traduz|traduzir|translate|rewrite|edit|change|modify|update|shorten|expand|improve|revise|refine|adjust|add|remove|replace)\b/
 const REPORT_NOUN = /\b(relatorio|report|pesquisa|research|texto|documento|document)\b/
+
+/** True when the given message is a completed deep-research report. */
+export function isDeepResearchReportMessage(
+  message: { id?: string; type?: string; content?: string },
+): boolean {
+  return message.type === 'ai'
+    && Boolean(parseResearchJobId(message.id))
+    && (message.content ?? '').includes('## Deep Research concluído')
+}
 
 /** The most recent completed deep-research report message in the conversation. */
 export function findLastResearchReportMessage(messages: NotebookChatMessage[]): NotebookChatMessage | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
-    if (message.type === 'ai' && parseResearchJobId(message.id) && message.content.includes('## Deep Research concluído')) {
-      return message
-    }
+    if (isDeepResearchReportMessage(messages[index])) return messages[index]
   }
   return undefined
 }
@@ -301,10 +306,75 @@ export interface ReportEditResult {
 }
 
 /**
- * Edit an existing deep-research report in place instead of producing a new
- * message. Detects an edit request against the most recent report, asks the LLM
- * to return the full revised report, and rebuilds the report message (preserving
- * the job's sources/metadata) so the caller can update that same message by id.
+ * Revise a specific deep-research report message. Asks the backend to apply the
+ * instruction with a full text model (no multimodal token cap, durable on the
+ * job), then rebuilds the report message (preserving the job's sources/metadata)
+ * so the caller can update that same message by id.
+ */
+export async function reviseResearchReportMessage({
+  target,
+  instruction,
+  queryClient,
+  modelId,
+  context,
+}: {
+  target: NotebookChatMessage
+  instruction: string
+  queryClient: QueryClient
+  modelId?: string
+  context?: ChatAgentRunContext
+}): Promise<ReportEditResult | null> {
+  const jobId = parseResearchJobId(target.id)
+  if (!jobId || !instruction.trim()) return null
+
+  const startedAt = performance.now()
+  const surface = context?.surface ?? 'global_chat'
+  logChatAgentEvent({
+    surface,
+    agent: 'deep_research',
+    event: 'selected',
+    status: 'selected',
+    context,
+    message_preview: previewMessage(instruction),
+    details: { mode: 'report_edit', job_id: jobId },
+  })
+
+  let job: ResearchJob
+  try {
+    job = await researchApi.reviseJob(jobId, { instruction: instruction.trim(), model_id: modelId })
+  } catch (error) {
+    logChatAgentEvent({
+      surface,
+      agent: 'deep_research',
+      event: 'tool_call',
+      status: 'failure',
+      context,
+      duration_ms: Math.round(performance.now() - startedAt),
+      details: { mode: 'report_edit', error: error instanceof Error ? error.message : String(error) },
+    })
+    throw error
+  }
+  const editedReport = job.result?.report?.trim()
+  if (!editedReport) return null
+
+  const newContent = formatDeepResearchResult(job.query, optionsFromJob(job, queryClient), job)
+  queryClient.invalidateQueries({ queryKey: QUERY_KEYS.researchJobs })
+  queryClient.setQueryData(QUERY_KEYS.researchJob(jobId), job)
+  logChatAgentEvent({
+    surface,
+    agent: 'deep_research',
+    event: 'tool_call',
+    status: 'success',
+    context,
+    duration_ms: Math.round(performance.now() - startedAt),
+    details: { mode: 'report_edit', job_id: jobId, response_chars: editedReport.length },
+  })
+  return { targetMessageId: target.id, newContent }
+}
+
+/**
+ * Chat-command path: detect an edit request against the most recent report and
+ * revise it in place instead of producing a new message.
  */
 export async function runDeepResearchReportEdit({
   message,
@@ -321,81 +391,7 @@ export async function runDeepResearchReportEdit({
 }): Promise<ReportEditResult | null> {
   const target = findLastResearchReportMessage(messages)
   if (!target || !isReportEditRequest(message, messages)) return null
-  const jobId = parseResearchJobId(target.id)
-  if (!jobId) return null
-
-  const startedAt = performance.now()
-  const surface = context?.surface ?? 'global_chat'
-  logChatAgentEvent({
-    surface,
-    agent: 'deep_research',
-    event: 'selected',
-    status: 'selected',
-    context,
-    message_preview: previewMessage(message),
-    details: { mode: 'report_edit', job_id: jobId },
-  })
-
-  let job: ResearchJob
-  try {
-    job = await researchApi.getJob(jobId)
-  } catch {
-    return null
-  }
-  const currentReport = job.result?.report?.trim()
-  if (!currentReport) return null
-
-  const prompt = [
-    'Tens um relatório existente em Markdown (no Contexto abaixo).',
-    'Aplica a alteração pedida pelo utilizador e devolve APENAS o relatório COMPLETO e atualizado,',
-    'no mesmo formato Markdown e na mesma língua do original.',
-    'Não acrescentes comentários, títulos extra, nem expliques o que mudaste — devolve só o relatório.',
-    '',
-    `Alteração pedida: ${message.trim()}`,
-  ].join('\n')
-
-  let editedReport: string
-  try {
-    const result = await multimodalApi.chat({
-      query: prompt,
-      context: currentReport,
-      mode: 'chat',
-      model_id: modelId,
-      surface,
-      run_id: context?.runId,
-      session_id: context?.sessionId,
-      notebook_id: context?.notebookId,
-    })
-    editedReport = (result.text || '').trim()
-  } catch (error) {
-    logChatAgentEvent({
-      surface,
-      agent: 'deep_research',
-      event: 'tool_call',
-      status: 'failure',
-      context,
-      duration_ms: Math.round(performance.now() - startedAt),
-      details: { mode: 'report_edit', error: error instanceof Error ? error.message : String(error) },
-    })
-    throw error
-  }
-  if (!editedReport) return null
-
-  const editedJob: ResearchJob = {
-    ...job,
-    result: { ...(job.result as ResearchResultData), report: editedReport },
-  }
-  const newContent = formatDeepResearchResult(job.query, optionsFromJob(job, queryClient), editedJob)
-  logChatAgentEvent({
-    surface,
-    agent: 'deep_research',
-    event: 'tool_call',
-    status: 'success',
-    context,
-    duration_ms: Math.round(performance.now() - startedAt),
-    details: { mode: 'report_edit', job_id: jobId, response_chars: editedReport.length },
-  })
-  return { targetMessageId: target.id, newContent }
+  return reviseResearchReportMessage({ target, instruction: message, queryClient, modelId, context })
 }
 
 interface ReconcileDeepResearchParams {

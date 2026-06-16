@@ -22,6 +22,7 @@ import {
   formatDeepResearchResult,
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
+  reviseResearchReportMessage,
   runDeepResearchAgent,
   runDeepResearchReportEdit,
   withResolvedModelName,
@@ -882,6 +883,41 @@ export function useMultimodalChat({
     }
   }, [currentSessionId, updateSessionMutation])
 
+  // Inline edit of a specific deep-research report message — updates that same
+  // message in place (no new user/assistant message).
+  const reviseReport = useCallback(async (messageId: string, instruction: string) => {
+    const sessionId = currentSessionId
+    if (!sessionId) return
+    const index = messages.findIndex((m) => m.id === messageId)
+    const target = index >= 0 ? messages[index] : undefined
+    if (!target) return
+    const result = await reviseResearchReportMessage({
+      target,
+      instruction,
+      queryClient,
+      modelId: currentSession?.model_override ?? undefined,
+      context: { surface: 'notebook_chat', runId: createChatAgentRunId('notebook_chat'), notebookId, sessionId },
+    })
+    if (!result) {
+      toast.error('Não consegui atualizar o relatório.')
+      return
+    }
+    setMessages((prev) => prev.map((m) => m.id === result.targetMessageId ? { ...m, content: result.newContent } : m))
+    const pairedHuman = index > 0 && messages[index - 1]?.type === 'human' ? messages[index - 1] : undefined
+    void chatApi.persistExchange(sessionId, {
+      user_message: pairedHuman?.content ?? '',
+      assistant_message: result.newContent,
+      user_message_id: pairedHuman?.id,
+      assistant_message_id: result.targetMessageId,
+    }).then(() => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId) })
+    }).catch((persistError) => {
+      console.error('Failed to persist inline report edit:', persistError)
+    })
+    toast.success('Relatório atualizado.')
+  }, [messages, currentSessionId, currentSession, notebookId, queryClient])
+
   return {
     sessions,
     currentSession: currentSession || sessions.find((session) => session.id === currentSessionId),
@@ -893,6 +929,7 @@ export function useMultimodalChat({
     charCount,
     pendingModelOverride,
     sendMessage,
+    reviseReport,
     clearMessages,
     buildContext,
     createSession,

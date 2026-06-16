@@ -19,6 +19,7 @@ import {
   formatDeepResearchResult,
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
+  reviseResearchReportMessage,
   runDeepResearchAgent,
   runDeepResearchReportEdit,
   withResolvedModelName,
@@ -861,6 +862,45 @@ export function useGlobalChat() {
     }
   }, [currentSessionId, updateSessionMutation])
 
+  // Inline edit of a specific deep-research report message — updates that same
+  // message in place (no new user/assistant message), mirroring the
+  // chat-command edit flow.
+  const reviseReport = useCallback(async (messageId: string, instruction: string) => {
+    const sessionId = currentSessionId
+    if (!sessionId) return
+    const index = messages.findIndex(m => m.id === messageId)
+    const target = index >= 0 ? messages[index] : undefined
+    if (!target) return
+    const result = await reviseResearchReportMessage({
+      target,
+      instruction,
+      queryClient,
+      modelId: currentSession?.model_override ?? undefined,
+      context: { surface: 'global_chat', runId: createChatAgentRunId('global_chat'), sessionId },
+    })
+    if (!result) {
+      toast.error('Não consegui atualizar o relatório.')
+      return
+    }
+    localMessagesDirtyRef.current = true
+    setMessages(prev => prev.map(m => m.id === result.targetMessageId ? { ...m, content: result.newContent } : m))
+    // Re-persist the original paired human (no-op replace by id) + the updated
+    // report (same id) so nothing new is appended.
+    const pairedHuman = index > 0 && messages[index - 1]?.type === 'human' ? messages[index - 1] : undefined
+    void globalChatApi.persistExchange(sessionId, {
+      user_message: pairedHuman?.content ?? '',
+      assistant_message: result.newContent,
+      user_message_id: pairedHuman?.id,
+      assistant_message_id: result.targetMessageId,
+    }).then(() => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+    }).catch((persistError) => {
+      console.error('Failed to persist inline report edit:', persistError)
+    })
+    toast.success('Relatório atualizado.')
+  }, [messages, currentSessionId, currentSession, queryClient])
+
   return {
     sessions,
     currentSession: currentSession || sessions.find(s => s.id === currentSessionId),
@@ -877,6 +917,7 @@ export function useGlobalChat() {
     deleteSession,
     switchSession,
     sendMessage,
+    reviseReport,
     setModelOverride,
     refetchSessions
   }

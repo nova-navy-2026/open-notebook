@@ -1383,6 +1383,60 @@ def delete_research_job(job_id: str) -> bool:
     return True
 
 
+async def revise_research_report(
+    job_id: str, instruction: str, model_id: Optional[str] = None
+) -> Optional[ResearchJob]:
+    """Apply a user instruction to an existing report and store the revision.
+
+    Uses a full language model (not the token-capped multimodal path) so long
+    reports are not truncated, and persists the revised report back onto the job
+    so the change is durable (chat + Deep Research history).
+
+    Returns the updated job, or None if the job/report is missing or the model
+    returned nothing usable.
+    """
+    job = _get_job(job_id)
+    if not job or not job.result or not (job.result.report or "").strip():
+        return None
+
+    from open_notebook.ai.provision import provision_langchain_model
+    from open_notebook.utils import clean_thinking_content
+    from open_notebook.utils.text_utils import extract_text_content
+
+    current_report = job.result.report
+    prompt = (
+        "És um editor de relatórios. Tens um relatório existente em Markdown e uma "
+        "alteração pedida pelo utilizador. Devolve APENAS o relatório COMPLETO e "
+        "atualizado, em Markdown, na mesma língua do original. Não acrescentes "
+        "comentários, notas finais, nem expliques o que mudaste — devolve só o "
+        "relatório.\n\n"
+        f"## Alteração pedida\n{instruction.strip()}\n\n"
+        f"## Relatório atual\n{current_report}"
+    )
+
+    model = await provision_langchain_model(prompt, model_id or job.model_id, "chat", max_tokens=8000)
+    ai_message = await model.ainvoke(prompt)
+    revised = clean_thinking_content(extract_text_content(ai_message.content)).strip()
+
+    # Strip an accidental code fence wrapping the whole report.
+    if revised.startswith("```"):
+        lines = revised.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        revised = "\n".join(lines).strip()
+
+    if not revised:
+        return None
+
+    job.result.report = revised
+    job.updated_at = _now_iso()
+    _persist_job(job)
+    logger.info(f"Revised research report {job_id} ({len(revised)} chars)")
+    return job
+
+
 def get_report_type_info() -> List[Dict[str, str]]:
     """Return metadata about available report types for the UI."""
     return [

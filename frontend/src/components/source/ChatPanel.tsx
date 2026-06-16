@@ -10,7 +10,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2 } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil } from 'lucide-react'
+import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -72,6 +73,9 @@ interface ChatPanelProps {
     deepResearch?: ChatDeepResearchOptions,
     agentOptions?: ChatAgentUiOptions,
   ) => void
+  // Inline edit of a deep-research report message (revises in place). When
+  // provided, report messages show an "Editar relatório" affordance.
+  onReviseReport?: (messageId: string, instruction: string) => Promise<void> | void
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -98,11 +102,90 @@ interface ChatPanelProps {
   exportingAll?: boolean
 }
 
+/** Inline "edit the report" control shown under a deep-research report message. */
+function ReportEditAffordance({
+  messageId,
+  onReviseReport,
+}: {
+  messageId: string
+  onReviseReport: (messageId: string, instruction: string) => Promise<void> | void
+}) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const instruction = text.trim()
+    if (!instruction || busy) return
+    setBusy(true)
+    try {
+      await onReviseReport(messageId, instruction)
+      setText('')
+      setOpen(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-fit px-2 text-xs text-muted-foreground"
+        onClick={() => setOpen(true)}
+      >
+        <Pencil className="h-3.5 w-3.5 mr-1" />
+        Editar relatório
+      </Button>
+    )
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <Textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="O que queres alterar no relatório? (ex.: encurta para metade, adiciona uma secção sobre…)"
+        rows={2}
+        className="text-sm"
+        disabled={busy}
+        autoFocus
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault()
+            void submit()
+          }
+        }}
+      />
+      <div className="flex gap-2">
+        <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void submit()} disabled={busy || !text.trim()}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+          Aplicar
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-3 text-xs"
+          onClick={() => {
+            setOpen(false)
+            setText('')
+          }}
+          disabled={busy}
+        >
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function ChatPanel({
   messages,
   isStreaming,
   contextIndicators,
   onSendMessage,
+  onReviseReport,
   modelOverride,
   onModelChange,
   sessions = [],
@@ -446,6 +529,12 @@ export function ChatPanel({
                       <MessageActions
                         content={message.content}
                         notebookId={notebookId}
+                      />
+                    )}
+                    {message.type === 'ai' && onReviseReport && isDeepResearchReportMessage(message) && (
+                      <ReportEditAffordance
+                        messageId={message.id}
+                        onReviseReport={onReviseReport}
                       />
                     )}
                   </div>

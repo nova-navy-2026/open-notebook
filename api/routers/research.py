@@ -19,7 +19,6 @@ from open_notebook.research.researcher_service import (
     ResearchReportSource,
     ResearchReportType,
     ResearchRequest,
-    ResearchResult,
     ResearchTone,
     delete_research_job,
     get_report_type_info,
@@ -27,6 +26,7 @@ from open_notebook.research.researcher_service import (
     get_source_info,
     get_tone_info,
     list_research_jobs,
+    revise_research_report,
     run_research,
     submit_research_job,
 )
@@ -44,6 +44,35 @@ def _job_visible_to_user(job, navy_user_id: Optional[str], auth_user_id: str) ->
     if navy_user_id == "__admin__":
         return job.user_id is None or job.user_id == "__admin__"
     return job.user_id == (navy_user_id or auth_user_id)
+
+
+def _job_to_response(job) -> dict:
+    """Serialise a research job (with result, if any) for the API."""
+    response = {
+        "id": job.id,
+        "query": job.query,
+        "report_type": job.report_type,
+        "status": job.status,
+        "progress": job.progress,
+        "progress_pct": job.progress_pct,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "error": job.error,
+        "has_result": job.result is not None,
+        "tone": job.tone,
+        "model_id": job.model_id,
+    }
+    if job.result:
+        response["result"] = {
+            "report": job.result.report,
+            "source_urls": job.result.source_urls,
+            "research_costs": job.result.research_costs,
+            "images": job.result.images,
+            "tone": job.result.tone,
+            "model_id": job.result.model_id,
+            "retrieved_documents": job.result.retrieved_documents,
+        }
+    return response
 
 
 async def _require_owned_notebook(notebook_id: str, auth_user_id: str) -> Notebook:
@@ -252,33 +281,7 @@ async def get_job(
         # Fail-closed: return 404 instead of 403 to avoid leaking job existence.
         raise HTTPException(status_code=404, detail="Research job not found")
 
-    response = {
-        "id": job.id,
-        "query": job.query,
-        "report_type": job.report_type,
-        "status": job.status,
-        "progress": job.progress,
-        "progress_pct": job.progress_pct,
-        "created_at": job.created_at,
-        "updated_at": job.updated_at,
-        "error": job.error,
-        "has_result": job.result is not None,
-        "tone": job.tone,
-        "model_id": job.model_id,
-    }
-
-    if job.result:
-        response["result"] = {
-            "report": job.result.report,
-            "source_urls": job.result.source_urls,
-            "research_costs": job.result.research_costs,
-            "images": job.result.images,
-            "tone": job.result.tone,
-            "model_id": job.result.model_id,
-            "retrieved_documents": job.result.retrieved_documents,
-        }
-
-    return response
+    return _job_to_response(job)
 
 
 @router.delete("/research/jobs/{job_id}")
@@ -297,6 +300,39 @@ async def delete_job(
     if not deleted:
         raise HTTPException(status_code=404, detail="Research job not found")
     return {"success": True, "message": f"Job {job_id} deleted"}
+
+
+class ReviseResearchRequest(BaseModel):
+    instruction: str
+    model_id: Optional[str] = None
+
+
+@router.post("/research/jobs/{job_id}/revise")
+async def revise_job(
+    job_id: str,
+    request: ReviseResearchRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    """Apply an edit instruction to a completed report and store the revision."""
+    job = get_research_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Research job not found")
+    if not _job_visible_to_user(job, user_id, auth_user_id):
+        raise HTTPException(status_code=404, detail="Research job not found")
+    if not job.result or not (job.result.report or "").strip():
+        raise HTTPException(status_code=400, detail="Research job has no report to revise")
+    if not request.instruction.strip():
+        raise HTTPException(status_code=400, detail="An edit instruction is required")
+
+    try:
+        updated = await revise_research_report(job_id, request.instruction, request.model_id)
+    except Exception as e:
+        logger.error(f"Failed to revise research report {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    if not updated:
+        raise HTTPException(status_code=500, detail="Report revision returned no content")
+    return _job_to_response(updated)
 
 
 @router.post("/research/save-as-note")
