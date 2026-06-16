@@ -1122,16 +1122,8 @@ export const ptPT = {
     transcriptAtaNotice:
       "Pré-preenchido a partir da última transcrição. Será gerada uma ATA (ata de reunião) diretamente a partir da transcrição, na língua da conversa — não é usado contexto do OpenSearch. Edite antes de gerar, se necessário.",
     reportType: "Tipo de Relatório",
-    reportSourceLabel: "Fonte de Dados",
     toneLabel: "Tom de Escrita",
     modelLabel: "Modelo de IA",
-    useAmalia: "Usar AMALIA",
-    amaliaDescription:
-      "AMALIA-9B — Modelo otimizado para português pela NOVASearch",
-    defaultModelNote: "Irá usar o modelo padrão do GPTResearcher (GPT-4o-mini)",
-    sourceUrls: "URLs de Fontes (Opcional)",
-    sourceUrlsDescription:
-      "Adicione URLs específicos para incluir na pesquisa. Um URL por linha.",
     generating: "A gerar...",
     generate: "Gerar Pesquisa",
     generationStarted: "Pesquisa Iniciada",
@@ -1154,7 +1146,6 @@ export const ptPT = {
     copyReport: "Copiar Relatório",
     copied: "Copiado",
     copiedDesc: "Relatório copiado para a área de transferência",
-    sourcesUsed: "Fontes Utilizadas",
     notebookResearchDesc:
       "Execute uma pesquisa aprofundada e guarde automaticamente o resultado como nota neste notebook.",
     researchInProgress: "Pesquisa em andamento...",

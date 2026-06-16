@@ -42,7 +42,7 @@ import { useModalManager } from '@/lib/hooks/use-modal-manager'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
-import { useModelDefaults } from '@/lib/hooks/use-models'
+import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
@@ -145,6 +145,7 @@ export function ChatPanel({
   const { data: reportTypes = [] } = useReportTypes()
   const { data: tones = [] } = useResearchTones()
   const { data: modelDefaults } = useModelDefaults()
+  const { data: models = [] } = useModels()
   const { data: availableNotebooks = [] } = useQuery({
     queryKey: ['chat-agent-notebooks'],
     queryFn: () => notebooksApi.list({ archived: false }),
@@ -160,6 +161,9 @@ export function ChatPanel({
   )
   const showVisionControls = enableAgentControls && selectedFileIsVisual
   const showSaveNoteControls = enableAgentControls && !notebookId && !selectedFile && availableNotebooks.length > 1
+  const researchModelName = researchModelId
+    ? models.find((model) => model.id === researchModelId || model.name === researchModelId)?.name
+    : undefined
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const scrollRoot = scrollAreaRef.current
     const viewport = scrollRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
@@ -208,6 +212,7 @@ export function ChatPanel({
           reportType: researchReportType,
           tone: researchTone,
           modelId: researchModelId || undefined,
+          modelName: researchModelName,
         }
         : undefined
       onSendMessage(

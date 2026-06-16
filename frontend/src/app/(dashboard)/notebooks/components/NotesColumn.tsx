@@ -146,26 +146,28 @@ export function NotesColumn({
         collapsedLabel={t.notebooks.agentNotes}
       >
         <Card className="h-full flex flex-col flex-1 overflow-hidden">
-          <CardHeader className="pb-3 flex-shrink-0">
+          <CardHeader className="px-3 pb-3 sm:px-4 flex-shrink-0">
             <div className="flex items-center justify-between gap-2 min-w-0">
-              <CardTitle className="text-lg truncate">{t.notebooks.agentNotes}</CardTitle>
+              <CardTitle className="min-w-0 truncate text-base xl:text-lg">{t.notebooks.agentNotes}</CardTitle>
               <div className="flex items-center gap-1 flex-shrink-0">
                 <Button
-                  size="sm"
+                  size="icon"
+                  className="h-9 w-9"
                   onClick={() => {
                     setEditingNote(null)
                     setShowAddDialog(true)
                   }}
+                  title={t.common.writeNote}
+                  aria-label={t.common.writeNote}
                 >
                   <Plus className="h-4 w-4" />
-                  <span className="hidden xl:inline ml-1">{t.common.writeNote}</span>
                 </Button>
                 {collapseButton}
               </div>
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto min-h-0">
+          <CardContent className="flex-1 overflow-y-auto min-h-0 px-3 sm:px-4">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <LoadingSpinner />
@@ -214,9 +216,9 @@ export function NotesColumn({
                       }
                     }}
                   >
-                    <div className="flex gap-3 items-stretch">
+                    <div className="flex min-w-0 gap-3 items-stretch">
                       {media ? (
-                        <div className="relative flex-shrink-0 w-20 self-stretch min-h-[5rem] rounded-md overflow-hidden border bg-muted">
+                        <div className="relative flex-shrink-0 w-16 self-stretch min-h-16 rounded-md overflow-hidden border bg-muted xl:w-20 xl:min-h-20">
                           {media.kind === 'image' ? (
                             <ImageThumbnail
                               src={media.mediaUrl}
@@ -237,36 +239,37 @@ export function NotesColumn({
                         </div>
                       ) : (
                         <div
-                          className={`relative flex-shrink-0 w-20 self-stretch min-h-[5rem] rounded-md overflow-hidden border flex items-center justify-center ${
+                          className={`relative flex-shrink-0 w-16 self-stretch min-h-16 rounded-md overflow-hidden border flex items-center justify-center xl:w-20 xl:min-h-20 ${
                             isAi
                               ? 'bg-primary/10 border-primary/30'
                               : 'bg-muted border-border'
                           }`}
                         >
                           <TypeIcon
-                            className={`h-8 w-8 ${
+                            className={`h-7 w-7 xl:h-8 xl:w-8 ${
                               isAi ? 'text-primary' : 'text-muted-foreground'
                             }`}
                           />
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between mb-2 gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
+                        <div className="mb-2 flex items-start justify-between gap-2">
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex min-w-0 items-center gap-1.5">
                             <TypeIcon className={`h-4 w-4 flex-shrink-0 ${isAi && !media ? 'text-primary' : media?.kind === 'image' ? 'text-emerald-600 dark:text-emerald-400' : media?.kind === 'video' ? 'text-purple-600 dark:text-purple-400' : 'text-muted-foreground'}`} />
-                            <Badge variant="outline" className={`text-xs ${typeBadgeClass}`}>
+                            <Badge variant="outline" className={`max-w-full truncate px-1.5 text-[11px] ${typeBadgeClass}`}>
                               {typeLabel}
                             </Badge>
-                          </div>
-
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-xs text-muted-foreground hidden sm:inline">
-                              {formatDistanceToNow(new Date(note.updated), { 
+                            </div>
+                            <span className="block truncate text-[11px] text-muted-foreground">
+                              {formatDistanceToNow(new Date(note.updated), {
                                 addSuffix: true,
                                 locale: getDateLocale(language)
                               })}
                             </span>
+                          </div>
 
+                          <div className="flex items-center gap-1 flex-shrink-0">
                             {/* Context toggle - only show if handler provided */}
                             {onContextModeChange && contextSelections?.[note.id] && (
                               <div onClick={(event) => event.stopPropagation()}>
@@ -284,8 +287,9 @@ export function NotesColumn({
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  className="h-7 w-7 p-0 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-visible:opacity-100 transition-opacity"
                                   onClick={(e) => e.stopPropagation()}
+                                  aria-label="Mais opções"
                                 >
                                   <MoreVertical className="h-4 w-4" />
                                 </Button>
@@ -307,18 +311,18 @@ export function NotesColumn({
                         </div>
 
                         {note.title && (
-                          <h4 className="text-sm font-medium mb-2 break-all">{note.title}</h4>
+                          <h4 className="text-sm font-medium mb-2 break-words line-clamp-2">{note.title}</h4>
                         )}
 
                         {media ? (
                           media.analysisText && (
-                            <p className="text-sm text-muted-foreground line-clamp-3 break-all">
+                            <p className="text-sm text-muted-foreground line-clamp-3 break-words">
                               {media.analysisText}
                             </p>
                           )
                         ) : (
                           note.content && (
-                            <p className="text-sm text-muted-foreground line-clamp-3 break-all">
+                            <p className="text-sm text-muted-foreground line-clamp-3 break-words">
                               {note.content}
                             </p>
                           )

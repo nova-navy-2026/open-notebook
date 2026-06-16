@@ -338,7 +338,7 @@ export default function NotebookPage() {
           <div
             className={cn(
               "h-full min-h-0 overflow-hidden transition-all duration-150 flex-shrink-0",
-              notesCollapsed ? "w-12" : "w-80",
+              notesCollapsed ? "w-12" : "w-80 xl:w-96 2xl:w-[26rem]",
             )}
           >
             <NotesColumn

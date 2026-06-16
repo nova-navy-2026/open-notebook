@@ -7,7 +7,7 @@ from surreal_commands import CommandInput, CommandOutput, command, submit_comman
 
 from open_notebook.ai.models import model_manager
 from open_notebook.database.repository import ensure_record_id, repo_insert, repo_query
-from open_notebook.exceptions import ConfigurationError
+from open_notebook.exceptions import ConfigurationError, NotFoundError
 from open_notebook.domain.notebook import Note, Source, SourceInsight
 from open_notebook.utils.chunking import ContentType, chunk_text, detect_content_type
 from open_notebook.utils.embedding import generate_embedding, generate_embeddings
@@ -126,7 +126,8 @@ class EmbedSourceOutput(CommandOutput):
         "wait_strategy": "exponential_jitter",
         "wait_min": 1,
         "wait_max": 60,
-        "stop_on": [ValueError, ConfigurationError],  # Don't retry validation/config errors
+        # Don't retry validation/config/missing-record errors.
+        "stop_on": [ValueError, ConfigurationError, NotFoundError],
         "retry_log_level": "debug",
     },
 )
@@ -204,7 +205,7 @@ async def embed_note_command(input_data: EmbedNoteInput) -> EmbedNoteOutput:
             processing_time=processing_time,
         )
 
-    except ValueError as e:
+    except (ValueError, NotFoundError) as e:
         # Permanent failure - don't retry
         processing_time = time.time() - start_time
         cmd_id = get_command_id(input_data)
@@ -235,7 +236,8 @@ async def embed_note_command(input_data: EmbedNoteInput) -> EmbedNoteOutput:
         "wait_strategy": "exponential_jitter",
         "wait_min": 1,
         "wait_max": 60,
-        "stop_on": [ValueError, ConfigurationError],  # Don't retry validation/config errors
+        # Don't retry validation/config/missing-record errors.
+        "stop_on": [ValueError, ConfigurationError, NotFoundError],
         "retry_log_level": "debug",
     },
 )
@@ -318,7 +320,7 @@ async def embed_insight_command(input_data: EmbedInsightInput) -> EmbedInsightOu
             processing_time=processing_time,
         )
 
-    except ValueError as e:
+    except (ValueError, NotFoundError) as e:
         # Permanent failure - don't retry
         processing_time = time.time() - start_time
         cmd_id = get_command_id(input_data)
@@ -349,7 +351,8 @@ async def embed_insight_command(input_data: EmbedInsightInput) -> EmbedInsightOu
         "wait_strategy": "exponential_jitter",
         "wait_min": 1,
         "wait_max": 60,
-        "stop_on": [ValueError, ConfigurationError],  # Don't retry validation/config errors
+        # Don't retry validation/config/missing-record errors.
+        "stop_on": [ValueError, ConfigurationError, NotFoundError],
         "retry_log_level": "debug",
     },
 )
@@ -525,7 +528,7 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
             processing_time=processing_time,
         )
 
-    except ValueError as e:
+    except (ValueError, NotFoundError) as e:
         # Permanent failure - don't retry
         processing_time = time.time() - start_time
         cmd_id = get_command_id(input_data)

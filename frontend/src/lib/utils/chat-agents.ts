@@ -7,6 +7,7 @@ export interface ChatDeepResearchOptions {
   reportType: string
   tone: string
   modelId?: string
+  modelName?: string
 }
 
 export interface ChatAgentUiOptions {
@@ -148,6 +149,14 @@ export function parseSaveToNoteTarget(message: string): string | undefined {
   return undefined
 }
 
+/**
+ * Offline fallback only. The authoritative instruction for each text agent
+ * lives in the backend agent definitions (`api/chat_agents/agents/*.py`) and is
+ * delivered via the router response (`routerDecision.instruction`). This
+ * client-side heuristic is used purely as a degraded mode when the router
+ * endpoint is unreachable, so keep it broadly aligned but treat the backend as
+ * the source of truth.
+ */
 export function detectTextAgentInstruction(message: string): string | undefined {
   const text = normaliseForAgentMatching(message)
 
@@ -184,29 +193,6 @@ export function detectTextAgentInstruction(message: string): string | undefined 
   }
 
   return undefined
-}
-
-export function instructionForAgent(agent?: string): string | undefined {
-  switch (agent) {
-    case 'table_extraction':
-      return '[Modo agente: Extração de tabelas]\nSe houver dados tabulares no contexto, extrai-os para Markdown. Preserva cabeçalhos, unidades, valores e notas. Se o utilizador pedir CSV, devolve também CSV num bloco de código. Não inventes células em falta.'
-    case 'document_comparison':
-      return '[Modo agente: Comparação documental]\nCompara os documentos, notas ou excertos relevantes. Estrutura por semelhanças, diferenças, alterações críticas, impacto prático e pontos que exigem validação.'
-    case 'checklist_procedure':
-      return '[Modo agente: Checklist/Procedimento]\nTransforma a resposta num procedimento operacional claro. Usa passos numerados, pré-condições, verificações, riscos/atenções e resultado esperado. Mantém pt-PT.'
-    case 'procedure_following':
-      return '[Modo agente: Acompanhamento de procedimento]\nGuia o utilizador de forma interativa. Usa a conversa recente para saber o último passo confirmado. Mostra apenas o próximo passo acionável, com como validar conclusão, e pergunta se pode avançar. Se ainda não houver procedimento definido, primeiro identifica objetivo, pré-condições e número de passos.'
-    case 'entity_extraction':
-      return '[Modo agente: Extração de entidades]\nExtrai entidades relevantes e organiza por tipo: pessoas, organizações, locais, navios/meios, datas, documentos, códigos, coordenadas e outros identificadores. Inclui evidência curta quando possível.'
-    case 'timeline':
-      return '[Modo agente: Timeline]\nConstrói uma cronologia em ordem temporal. Para cada evento inclui data/hora se existir, evento, atores/entidades e fonte/evidência curta. Indica incertezas.'
-    case 'report_builder':
-      return '[Modo agente: Relatório]\nProduz uma estrutura de relatório real, compatível com índice: título, resumo executivo, introdução, metodologia/âmbito, secções H2/H3, análise, conclusões e recomendações. Usa headings Markdown.'
-    case 'source_quality_audit':
-      return '[Modo agente: Auditoria de qualidade de fontes]\nAudita a resposta/relatório/contexto disponível. Organiza por: claims principais, evidência disponível, claims sem suporte, fontes fracas ou desatualizadas, contradições, lacunas de informação, nível de confiança e recomendações de validação. Não inventes fontes. Se falta evidência, diz explicitamente.'
-    default:
-      return undefined
-  }
 }
 
 export function applyTextAgentInstruction(message: string): string {

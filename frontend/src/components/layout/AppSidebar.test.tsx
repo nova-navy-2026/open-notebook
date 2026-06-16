@@ -3,6 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { AppSidebar } from './AppSidebar'
 import { useSidebarStore } from '@/lib/stores/sidebar-store'
+import { enUS } from '@/lib/locales/en-US'
+
+const appName = enUS.common.appName
 
 // Mock Tooltip components to avoid Radix UI async issues in tests
 vi.mock('@/components/ui/tooltip', () => ({
@@ -16,13 +19,13 @@ vi.mock('@/components/ui/tooltip', () => ({
 describe('AppSidebar', () => {
   it('renders correctly when expanded', () => {
     render(<AppSidebar />)
-    
+
     // Check for logo or app name (using actual locale value)
-    expect(screen.getByText(/Open Notebook/i)).toBeDefined()
-    
+    expect(screen.getAllByText(appName).length).toBeGreaterThan(0)
+
     // Check for navigation items (using actual locale values)
-    expect(screen.getByText(/Sources/i)).toBeDefined()
-    expect(screen.getByText(/Notebooks/i)).toBeDefined()
+    expect(screen.getByText(enUS.navigation.sources)).toBeDefined()
+    expect(screen.getByText(enUS.navigation.notebooks)).toBeDefined()
   })
 
   it('toggles collapse state when clicking handle', () => {
@@ -55,6 +58,6 @@ describe('AppSidebar', () => {
     render(<AppSidebar />)
     
     // In collapsed mode, app name shouldn't be visible (as text)
-    expect(screen.queryByText(/Open Notebook/i)).toBeNull()
+    expect(screen.queryByText(appName)).toBeNull()
   })
 })

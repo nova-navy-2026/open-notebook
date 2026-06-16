@@ -392,9 +392,19 @@ class Source(ObjectModel):
                 title=self.title,
                 insights=insights,
                 full_text=self.full_text,
+                caption=self.caption,
+                file_mime=self.file_mime,
             )
         else:
-            return dict(id=self.id, title=self.title, insights=insights)
+            context = dict(
+                id=self.id,
+                title=self.title,
+                insights=insights,
+                file_mime=self.file_mime,
+            )
+            if self.caption:
+                context["caption"] = self.caption
+            return context
 
     async def get_embedded_chunks(self) -> int:
         try:

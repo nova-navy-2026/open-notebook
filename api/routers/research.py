@@ -30,8 +30,30 @@ from open_notebook.research.researcher_service import (
     run_research,
     submit_research_job,
 )
+from open_notebook.domain.notebook import Notebook
 
 router = APIRouter()
+
+
+def _object_belongs_to_user(obj, user_id: str) -> bool:
+    owner = getattr(obj, "owner", None)
+    return owner is None or owner == user_id
+
+
+def _job_visible_to_user(job, navy_user_id: Optional[str], auth_user_id: str) -> bool:
+    if navy_user_id == "__admin__":
+        return job.user_id is None or job.user_id == "__admin__"
+    return job.user_id == (navy_user_id or auth_user_id)
+
+
+async def _require_owned_notebook(notebook_id: str, auth_user_id: str) -> Notebook:
+    try:
+        notebook = await Notebook.get(notebook_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    if not notebook or not _object_belongs_to_user(notebook, auth_user_id):
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    return notebook
 
 
 # ── Request / Response Models ──────────────────────────────────────────
@@ -124,6 +146,9 @@ async def generate_research(
     try:
         # Build internal request
         logger.debug(f"Research request received: query='{request.query[:100]}', type={request.report_type}, navy_user={user_id}, auth_user={auth_user_id}")
+        if request.notebook_id:
+            await _require_owned_notebook(request.notebook_id, auth_user_id)
+
         research_request = ResearchRequest(
             query=request.query,
             report_type=ResearchReportType(request.report_type),
@@ -134,13 +159,10 @@ async def generate_research(
             model_id=request.model_id,
             use_amalia=request.use_amalia,
             language=request.language,
-            # ``user_id`` on the internal request is used both as the ACL
-            # filter for the navy OpenSearch index and as the owner tag
-            # stored on the ResearchJob so the user can only see their own
-            # reports. Prefer the navy id when available; otherwise fall
-            # back to the platform auth id (e.g. "anonymous") so jobs are
-            # still scoped per user.
-            user_id=user_id or auth_user_id,
+            # Navy identity filters the OpenSearch corpus. The platform auth
+            # user loads private SurrealDB uploads and scopes job visibility.
+            user_id=user_id,
+            auth_user_id=auth_user_id,
         )
 
         if request.run_in_background:
@@ -167,6 +189,8 @@ async def generate_research(
                 "error": result.error,
             }
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid parameter: {e}")
     except Exception as e:
@@ -203,6 +227,7 @@ async def list_jobs(
                 "progress": j.progress,
                 "progress_pct": j.progress_pct,
                 "created_at": j.created_at,
+                "updated_at": j.updated_at,
                 "error": j.error,
                 "has_result": j.result is not None,
                 "tone": j.tone,
@@ -223,15 +248,9 @@ async def get_job(
     job = get_research_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")
-    if user_id == "__admin__":
-        # Admin can access unassociated jobs and their own
-        if job.user_id is not None and job.user_id != "__admin__":
-            raise HTTPException(status_code=404, detail="Research job not found")
-    else:
-        owner = user_id or auth_user_id
+    if not _job_visible_to_user(job, user_id, auth_user_id):
         # Fail-closed: return 404 instead of 403 to avoid leaking job existence.
-        if job.user_id != owner:
-            raise HTTPException(status_code=404, detail="Research job not found")
+        raise HTTPException(status_code=404, detail="Research job not found")
 
     response = {
         "id": job.id,
@@ -241,6 +260,7 @@ async def get_job(
         "progress": job.progress,
         "progress_pct": job.progress_pct,
         "created_at": job.created_at,
+        "updated_at": job.updated_at,
         "error": job.error,
         "has_result": job.result is not None,
         "tone": job.tone,
@@ -271,14 +291,8 @@ async def delete_job(
     job = get_research_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")
-    if user_id == "__admin__":
-        # Admin can delete unassociated jobs and their own
-        if job.user_id is not None and job.user_id != "__admin__":
-            raise HTTPException(status_code=404, detail="Research job not found")
-    else:
-        owner = user_id or auth_user_id
-        if job.user_id != owner:
-            raise HTTPException(status_code=404, detail="Research job not found")
+    if not _job_visible_to_user(job, user_id, auth_user_id):
+        raise HTTPException(status_code=404, detail="Research job not found")
     deleted = delete_research_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Research job not found")
@@ -286,7 +300,11 @@ async def delete_job(
 
 
 @router.post("/research/save-as-note")
-async def save_research_as_note(request: SaveResearchAsNoteRequest):
+async def save_research_as_note(
+    request: SaveResearchAsNoteRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
     """
     Save a completed research result as a Note in a Notebook.
     """
@@ -295,9 +313,13 @@ async def save_research_as_note(request: SaveResearchAsNoteRequest):
         raise HTTPException(
             status_code=404, detail="Research job not found or not completed"
         )
+    if not _job_visible_to_user(job, user_id, auth_user_id):
+        raise HTTPException(status_code=404, detail="Research job not found or not completed")
 
     try:
         from open_notebook.domain.notebook import Note
+
+        await _require_owned_notebook(request.notebook_id, auth_user_id)
 
         title = request.title or f"Research: {job.query[:80]}"
         note = Note(
@@ -319,6 +341,8 @@ async def save_research_as_note(request: SaveResearchAsNoteRequest):
             "message": f"Research saved as note: {title}",
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to save research as note: {e}")
         raise HTTPException(status_code=500, detail=str(e))

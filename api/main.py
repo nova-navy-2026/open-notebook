@@ -14,7 +14,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.middleware.jwt_auth import JWTAuthMiddleware
 from api.middleware.rbac import RBACMiddleware
 from api.audit_service import AuditLoggingMiddleware
-from api.routers import auth
 
 from api.auth import PasswordAuthMiddleware
 from open_notebook.exceptions import (

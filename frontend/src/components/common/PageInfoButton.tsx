@@ -3,10 +3,13 @@
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { getPageInfoContent, type PageInfoKey } from '@/lib/utils/page-info'
 
@@ -20,8 +23,8 @@ export function PageInfoButton({ pageKey, className }: PageInfoButtonProps) {
   const content = getPageInfoContent(pageKey, language)
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Dialog>
+      <DialogTrigger asChild>
         <Button
           type="button"
           variant="ghost"
@@ -32,23 +35,27 @@ export function PageInfoButton({ pageKey, className }: PageInfoButtonProps) {
         >
           <Info className="h-4 w-4" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 max-w-[90vw]">
-        <div className="space-y-2">
-          <p className="text-sm font-semibold">{content.title}</p>
-          {content.description && (
-            <p className="text-xs text-muted-foreground">{content.description}</p>
-          )}
-          <ul className="space-y-1.5 text-xs">
-            {content.items.map((item, index) => (
-              <li key={index} className="flex gap-2">
-                <span className="text-primary mt-px">•</span>
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] max-w-xl p-0">
+        <div className="flex max-h-[85vh] flex-col">
+          <DialogHeader className="border-b px-6 py-5 pr-12">
+            <DialogTitle>{content.title}</DialogTitle>
+            {content.description && (
+              <DialogDescription>{content.description}</DialogDescription>
+            )}
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto px-6 py-5">
+            <ul className="space-y-3 text-sm">
+              {content.items.map((item, index) => (
+                <li key={index} className="flex gap-3 leading-relaxed">
+                  <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-primary" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   )
 }

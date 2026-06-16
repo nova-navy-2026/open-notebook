@@ -100,7 +100,16 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       messages={chat.messages}
       isStreaming={chat.isSending}
       contextIndicators={null}
-      onSendMessage={(message, _modelOverride, file, deepResearch, agentOptions) => chat.sendMessage(message, file, deepResearch, agentOptions)}
+      onSendMessage={(message, modelOverride, file, deepResearch, agentOptions) => chat.sendMessage(message, modelOverride, file, deepResearch, agentOptions)}
+      modelOverride={chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined}
+      onModelChange={(model) => chat.setModelOverride(model ?? null)}
+      sessions={chat.sessions}
+      currentSessionId={chat.currentSessionId}
+      onCreateSession={(title) => chat.createSession(title)}
+      onSelectSession={chat.switchSession}
+      onUpdateSession={(sessionId, title) => chat.updateSession(sessionId, { title })}
+      onDeleteSession={chat.deleteSession}
+      loadingSessions={chat.loadingSessions}
       notebookContextStats={contextStats}
       notebookId={notebookId}
       enableAttachments

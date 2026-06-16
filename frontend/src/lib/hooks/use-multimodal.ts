@@ -1,20 +1,29 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { chatApi } from '@/lib/api/chat'
 import { multimodalApi } from '@/lib/api/multimodal'
-import { SourceListResponse, NoteResponse } from '@/lib/types/api'
+import {
+  SourceListResponse,
+  NoteResponse,
+  UpdateNotebookChatSessionRequest,
+} from '@/lib/types/api'
 import { ContextSelections } from '@/app/(dashboard)/notebooks/[id]/page'
 import { NotebookChatMessage } from '@/lib/types/api'
+import { QUERY_KEYS } from '@/lib/api/query-client'
+import { useTranslation } from '@/lib/hooks/use-translation'
+import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import type { MultimodalResponse } from '@/lib/api/multimodal'
 import {
   formatDeepResearchFailure,
   formatDeepResearchProgress,
   formatDeepResearchResult,
   pollDeepResearchJob,
+  reconcileDeepResearchMessages,
   runDeepResearchAgent,
+  withResolvedModelName,
 } from '@/lib/chat-agents/deep-research-agent'
 import { runNotebookSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
@@ -32,7 +41,6 @@ import {
   applyTextAgentInstruction,
   detectTextAgentInstruction,
   instructionForVisualMode,
-  instructionForAgent,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
@@ -49,10 +57,6 @@ function storageKeyForNotebook(notebookId: string): string {
   return `open-notebook:notebook:${notebookId}:multimodal-chat`
 }
 
-function serialisableMessages(messages: NotebookChatMessage[]): NotebookChatMessage[] {
-  return messages.map((message) => ({ ...message, attachments: undefined }))
-}
-
 function formatContext(context: {
   sources: Array<Record<string, unknown>>
   notes: Array<Record<string, unknown>>
@@ -62,9 +66,17 @@ function formatContext(context: {
 
   for (const item of context.sources) {
     const title = (item.title as string) || (item.id as string) || 'Source'
-    const content = (item.content as string) || ''
+    const id = (item.id as string) || ''
+    const content = (
+      (item.content as string) ||
+      (item.full_text as string) ||
+      (item.visual_content as string) ||
+      (item.caption as string) ||
+      (item.processing_status as string) ||
+      ''
+    )
     if (content.trim()) {
-      parts.push(`[Source – ${title}]:\n${content}`)
+      parts.push(`[Source ${id} – ${title}]:\n${content}`)
     }
   }
 
@@ -153,55 +165,153 @@ export function useMultimodalChat({
   contextSelections,
   selectedNavyDocIds,
 }: UseMultimodalChatParams) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<NotebookChatMessage[]>([])
   const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
+  const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
   const lastVisualFileRef = useRef<File | null>(null)
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
-  const storageReadyRef = useRef(false)
   const notebookIdRef = useRef(notebookId)
+  const autoSelectedRef = useRef(false)
+  const syncedSessionRef = useRef<string | null>(null)
+  // Deep research jobs already being polled by this hook instance (inline or
+  // reconciled), so the reconciler never double-polls the same job.
+  const polledResearchJobsRef = useRef<Set<string>>(new Set())
+
+  const {
+    data: sessions = [],
+    isLoading: loadingSessions,
+    refetch: refetchSessions,
+  } = useQuery({
+    queryKey: QUERY_KEYS.notebookChatSessions(notebookId),
+    queryFn: () => chatApi.listSessions(notebookId),
+    enabled: !!notebookId,
+  })
+
+  const { data: currentSession, refetch: refetchCurrentSession } = useQuery({
+    queryKey: QUERY_KEYS.notebookChatSession(currentSessionId!),
+    queryFn: () => chatApi.getSession(currentSessionId!),
+    enabled: !!notebookId && !!currentSessionId,
+  })
+
+  useEffect(() => {
+    if (!currentSession?.id || isSending) return
+    const sessionChanged = syncedSessionRef.current !== currentSession.id
+    const serverMessages = currentSession.messages ?? []
+    if (sessionChanged) {
+      setMessages(serverMessages)
+      syncedSessionRef.current = currentSession.id
+      return
+    }
+    if (serverMessages.length > 0) {
+      setMessages(serverMessages)
+    }
+  }, [currentSession, isSending])
+
+  useEffect(() => {
+    if (!autoSelectedRef.current && sessions.length > 0 && !currentSessionId) {
+      autoSelectedRef.current = true
+      setCurrentSessionId(sessions[0].id)
+    }
+  }, [sessions, currentSessionId])
+
+  // Resume any deep research jobs whose "em curso" message was loaded from the
+  // server (e.g. after a reload or navigating away and back), so the message
+  // updates to phases/the final report instead of staying frozen.
+  useEffect(() => {
+    const sessionId = currentSessionId
+    if (!sessionId) return
+    reconcileDeepResearchMessages({
+      messages,
+      polledJobs: polledResearchJobsRef.current,
+      queryClient,
+      isActive: () => notebookIdRef.current === notebookId,
+      applyContent: (id, content) => {
+        if (notebookIdRef.current !== notebookId) return
+        setMessages((prev) => prev.map((m) => m.id === id ? { ...m, content } : m))
+      },
+      persist: ({ userMessage, userMessageId, assistantMessage, assistantMessageId }) => {
+        void chatApi.persistExchange(sessionId, {
+          user_message: userMessage,
+          assistant_message: assistantMessage,
+          user_message_id: userMessageId,
+          assistant_message_id: assistantMessageId,
+        }).then(() => {
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId) })
+        }).catch((persistError) => {
+          console.error('Failed to persist reconciled notebook deep research exchange:', persistError)
+        })
+      },
+    })
+  }, [messages, currentSessionId, notebookId, queryClient])
+
+  const createSessionMutation = useMutation({
+    mutationFn: (data: { title?: string; model_override?: string | null }) =>
+      chatApi.createSession({
+        notebook_id: notebookId,
+        title: data.title,
+        model_override: data.model_override ?? undefined,
+      }),
+    onSuccess: (newSession) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+      setCurrentSessionId(newSession.id)
+      toast.success(t.chat.sessionCreated)
+    },
+    onError: (err: unknown) => {
+      const error = err as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
+    },
+  })
+
+  const updateSessionMutation = useMutation({
+    mutationFn: ({ sessionId, data }: { sessionId: string; data: UpdateNotebookChatSessionRequest }) =>
+      chatApi.updateSession(sessionId, data),
+    onSuccess: (_updated, vars) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(vars.sessionId) })
+      toast.success(t.chat.sessionUpdated)
+    },
+    onError: (err: unknown) => {
+      const error = err as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToUpdateSession'))
+    },
+  })
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: (sessionId: string) => chatApi.deleteSession(sessionId),
+    onSuccess: (_result, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+      queryClient.removeQueries({ queryKey: QUERY_KEYS.notebookChatSession(deletedId) })
+      if (currentSessionId === deletedId) {
+        autoSelectedRef.current = true
+        syncedSessionRef.current = null
+        setCurrentSessionId(null)
+        setMessages([])
+      }
+      toast.success(t.chat.sessionDeleted)
+    },
+    onError: (err: unknown) => {
+      const error = err as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
+    },
+  })
 
   useEffect(() => {
     notebookIdRef.current = notebookId
-    storageReadyRef.current = false
     lastVisualFileRef.current = null
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''
-
-    if (typeof window === 'undefined') {
-      storageReadyRef.current = true
-      return
-    }
-
-    const stored = window.localStorage.getItem(storageKeyForNotebook(notebookId))
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as NotebookChatMessage[]
-        setMessages(Array.isArray(parsed) ? parsed : [])
-      } catch (error) {
-        console.error('Failed to restore multimodal notebook chat:', error)
-        setMessages([])
-      }
-    } else {
-      setMessages([])
-    }
-    window.setTimeout(() => {
-      storageReadyRef.current = true
-    }, 0)
+    autoSelectedRef.current = false
+    syncedSessionRef.current = null
+    setCurrentSessionId(null)
+    setMessages([])
   }, [notebookId])
-
-  useEffect(() => {
-    if (!storageReadyRef.current || typeof window === 'undefined') return
-    const key = storageKeyForNotebook(notebookId)
-    if (messages.length === 0) {
-      window.localStorage.removeItem(key)
-      return
-    }
-    window.localStorage.setItem(key, JSON.stringify(serialisableMessages(messages)))
-  }, [messages, notebookId])
 
   const buildContext = useCallback(
     async (query?: string) => {
@@ -252,10 +362,31 @@ export function useMultimodalChat({
   const sendMessage = useCallback(
     async (
       message: string,
+      modelOverride?: string,
       file?: File,
       deepResearch?: ChatDeepResearchOptions,
       agentOptions?: ChatAgentUiOptions,
     ) => {
+      let sessionId = currentSessionId
+      if (!sessionId) {
+        try {
+          const defaultTitle = message.length > 30 ? `${message.substring(0, 30)}...` : message
+          const newSession = await chatApi.createSession({
+            notebook_id: notebookId,
+            title: defaultTitle,
+            model_override: pendingModelOverride ?? undefined,
+          })
+          sessionId = newSession.id
+          setCurrentSessionId(sessionId)
+          setPendingModelOverride(null)
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+        } catch (err: unknown) {
+          const error = err as { response?: { data?: { detail?: string } }; message?: string }
+          toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
+          return
+        }
+      }
+
       const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
       const visualFile = file ?? (isVisualFollowUp ? lastVisualFileRef.current ?? undefined : undefined)
       const visualModeInstruction = instructionForVisualMode(agentOptions?.vision?.mode)
@@ -281,6 +412,27 @@ export function useMultimodalChat({
         surface: 'notebook_chat' as const,
         runId: createChatAgentRunId('notebook_chat'),
         notebookId,
+        sessionId,
+        modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
+      }
+      const appendAndPersistAssistant = async (content: string, idPrefix = 'ai') => {
+        const aiMessage: NotebookChatMessage = {
+          id: `${idPrefix}-${Date.now()}`,
+          type: 'ai',
+          content,
+          timestamp: new Date().toISOString(),
+        }
+        setMessages((prev) => [...prev, aiMessage])
+        try {
+          await chatApi.persistExchange(sessionId!, {
+            user_message: userMessage.content,
+            assistant_message: content,
+          })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId!) })
+        } catch (persistError) {
+          console.error('Failed to persist notebook chat exchange:', persistError)
+        }
       }
       let activeAgentForFailure = 'notebook_chat'
       let activeTextAgentContext: {
@@ -301,47 +453,90 @@ export function useMultimodalChat({
           ? routerDecision.agent
           : undefined
         activeAgentForFailure = preferredAgent ?? activeAgentForFailure
+        const deepResearchOptions = withResolvedModelName(
+          deepResearch ?? (preferredAgent === 'deep_research'
+            ? { reportType: 'research_report', tone: 'Objective' }
+            : undefined),
+          queryClient,
+        )
 
         if (!file) {
           const content = await runDeepResearchAgent({
             message,
-            options: deepResearch,
+            options: deepResearchOptions,
             queryClient,
             notebookId,
             context: agentContext,
           })
-          if (content) {
-            const aiMessageId = `ai-research-${content.jobId}`
-            const aiMessage: NotebookChatMessage = {
-              id: aiMessageId,
-              type: 'ai',
-              content: content.initialContent,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, aiMessage])
-            void pollDeepResearchJob({
+        if (content) {
+          const aiMessageId = `ai-research-${content.jobId}`
+          const userMessageId = userMessage.id
+          const aiMessage: NotebookChatMessage = {
+            id: aiMessageId,
+            type: 'ai',
+            content: content.initialContent,
+            timestamp: new Date().toISOString(),
+          }
+          setMessages((prev) => [...prev, aiMessage])
+          // Claim this job so the reconciler effect won't start a second poll.
+          polledResearchJobsRef.current.add(content.jobId)
+          void chatApi.persistExchange(sessionId!, {
+            user_message: userMessage.content,
+            assistant_message: content.initialContent,
+            user_message_id: userMessageId,
+            assistant_message_id: aiMessageId,
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId!) })
+          }).catch((persistError) => {
+            console.error('Failed to persist initial notebook deep research exchange:', persistError)
+          })
+          void pollDeepResearchJob({
               jobId: content.jobId,
               queryClient,
               onUpdate: (_content, job) => {
                 if (notebookIdRef.current !== notebookId) return
-                const nextContent = formatDeepResearchProgress(message, deepResearch!, content.jobId, job)
+                const nextContent = formatDeepResearchProgress(message, deepResearchOptions!, content.jobId, job)
                 setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: nextContent } : m))
               },
               onComplete: (_content, job) => {
-                if (notebookIdRef.current !== notebookId) return
-                const finalContent = formatDeepResearchResult(message, deepResearch!, job)
+              const finalContent = formatDeepResearchResult(message, deepResearchOptions!, job)
+              if (notebookIdRef.current === notebookId) {
                 setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: finalContent } : m))
-              },
-              onFailure: (_content, job) => {
-                if (notebookIdRef.current !== notebookId) return
+              }
+              // Persist even if the user navigated away from this notebook, so
+              // the report isn't lost when only the local view changed.
+              void chatApi.persistExchange(sessionId!, {
+                user_message: userMessage.content,
+                assistant_message: finalContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
+              }).then(() => {
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId!) })
+              }).catch((persistError) => {
+                console.error('Failed to persist completed notebook deep research exchange:', persistError)
+              })
+            },
+            onFailure: (_content, job) => {
                 const failureContent = formatDeepResearchFailure(
                   message,
-                  deepResearch!,
+                  deepResearchOptions!,
                   content.jobId,
                   job?.error ?? (typeof _content === 'string' ? _content : undefined),
-                )
+              )
+              if (notebookIdRef.current === notebookId) {
                 setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: failureContent } : m))
-              },
+              }
+              void chatApi.persistExchange(sessionId!, {
+                user_message: userMessage.content,
+                assistant_message: failureContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
+              }).catch((persistError) => {
+                console.error('Failed to persist failed notebook deep research exchange:', persistError)
+              })
+            },
             }).catch((pollError) => {
               console.error('Failed to poll deep research job:', pollError)
             })
@@ -359,13 +554,7 @@ export function useMultimodalChat({
             force: preferredAgent === 'save_note',
           })
           if (content) {
-            const aiMessage: NotebookChatMessage = {
-              id: `ai-${Date.now()}`,
-              type: 'ai',
-              content,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, aiMessage])
+            await appendAndPersistAssistant(content)
             return
           }
         }
@@ -377,13 +566,7 @@ export function useMultimodalChat({
             preferredAgent === 'route' ? routerDecision?.parameters : undefined,
           )
           if (content) {
-            const aiMessage: NotebookChatMessage = {
-              id: `ai-${Date.now()}`,
-              type: 'ai',
-              content,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, aiMessage])
+            await appendAndPersistAssistant(content)
             return
           }
         }
@@ -396,18 +579,12 @@ export function useMultimodalChat({
             preferredAgent === 'data_profiler',
           )
           if (content) {
-            const aiMessage: NotebookChatMessage = {
-              id: `ai-${Date.now()}`,
-              type: 'ai',
-              content,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, aiMessage])
+            await appendAndPersistAssistant(content)
             return
           }
         }
 
-        if (file) {
+        {
           const content = await runGraphAgent(
             message,
             file,
@@ -415,13 +592,7 @@ export function useMultimodalChat({
             preferredAgent === 'graph_generator',
           )
           if (content) {
-            const aiMessage: NotebookChatMessage = {
-              id: `ai-${Date.now()}`,
-              type: 'ai',
-              content,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, aiMessage])
+            await appendAndPersistAssistant(content)
             return
           }
         }
@@ -435,18 +606,12 @@ export function useMultimodalChat({
             agentOptions?.transcription,
           )
           if (content) {
-            const aiMessage: NotebookChatMessage = {
-              id: `ai-${Date.now()}`,
-              type: 'ai',
-              content,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, aiMessage])
+            await appendAndPersistAssistant(content)
             return
           }
         }
 
-        const instruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(visualQuery)
+        const instruction = routerDecision?.instruction || detectTextAgentInstruction(visualQuery)
         if (instruction) {
           activeTextAgentContext = {
             name: preferredAgent ?? 'text_instruction',
@@ -488,6 +653,89 @@ export function useMultimodalChat({
           ? `${visualQuery.trim()}\n\n${instruction}`
           : applyTextAgentInstruction(visualQuery)
         const rawContext = await buildContext(agentQuery)
+
+        if (!file && !isVisualFile(visualFile)) {
+          const body = await chatApi.sendMessageStream({
+            session_id: sessionId!,
+            message,
+            context: rawContext,
+            model_override: modelOverride ?? (currentSession?.model_override ?? undefined),
+            agent_instruction: instruction,
+          })
+
+          if (!body) throw new Error('No response body')
+
+          const reader = body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let aiMessageId: string | null = null
+          let aiContent = ''
+
+          const ensureAiMessage = () => {
+            if (!aiMessageId) {
+              aiMessageId = `ai-${Date.now()}`
+              const initial: NotebookChatMessage = {
+                id: aiMessageId,
+                type: 'ai',
+                content: '',
+                timestamp: new Date().toISOString(),
+              }
+              setMessages((prev) => [...prev, initial])
+            }
+          }
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const events = buffer.split('\n\n')
+            buffer = events.pop() ?? ''
+            for (const evt of events) {
+              const line = evt.split('\n').find((l) => l.startsWith('data: '))
+              if (!line) continue
+              try {
+                const data = JSON.parse(line.slice(6))
+                if (data.type === 'delta') {
+                  ensureAiMessage()
+                  aiContent += data.content || ''
+                  setMessages((prev) =>
+                    prev.map((m) => m.id === aiMessageId ? { ...m, content: aiContent } : m),
+                  )
+                } else if (data.type === 'complete') {
+                  ensureAiMessage()
+                  aiContent = data.content || aiContent
+                  setMessages((prev) =>
+                    prev.map((m) => m.id === aiMessageId ? { ...m, content: aiContent } : m),
+                  )
+                } else if (data.type === 'error') {
+                  throw new Error(data.message || 'Stream error')
+                }
+              } catch (parseError) {
+                if (!(parseError instanceof SyntaxError)) throw parseError
+              }
+            }
+          }
+
+          if (activeTextAgentContext.instruction && activeTextAgentContext.startedAt) {
+            logChatAgentEvent({
+              surface: 'notebook_chat',
+              agent: activeTextAgentContext.name ?? 'text_instruction',
+              event: 'tool_call',
+              status: 'success',
+              context: agentContext,
+              duration_ms: Math.round(performance.now() - activeTextAgentContext.startedAt),
+              details: {
+                response_chars: aiContent.length,
+                instruction: activeTextAgentContext.instruction.split('\n')[0],
+              },
+            })
+          }
+
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+          await refetchCurrentSession()
+          return
+        }
+
         const contextText = [
           formatContext(rawContext),
           buildRecentChatContext(messages),
@@ -505,6 +753,7 @@ export function useMultimodalChat({
           surface: agentContext.surface,
           run_id: agentContext.runId,
           notebook_id: agentContext.notebookId,
+          model_id: agentContext.modelId,
         })
 
         const content = await formatMultimodalResponse(result)
@@ -531,13 +780,7 @@ export function useMultimodalChat({
           lastVisualQueryRef.current = visualQuery
           lastVisualContextRef.current = content
         }
-        const aiMessage: NotebookChatMessage = {
-          id: `ai-${Date.now()}`,
-          type: 'ai',
-          content,
-          timestamp: new Date().toISOString(),
-        }
-        setMessages((prev) => [...prev, aiMessage])
+        await appendAndPersistAssistant(content)
       } catch (err: unknown) {
         const error = err as { response?: { data?: { detail?: string } }; message?: string }
         console.error('Multimodal chat error:', error)
@@ -559,18 +802,15 @@ export function useMultimodalChat({
           },
         })
         toast.error(messageText)
-        const aiMessage: NotebookChatMessage = {
-          id: `ai-error-${Date.now()}`,
-          type: 'ai',
-          content: `Não consegui analisar o pedido. Detalhe técnico: ${messageText}`,
-          timestamp: new Date().toISOString(),
-        }
-        setMessages((prev) => [...prev, aiMessage])
+        await appendAndPersistAssistant(
+          `Não consegui analisar o pedido. Detalhe técnico: ${messageText}`,
+          'ai-error',
+        )
       } finally {
         setIsSending(false)
       }
     },
-    [buildContext, messages, notebookId, queryClient],
+    [buildContext, currentSession, currentSessionId, messages, notebookId, pendingModelOverride, queryClient, refetchCurrentSession, t],
   )
 
   const clearMessages = useCallback(() => {
@@ -583,13 +823,54 @@ export function useMultimodalChat({
     setMessages([])
   }, [notebookId])
 
+  const switchSession = useCallback((sessionId: string) => {
+    setCurrentSessionId(sessionId)
+  }, [])
+
+  const createSession = useCallback((title?: string) => {
+    return createSessionMutation.mutate({
+      title,
+      model_override: pendingModelOverride,
+    })
+  }, [createSessionMutation, pendingModelOverride])
+
+  const updateSession = useCallback((sessionId: string, data: UpdateNotebookChatSessionRequest) => {
+    return updateSessionMutation.mutate({ sessionId, data })
+  }, [updateSessionMutation])
+
+  const deleteSession = useCallback((sessionId: string) => {
+    return deleteSessionMutation.mutate(sessionId)
+  }, [deleteSessionMutation])
+
+  const setModelOverride = useCallback((model: string | null) => {
+    if (currentSessionId) {
+      updateSessionMutation.mutate({
+        sessionId: currentSessionId,
+        data: { model_override: model },
+      })
+    } else {
+      setPendingModelOverride(model)
+    }
+  }, [currentSessionId, updateSessionMutation])
+
   return {
+    sessions,
+    currentSession: currentSession || sessions.find((session) => session.id === currentSessionId),
+    currentSessionId,
     messages,
     isSending,
+    loadingSessions,
     tokenCount,
     charCount,
+    pendingModelOverride,
     sendMessage,
     clearMessages,
     buildContext,
+    createSession,
+    updateSession,
+    deleteSession,
+    switchSession,
+    setModelOverride,
+    refetchSessions,
   }
 }

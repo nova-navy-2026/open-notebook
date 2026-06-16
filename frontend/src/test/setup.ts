@@ -67,3 +67,31 @@ vi.mock('@/lib/hooks/use-create-dialogs', () => ({
     openPodcastDialog: vi.fn(),
   })),
 }))
+
+// Mock @/components/providers/ThemeProvider so components using useTheme() can
+// render without a ThemeProvider wrapper in unit tests.
+vi.mock('@/components/providers/ThemeProvider', () => ({
+  useTheme: vi.fn(() => ({
+    theme: 'light',
+    resolvedTheme: 'light',
+    setTheme: vi.fn(),
+  })),
+  ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
+// Mock @/lib/contexts/rbac-context so components using useRBAC() can render
+// without an RBACProvider wrapper in unit tests. Defaults to an admin view;
+// individual tests can override useRBAC via vi.mocked().
+vi.mock('@/lib/contexts/rbac-context', () => ({
+  useRBAC: vi.fn(() => ({
+    hasRole: vi.fn(() => true),
+    hasPermission: vi.fn(() => true),
+    isAdmin: true,
+    isEditor: true,
+    isViewer: true,
+    userRoles: ['admin'],
+  })),
+  RBACProvider: ({ children }: { children: React.ReactNode }) => children,
+  RequireRole: ({ children }: { children: React.ReactNode }) => children,
+  RequirePermission: ({ children }: { children: React.ReactNode }) => children,
+}))

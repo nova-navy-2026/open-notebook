@@ -107,6 +107,7 @@ export interface CreateSourceRequest {
   content?: string
   title?: string
   transformations?: string[]
+  language?: string
   embed?: boolean
   delete_source?: boolean
   // New async processing support
@@ -229,8 +230,10 @@ export interface SendNotebookChatMessageRequest {
   context: {
     sources: Array<Record<string, unknown>>
     notes: Array<Record<string, unknown>>
+    navy_corpus?: Array<Record<string, unknown>>
   }
   model_override?: string
+  agent_instruction?: string
 }
 
 export interface BuildContextRequest {

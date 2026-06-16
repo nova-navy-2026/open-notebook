@@ -1112,15 +1112,8 @@ export const enUS = {
     transcriptAtaNotice:
       "Pre-filled from the latest transcription. A meeting-minutes (ATA) document will be generated directly from the transcript in the conversation language — no OpenSearch context is used. Edit before generating if needed.",
     reportType: "Report Type",
-    reportSourceLabel: "Data Source",
     toneLabel: "Writing Tone",
     modelLabel: "AI Model",
-    useAmalia: "Use AMALIA",
-    amaliaDescription: "AMALIA-9B — Portuguese-optimized model by NOVASearch",
-    defaultModelNote: "Will use the default GPTResearcher model (GPT-4o-mini)",
-    sourceUrls: "Source URLs (Optional)",
-    sourceUrlsDescription:
-      "Add specific URLs to include in the research. One URL per line.",
     generating: "Generating...",
     generate: "Generate Research",
     generationStarted: "Research Started",
@@ -1143,7 +1136,6 @@ export const enUS = {
     copyReport: "Copy Report",
     copied: "Copied",
     copiedDesc: "Report copied to clipboard",
-    sourcesUsed: "Sources Used",
     notebookResearchDesc:
       "Run a deep research and automatically save the result as a note in this notebook.",
     researchInProgress: "Research in progress...",

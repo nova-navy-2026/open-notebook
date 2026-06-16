@@ -62,8 +62,9 @@ Rewrite the prompt so it more strongly enforces:
 - Grounding: every factual claim must come from the sub-answers.
 - Citation discipline: only use citation IDs that already appear in the
   sub-answers; never invent IDs or cite filenames/URLs.
-- Language: default pt-PT, switch only if the user's question is clearly
-  in another language.
+- Language: default European Portuguese (pt-PT), switch only if the user's
+  question is clearly in another language. If writing Portuguese, enforce
+  European Portuguese and avoid Brazilian Portuguese forms.
 - No meta commentary, no references section.
 - Explicitly state when evidence is incomplete instead of guessing.
 

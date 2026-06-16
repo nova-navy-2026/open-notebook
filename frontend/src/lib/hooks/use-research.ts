@@ -13,6 +13,12 @@ import {
   isResearchActive,
 } from "@/lib/types/research";
 
+function readJobsFromCache(data: unknown): ResearchJob[] {
+  if (Array.isArray(data)) return data as ResearchJob[];
+  const maybePayload = data as { jobs?: ResearchJob[] } | undefined;
+  return maybePayload?.jobs ?? [];
+}
+
 /**
  * Hook to fetch available report types (cached forever since they're static)
  */
@@ -59,7 +65,7 @@ export function useResearchJobs(options?: { autoRefresh?: boolean }) {
     refetchInterval: (current) => {
       if (!autoRefresh) return false;
 
-      const jobs = current.state.data?.jobs as ResearchJob[] | undefined;
+      const jobs = readJobsFromCache(current.state.data);
       if (!jobs || jobs.length === 0) return false;
 
       // Auto-refresh every 3s if any jobs are active

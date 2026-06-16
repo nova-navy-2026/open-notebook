@@ -18,7 +18,9 @@ import {
   formatDeepResearchProgress,
   formatDeepResearchResult,
   pollDeepResearchJob,
+  reconcileDeepResearchMessages,
   runDeepResearchAgent,
+  withResolvedModelName,
 } from '@/lib/chat-agents/deep-research-agent'
 import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
@@ -35,7 +37,6 @@ import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
 import {
   detectTextAgentInstruction,
   instructionForVisualMode,
-  instructionForAgent,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
@@ -114,6 +115,9 @@ export function useGlobalChat() {
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
   const currentSessionIdRef = useRef<string | null>(currentSessionId)
+  // Deep research jobs already being polled by this hook instance (inline or
+  // reconciled), so the reconciler never double-polls the same job.
+  const polledResearchJobsRef = useRef<Set<string>>(new Set())
 
   // Fetch all global chat sessions
   const {
@@ -152,6 +156,38 @@ export function useGlobalChat() {
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId
   }, [currentSessionId])
+
+  // Resume any deep research jobs whose "em curso" message was loaded from the
+  // server (e.g. after a reload or navigating away and back). Without this the
+  // message would stay frozen on the progress placeholder forever.
+  useEffect(() => {
+    const sessionId = currentSessionId
+    if (!sessionId) return
+    reconcileDeepResearchMessages({
+      messages,
+      polledJobs: polledResearchJobsRef.current,
+      queryClient,
+      isActive: () => currentSessionIdRef.current === sessionId,
+      applyContent: (id, content) => {
+        if (currentSessionIdRef.current !== sessionId) return
+        localMessagesDirtyRef.current = true
+        setMessages(prev => prev.map(m => m.id === id ? { ...m, content } : m))
+      },
+      persist: ({ userMessage, userMessageId, assistantMessage, assistantMessageId }) => {
+        void globalChatApi.persistExchange(sessionId, {
+          user_message: userMessage,
+          assistant_message: assistantMessage,
+          user_message_id: userMessageId,
+          assistant_message_id: assistantMessageId,
+        }).then(() => {
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+        }).catch((persistError) => {
+          console.error('Failed to persist reconciled deep research exchange:', persistError)
+        })
+      },
+    })
+  }, [messages, currentSessionId, queryClient])
 
   // Auto-select most recent session — only on the very first load.
   useEffect(() => {
@@ -262,6 +298,7 @@ export function useGlobalChat() {
           model_override: pendingModelOverride ?? undefined
         })
         sessionId = newSession.id
+        currentSessionIdRef.current = sessionId
         setCurrentSessionId(sessionId)
         setPendingModelOverride(null)
         queryClient.invalidateQueries({
@@ -310,16 +347,23 @@ export function useGlobalChat() {
       const preferredAgent = routerDecision && routerDecision.confidence >= 0.55
         ? routerDecision.agent
         : undefined
+      const deepResearchOptions = withResolvedModelName(
+        deepResearch ?? (preferredAgent === 'deep_research'
+          ? { reportType: 'research_report', tone: 'Objective' }
+          : undefined),
+        queryClient,
+      )
 
       if (!file) {
         const content = await runDeepResearchAgent({
           message,
-          options: deepResearch,
+          options: deepResearchOptions,
           queryClient,
           context: agentContext,
         })
         if (content) {
           const aiMessageId = `ai-research-${content.jobId}`
+          const userMessageId = userMessage.id
           const aiMessage: NotebookChatMessage = {
             id: aiMessageId,
             type: 'ai',
@@ -327,16 +371,29 @@ export function useGlobalChat() {
             timestamp: new Date().toISOString()
           }
           setMessages(prev => [...prev, aiMessage])
+          // Claim this job so the reconciler effect won't start a second poll.
+          polledResearchJobsRef.current.add(content.jobId)
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content.initialContent,
+            user_message_id: userMessageId,
+            assistant_message_id: aiMessageId,
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+          }).catch((persistError) => {
+            console.error('Failed to persist initial deep research exchange:', persistError)
+          })
           void pollDeepResearchJob({
             jobId: content.jobId,
             queryClient,
             onUpdate: (_content, job) => {
               if (currentSessionIdRef.current !== sessionId) return
-              const nextContent = formatDeepResearchProgress(message, deepResearch!, content.jobId, job)
+              const nextContent = formatDeepResearchProgress(message, deepResearchOptions!, content.jobId, job)
               setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: nextContent } : m))
             },
             onComplete: (_content, job) => {
-              const finalContent = formatDeepResearchResult(message, deepResearch!, job)
+              const finalContent = formatDeepResearchResult(message, deepResearchOptions!, job)
               if (currentSessionIdRef.current === sessionId) {
                 localMessagesDirtyRef.current = true
                 setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: finalContent } : m))
@@ -344,8 +401,11 @@ export function useGlobalChat() {
               void globalChatApi.persistExchange(sessionId, {
                 user_message: userMessage.content,
                 assistant_message: finalContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
               }).then(() => {
                 queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
               }).catch((persistError) => {
                 console.error('Failed to persist deep research exchange:', persistError)
               })
@@ -353,7 +413,7 @@ export function useGlobalChat() {
             onFailure: (_content, job) => {
               const failureContent = formatDeepResearchFailure(
                 message,
-                deepResearch!,
+                deepResearchOptions!,
                 content.jobId,
                 job?.error ?? (typeof _content === 'string' ? _content : undefined),
               )
@@ -364,6 +424,8 @@ export function useGlobalChat() {
               void globalChatApi.persistExchange(sessionId, {
                 user_message: userMessage.content,
                 assistant_message: failureContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
               }).catch((persistError) => {
                 console.error('Failed to persist failed deep research exchange:', persistError)
               })
@@ -451,7 +513,7 @@ export function useGlobalChat() {
         }
       }
 
-      if (file) {
+      {
         const content = await runGraphAgent(
           message,
           file,
@@ -580,7 +642,7 @@ export function useGlobalChat() {
         return
       }
 
-      const agentInstruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(message)
+      const agentInstruction = routerDecision?.instruction || detectTextAgentInstruction(message)
       if (agentInstruction) {
         activeTextAgentContext = {
           instruction: agentInstruction,

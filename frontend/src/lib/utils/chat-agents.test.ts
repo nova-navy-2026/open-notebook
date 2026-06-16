@@ -5,6 +5,7 @@ import {
   parseRouteRequest,
   wantsDiarization,
 } from './chat-agents'
+import { formatDeepResearchProgress } from '../chat-agents/deep-research-agent'
 
 describe('chat agent helpers', () => {
   it('parses Portuguese route requests with accents', () => {
@@ -45,5 +46,21 @@ describe('chat agent helpers', () => {
         { start: 2.5, end: 5, speaker: 'SPEAKER_01', text: 'Recebido.' },
       ],
     })).toContain('[0:00-0:02] SPEAKER_00: Olá.')
+  })
+
+  it('formats deep research messages with the readable model name', () => {
+    const content = formatDeepResearchProgress(
+      'Investiga segurança marítima',
+      {
+        reportType: 'research_report',
+        tone: 'Objective',
+        modelId: 'model:abc123',
+        modelName: 'AMALIA-9B',
+      },
+      'job-1',
+    )
+
+    expect(content).toContain('- Modelo: AMALIA-9B')
+    expect(content).not.toContain('- Modelo: model:abc123')
   })
 })

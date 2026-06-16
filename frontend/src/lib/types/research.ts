@@ -66,6 +66,7 @@ export interface ResearchJob {
   progress: string;
   progress_pct: number;
   created_at: string;
+  updated_at?: string | null;
   error?: string | null;
   has_result?: boolean;
   result?: ResearchResultData | null;

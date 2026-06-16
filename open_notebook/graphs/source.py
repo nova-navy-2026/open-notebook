@@ -41,6 +41,7 @@ class SourceState(TypedDict):
     transformation: Annotated[list, operator.add]
     embed: bool
     caption: Optional[str]
+    caption_language: Optional[str]
 
 
 class TransformationState(TypedDict):
@@ -226,25 +227,26 @@ async def vision_process(state: SourceState) -> dict:
     # Determine MIME type
     mime_type = source.file_mime or "image/jpeg"
 
-    # Get image/video bytes — prefer the file on disk (temp file from upload),
-    # then fall back to the DB-stored file_data
+    # Get image/video bytes. New uploads are stored in the Source record so
+    # background workers and retries do not depend on temporary upload files.
     image_bytes: Optional[bytes] = None
 
     file_path = content_state.get("file_path")
-    if file_path:
+    if source.file_data:
+        try:
+            image_bytes = source.get_file_bytes()
+            logger.debug(f"Read {len(image_bytes)} bytes from DB file_data")
+        except Exception as e:
+            logger.warning(f"Could not decode file_data from DB: {e}")
+
+    # Legacy fallback for pre-DB-storage sources.
+    if not image_bytes and file_path:
         try:
             with open(file_path, "rb") as f:
                 image_bytes = f.read()
             logger.debug(f"Read {len(image_bytes)} bytes from disk: {file_path}")
         except Exception as e:
             logger.warning(f"Could not read file from disk: {e}")
-
-    if not image_bytes and source.file_data:
-        try:
-            image_bytes = base64.b64decode(source.file_data)
-            logger.debug(f"Read {len(image_bytes)} bytes from DB file_data")
-        except Exception as e:
-            logger.warning(f"Could not decode file_data from DB: {e}")
 
     if not image_bytes:
         raise ValueError(
@@ -253,14 +255,21 @@ async def vision_process(state: SourceState) -> dict:
         )
 
     # Generate caption
+    caption_language = state.get("caption_language") or content_state.get(
+        "caption_language"
+    )
     try:
         if is_video_mime(mime_type):
             caption = await generate_video_caption(
-                video_bytes=image_bytes, mime_type=mime_type
+                video_bytes=image_bytes,
+                mime_type=mime_type,
+                language=caption_language,
             )
         else:
             caption = await generate_image_caption(
-                image_bytes=image_bytes, mime_type=mime_type
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                language=caption_language,
             )
     except Exception as e:
         logger.error(f"Vision captioning failed: {e}")
@@ -274,7 +283,11 @@ async def vision_process(state: SourceState) -> dict:
     # Build a ProcessSourceState-compatible result so save_source can use it
     processed_state = ProcessSourceState(
         content=caption,
-        title=source.file_name or source.title or "Visual Content",
+        title=(
+            source.title
+            if source.title and source.title != "Processing..."
+            else source.file_name or "Visual Content"
+        ),
         file_path=content_state.get("file_path", ""),
         url=content_state.get("url", ""),
     )
@@ -284,8 +297,9 @@ async def vision_process(state: SourceState) -> dict:
         import os
 
         try:
-            os.remove(file_path)
-            logger.debug(f"Deleted temp file: {file_path}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.debug(f"Deleted temp file: {file_path}")
         except Exception as e:
             logger.warning(f"Could not delete temp file: {e}")
 

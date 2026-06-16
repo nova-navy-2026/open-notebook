@@ -595,7 +595,8 @@ async def _run_gemma_ocr(
         "- Se houver várias zonas de texto, organiza por blocos/linhas.\n"
         "- Se algum texto estiver ilegível, marca como [ilegível] em vez de inventar.\n"
         "- Depois da transcrição, acrescenta uma nota curta sobre a confiança/leiturabilidade.\n"
-        "- Responde em pt-PT, exceto se o pedido do utilizador estiver claramente noutra língua.\n"
+        "- Responde em português europeu (pt-PT), exceto se o pedido do utilizador estiver claramente noutra língua.\n"
+        "- Se responderes em português, não uses português do Brasil. Evita formas como 'você', 'usuário', 'arquivo', 'mídia', 'tela', 'ônibus' e 'celular'; prefere pt-PT.\n"
     )
     if context and context.strip():
         prompt = f"{prompt}\n\nContexto visual anterior, se for útil:\n{context.strip()}"
@@ -1401,7 +1402,7 @@ async def multimodal_chat(
                 "Não consegui usar a análise multimodal da Gemma.",
             )
         raise HTTPException(status_code=503, detail=str(e))
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as e:
         logger.warning(
             f"Gemma multimodal timed out after {_gemma_multimodal_timeout()}s; "
             f"falling back where possible. query={repr(query[:80])}"

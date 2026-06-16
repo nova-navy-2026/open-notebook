@@ -47,6 +47,22 @@ export const chatApi = {
     await apiClient.delete(`/chat/sessions/${sessionId}`)
   },
 
+  persistExchange: async (
+    sessionId: string,
+    data: {
+      user_message: string
+      assistant_message: string
+      user_message_id?: string
+      assistant_message_id?: string
+    },
+  ) => {
+    const response = await apiClient.post<NotebookChatSessionWithMessages>(
+      `/chat/sessions/${sessionId}/messages`,
+      data,
+    )
+    return response.data
+  },
+
   // Messaging (synchronous, no streaming)
   sendMessage: async (data: SendNotebookChatMessageRequest) => {
     const response = await apiClient.post<{

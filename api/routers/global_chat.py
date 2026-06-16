@@ -16,6 +16,7 @@ Endpoints:
 
 import asyncio
 import json
+import re
 import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -110,6 +111,12 @@ class ExecuteGlobalChatRequest(BaseModel):
 class PersistGlobalChatExchangeRequest(BaseModel):
     user_message: str = Field(..., description="User message to persist")
     assistant_message: str = Field(..., description="Assistant message to persist")
+    user_message_id: Optional[str] = Field(
+        None, description="Stable user message id for updates/replacements"
+    )
+    assistant_message_id: Optional[str] = Field(
+        None, description="Stable assistant message id for updates/replacements"
+    )
 
 
 class ExecuteGlobalChatResponse(BaseModel):
@@ -127,61 +134,74 @@ class SuccessResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _search_user_sources(
-    query: str, k: int, user_id: Optional[str] = None
+def _search_terms(query: str) -> List[str]:
+    words = re.findall(r"[\wÀ-ÿ]{3,}", (query or "").lower())
+    stop = {
+        "com", "das", "dos", "para", "por", "que", "uma", "este", "esta",
+        "isto", "sobre", "the", "and", "for", "with", "what", "from",
+    }
+    return [word for word in words if word not in stop]
+
+
+async def _search_surreal_sources(
+    query: str,
+    k: int,
+    auth_user_id: str,
 ) -> List[Dict[str, Any]]:
-    """Hybrid (BM25 + k-NN) search over user-indexed sources for one query.
+    """Search app-uploaded SurrealDB sources for the authenticated app user."""
+    terms = _search_terms(query)
+    if not terms:
+        return []
 
-    Returns normalized chunk dicts. Never raises. ``user_id`` is the navy ACL
-    identity used to filter access-controlled documents that share the index.
-    """
-    out: List[Dict[str, Any]] = []
     try:
-        from open_notebook.config import INDEX_USER_SOURCES_TO_OPENSEARCH
-        from open_notebook.search import is_opensearch_enabled
-
-        if not is_opensearch_enabled() or not INDEX_USER_SOURCES_TO_OPENSEARCH:
-            return out
-
-        from open_notebook.utils.embedding import generate_embedding
-
-        try:
-            embedding = await generate_embedding(query)
-        except Exception as e:
-            logger.warning(
-                f"Global chat: failed to embed query, falling back to BM25: {e}"
+        rows = await repo_query(
+            """
+            SELECT id, title, full_text, caption, file_mime, owner, updated
+            FROM source
+            WHERE (
+                owner = $owner OR owner IS NULL OR owner = NONE
             )
-            embedding = None
-
-        if embedding:
-            from open_notebook.search.query import opensearch_hybrid_search
-
-            results = await opensearch_hybrid_search(
-                query, embedding, results=k, source=True, note=False,
-                user_id=user_id,
+            AND (
+                full_text != NONE OR caption != NONE
             )
-        else:
-            from open_notebook.search.query import opensearch_text_search
-
-            results = await opensearch_text_search(
-                query, k, source=True, note=False, user_id=user_id
-            )
-
-        for r in results or []:
-            content = r.get("content", "")
-            if not content and r.get("matches"):
-                content = r["matches"][0] if r["matches"] else ""
-            out.append(
-                {
-                    "id": r.get("id", ""),
-                    "parent_id": r.get("parent_id", ""),
-                    "title": r.get("title", ""),
-                    "content": content,
-                }
-            )
+            ORDER BY updated DESC
+            LIMIT 250
+            """,
+            {"owner": auth_user_id},
+        )
     except Exception as e:
-        logger.warning(f"Global chat: OpenSearch user search failed: {e}")
-    return out
+        logger.warning(f"Global chat: SurrealDB source search failed: {e}")
+        return []
+
+    scored: List[tuple[int, Dict[str, Any]]] = []
+    for row in rows or []:
+        source_id = str(row.get("id") or "")
+        title = str(row.get("title") or source_id or "Source")
+        caption = str(row.get("caption") or "")
+        full_text = str(row.get("full_text") or "")
+        content = "\n\n".join(part for part in [caption, full_text] if part.strip())
+        haystack = f"{title}\n{content}".lower()
+        score = sum(haystack.count(term) for term in terms)
+        if score <= 0:
+            continue
+        if len(content) > 5000:
+            content = content[:5000].rstrip() + "\n\n[excerto truncado]"
+        scored.append(
+            (
+                score,
+                {
+                    "id": source_id,
+                    "parent_id": source_id,
+                    "title": title,
+                    "content": content,
+                    "file_mime": row.get("file_mime"),
+                    "storage": "surrealdb",
+                },
+            )
+        )
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [item for _, item in scored[:k]]
 
 
 async def _search_navy_corpus(
@@ -223,12 +243,14 @@ async def _build_global_context(
     query: str,
     k: int = 5,
     user_id: Optional[str] = None,
+    auth_user_id: str = "anonymous",
 ) -> Dict[str, Any]:
-    """Retrieve the top-``k`` most relevant chunks from OpenSearch (RAG).
+    """Retrieve relevant app uploads and ACL-filtered Navy corpus chunks.
 
-    Uses semantic retrieval rather than dumping every indexed document:
-      * User-indexed sources → hybrid search (BM25 + k-NN, RRF-merged).
-      * Navy corpus → k-NN search on BGE-M3 embeddings, with a BM25
+    Uses retrieval rather than dumping every indexed document:
+      * App uploads → SurrealDB source text/captions owned by the app user.
+      * Navy corpus → OpenSearch k-NN on BGE-M3 embeddings, filtered by the
+        user's department/clearance ACL, with a BM25
         fallback inside ``vector_search_navy_documents`` if embedding
         generation fails.
 
@@ -254,10 +276,10 @@ async def _build_global_context(
     # Spread the budget across variants so the merged set stays around ``k``.
     per_query = max(2, k // max(1, len(variants) - 1)) if len(variants) > 1 else k
 
-    # 1+2. Search user sources and navy corpus for every variant in parallel.
+    # 1+2. Search app uploads and the ACL-filtered navy corpus for every variant.
     search_tasks = []
     for v in variants:
-        search_tasks.append(_search_user_sources(v, per_query, user_id))
+        search_tasks.append(_search_surreal_sources(v, per_query, auth_user_id))
         search_tasks.append(_search_navy_corpus(v, per_query, user_id))
     results_per_task = await asyncio.gather(*search_tasks, return_exceptions=True)
 
@@ -267,7 +289,8 @@ async def _build_global_context(
         if isinstance(task_result, Exception):
             logger.warning(f"Global chat: variant search task failed: {task_result}")
             continue
-        is_navy = idx % 2 == 1
+        task_kind = idx % 2
+        is_navy = task_kind == 1
         for item in task_result:
             item_id = item.get("id", "")
             if is_navy:
@@ -583,8 +606,14 @@ async def persist_global_chat_exchange(
             RunnableConfig(configurable={"thread_id": full_id}),
             {
                 "messages": [
-                    HumanMessage(content=request.user_message),
-                    AIMessage(content=request.assistant_message),
+                    HumanMessage(
+                        content=request.user_message,
+                        id=request.user_message_id,
+                    ),
+                    AIMessage(
+                        content=request.assistant_message,
+                        id=request.assistant_message_id,
+                    ),
                 ]
             },
         )
@@ -679,8 +708,12 @@ async def execute_global_chat(
         if not _session_belongs_to_user(session, auth_user_id):
             raise HTTPException(status_code=404, detail="Session not found")
 
-        # Build context from all indexed docs
-        context = await _build_global_context(request.message, user_id=user_id)
+        # Build context from app uploads plus ACL-filtered Navy corpus.
+        context = await _build_global_context(
+            request.message,
+            user_id=user_id,
+            auth_user_id=auth_user_id,
+        )
         context_for_prompt = _context_with_agent_instruction(
             context,
             request.agent_instruction,
@@ -805,8 +838,12 @@ async def execute_global_chat_stream(
     if not _session_belongs_to_user(session, auth_user_id):
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Build context (RAG over indexed docs) up front
-    context = await _build_global_context(request.message, user_id=user_id)
+    # Build context from app uploads plus ACL-filtered Navy corpus.
+    context = await _build_global_context(
+        request.message,
+        user_id=user_id,
+        auth_user_id=auth_user_id,
+    )
     if request.agent_instruction:
         logger.info(
             "ChatAgent text instruction | surface=global_chat session={} "

@@ -24,6 +24,11 @@ apiClient.interceptors.request.use(async (config) => {
   }
 
   if (typeof window !== "undefined") {
+    const language = localStorage.getItem("i18nextLng");
+    if (language) {
+      config.headers["Accept-Language"] = language;
+    }
+
     const authStorage = localStorage.getItem("auth-storage");
     if (authStorage) {
       try {

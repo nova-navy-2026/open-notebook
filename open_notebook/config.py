@@ -16,6 +16,12 @@ os.makedirs(UPLOADS_FOLDER, exist_ok=True)
 # Set to 0 to disable the limit
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
 
+# Maximum number of evenly-spaced video frames to caption for uploaded videos.
+# Higher values improve coverage but cost more vision-model calls.
+VIDEO_CAPTION_MAX_FRAMES = max(
+    1, min(int(os.environ.get("VIDEO_CAPTION_MAX_FRAMES", "8")), 24)
+)
+
 # TIKTOKEN CACHE FOLDER
 # Reads TIKTOKEN_CACHE_DIR from the environment so Docker can redirect the cache
 # to a path outside /data/ (which is typically volume-mounted and would hide the
