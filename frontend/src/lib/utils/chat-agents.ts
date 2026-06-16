@@ -127,6 +127,64 @@ export function lastAssistantMessage(messages: NotebookChatMessage[]): NotebookC
   return [...messages].reverse().find((message) => message.type === 'ai' && message.content.trim())
 }
 
+const ORDINAL_WORDS: Record<string, number> = {
+  primeira: 1, primeiro: 1, first: 1,
+  segunda: 2, segundo: 2, second: 2,
+  terceira: 3, terceiro: 3, third: 3,
+  quarta: 4, quarto: 4, fourth: 4,
+  quinta: 5, quinto: 5, fifth: 5,
+  sexta: 6, sexto: 6, sixth: 6,
+}
+
+/**
+ * Parse which assistant message the user is referring to, counted from the end:
+ * 1 = last, 2 = second-to-last, 3 = third-to-last, … Defaults to 1 (last).
+ * Understands pt-PT ("última", "penúltima", "antepenúltima", "terceira a contar
+ * do fim") and English ("last", "2nd to last", "third to last", "3 from the end").
+ */
+export function parseMessageOrdinalFromEnd(message: string): number {
+  const text = normaliseForAgentMatching(message)
+
+  if (/\bantepenultima\b/.test(text)) return 3
+  if (/\bpenultima\b/.test(text)) return 2
+
+  // "<number> to last" / "<number> from the end" / "<número> [resposta] a contar/a partir do fim/final"
+  const numFromEnd = text.match(
+    /\b(\d+)\s*(?:st|nd|rd|th|[ªaºo])?\s*(?:mensagem|message|resposta|answer)?\s*(?:to last|from(?: the)? end|a contar do (?:fim|final)|a partir do (?:fim|final)|do (?:fim|final))\b/,
+  )
+  if (numFromEnd) {
+    const n = parseInt(numFromEnd[1], 10)
+    if (n >= 1) return n
+  }
+
+  // "<word> to last" / "<word> message from the end" / "<palavra> a contar do fim"
+  const wordFromEnd = text.match(
+    /\b(primeir[ao]|segund[ao]|terceir[ao]|quart[ao]|quint[ao]|sext[ao]|first|second|third|fourth|fifth|sixth)\b\s*(?:mensagem|message|resposta|answer)?\s*(?:to last|from(?: the)? end|a contar do (?:fim|final)|a partir do (?:fim|final)|do (?:fim|final))\b/,
+  )
+  if (wordFromEnd) {
+    const n = ORDINAL_WORDS[wordFromEnd[1]]
+    if (n) return n
+  }
+
+  return 1
+}
+
+/**
+ * Pick the assistant message the user wants to act on, counted from the end.
+ * Falls back to the last assistant message when no ordinal is given, and clamps
+ * to the oldest assistant message when the requested ordinal is out of range.
+ */
+export function selectTargetAssistantMessage(
+  message: string,
+  messages: NotebookChatMessage[],
+): NotebookChatMessage | undefined {
+  const assistants = messages.filter((m) => m.type === 'ai' && m.content.trim())
+  if (assistants.length === 0) return undefined
+  const fromEnd = parseMessageOrdinalFromEnd(message)
+  const index = Math.min(Math.max(assistants.length - fromEnd, 0), assistants.length - 1)
+  return assistants[index]
+}
+
 export function isSaveToNoteRequest(message: string): boolean {
   const text = normaliseForAgentMatching(message)
   return /\b(guarda|guardar|salva|salvar|save|cria|criar|create|adiciona|adicionar|add)\b.*\b(nota|note|notebook|caderno)\b/.test(text)

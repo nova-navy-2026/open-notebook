@@ -23,6 +23,7 @@ import {
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
   runDeepResearchAgent,
+  runDeepResearchReportEdit,
   withResolvedModelName,
 } from '@/lib/chat-agents/deep-research-agent'
 import { runNotebookSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
@@ -442,6 +443,34 @@ export function useMultimodalChat({
       } = {}
 
       try {
+        // Follow-up edits to an existing deep-research report rewrite that same
+        // message in place instead of producing a new one.
+        if (!file) {
+          const reportEdit = await runDeepResearchReportEdit({
+            message,
+            messages,
+            queryClient,
+            modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
+            context: agentContext,
+          })
+          if (reportEdit) {
+            setMessages((prev) => prev.map((m) => m.id === reportEdit.targetMessageId ? { ...m, content: reportEdit.newContent } : m))
+            void chatApi.persistExchange(sessionId!, {
+              user_message: userMessage.content,
+              assistant_message: reportEdit.newContent,
+              user_message_id: userMessage.id,
+              assistant_message_id: reportEdit.targetMessageId,
+            }).then(() => {
+              queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+              queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId!) })
+            }).catch((persistError) => {
+              console.error('Failed to persist notebook report edit:', persistError)
+            })
+            toast.success('Relatório atualizado.')
+            return
+          }
+        }
+
         const routerDecision = await routeChatAgentWithGemma({
           message,
           file: visualFile,
