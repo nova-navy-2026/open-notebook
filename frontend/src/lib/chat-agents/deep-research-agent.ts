@@ -90,15 +90,15 @@ function formatSources(result?: ResearchResultData | null): string[] {
   return lines
 }
 
-export function formatDeepResearchResult(
+/**
+ * Compact completion-notification message (replaces the "em curso" message in place).
+ * Contains only the metadata header — the report body is in a separate message.
+ */
+export function formatDeepResearchCompletion(
   message: string,
   options: ChatDeepResearchOptions,
   job: ResearchJob,
 ): string {
-  const report = job.result?.report?.trim()
-  const reportBody = report || 'O job terminou, mas não devolveu texto de relatório.'
-  const sourceLines = formatSources(job.result)
-
   return [
     '## Deep Research concluído',
     '',
@@ -107,7 +107,20 @@ export function formatDeepResearchResult(
     ...formatOptions(options),
     `- Job: ${job.id}`,
     job.result?.research_costs ? `- Custo estimado: ${job.result.research_costs}` : undefined,
-    '',
+  ].filter(Boolean).join('\n')
+}
+
+/**
+ * Standalone report message — just the report body, sources, and footer note.
+ * Stored in a separate message with the `reportMessageId` so it can be edited
+ * independently of the completion notification.
+ */
+export function formatDeepResearchReport(job: ResearchJob): string {
+  const report = job.result?.report?.trim()
+  const reportBody = report || 'O job terminou, mas não devolveu texto de relatório.'
+  const sourceLines = formatSources(job.result)
+
+  return [
     reportBody,
     '',
     ...sourceLines,
@@ -210,14 +223,26 @@ export async function runDeepResearchAgent({
  * background job to its chat message without any extra bookkeeping.
  */
 export const RESEARCH_MESSAGE_ID_PREFIX = 'ai-research-'
+/** Suffix added to the report content message so it's distinct from the completion notification. */
+const RESEARCH_REPORT_ID_SUFFIX = '-report'
 
 export function researchMessageId(jobId: string): string {
   return `${RESEARCH_MESSAGE_ID_PREFIX}${jobId}`
 }
 
+/** ID for the standalone report message (separate from the completion-notification message). */
+export function reportMessageId(jobId: string): string {
+  return `${RESEARCH_MESSAGE_ID_PREFIX}${jobId}${RESEARCH_REPORT_ID_SUFFIX}`
+}
+
 export function parseResearchJobId(messageId: string | undefined | null): string | null {
   if (!messageId || !messageId.startsWith(RESEARCH_MESSAGE_ID_PREFIX)) return null
-  const jobId = messageId.slice(RESEARCH_MESSAGE_ID_PREFIX.length)
+  const withoutPrefix = messageId.slice(RESEARCH_MESSAGE_ID_PREFIX.length)
+  // Strip the optional -report suffix so both the notification and report messages
+  // resolve to the same underlying job ID.
+  const jobId = withoutPrefix.endsWith(RESEARCH_REPORT_ID_SUFFIX)
+    ? withoutPrefix.slice(0, -RESEARCH_REPORT_ID_SUFFIX.length)
+    : withoutPrefix
   return jobId || null
 }
 
@@ -276,13 +301,17 @@ export function optionsFromJob(job: ResearchJob, queryClient?: QueryClient): Cha
 const REPORT_EDIT_VERB = /\b(altera|alterar|muda|mudar|modifica|modificar|reescreve|reescrever|reformula|reformular|edita|editar|ajusta|ajustar|adiciona|adicionar|acrescenta|acrescentar|inclui|incluir|junta|juntar|remove|remover|retira|retirar|tira|tirar|apaga|apagar|elimina|eliminar|corta|cortar|encurta|encurtar|resume|resumir|simplifica|simplificar|expande|expandir|detalha|detalhar|desenvolve|desenvolver|aumenta|aumentar|diminui|diminuir|melhora|melhorar|corrige|corrigir|atualiza|atualizar|substitui|substituir|transforma|transformar|torna|tornar|poe|poem|coloca|colocar|foca|focar|traduz|traduzir|translate|rewrite|edit|change|modify|update|shorten|expand|improve|revise|refine|adjust|add|remove|replace)\b/
 const REPORT_NOUN = /\b(relatorio|report|pesquisa|research|texto|documento|document)\b/
 
-/** True when the given message is a completed deep-research report. */
+/**
+ * True when the given message is the standalone deep-research report message.
+ * Identified by the `-report` suffix in the message ID, not by content, so the
+ * check works even after the report has been edited (content changes, ID stays).
+ */
 export function isDeepResearchReportMessage(
   message: { id?: string; type?: string; content?: string },
 ): boolean {
   return message.type === 'ai'
-    && Boolean(parseResearchJobId(message.id))
-    && (message.content ?? '').includes('## Deep Research concluído')
+    && typeof message.id === 'string'
+    && message.id.endsWith(RESEARCH_REPORT_ID_SUFFIX)
 }
 
 /** The most recent completed deep-research report message in the conversation. */
@@ -357,7 +386,7 @@ export async function reviseResearchReportMessage({
   const editedReport = job.result?.report?.trim()
   if (!editedReport) return null
 
-  const newContent = formatDeepResearchResult(job.query, optionsFromJob(job, queryClient), job)
+  const newContent = formatDeepResearchReport(job)
   queryClient.invalidateQueries({ queryKey: QUERY_KEYS.researchJobs })
   queryClient.setQueryData(QUERY_KEYS.researchJob(jobId), job)
   logChatAgentEvent({
@@ -402,6 +431,8 @@ interface ReconcileDeepResearchParams {
   /** Whether the conversation owning these messages is still the active one. */
   isActive: () => boolean
   applyContent: (messageId: string, content: string) => void
+  /** Append a new message to the local state (used to add the report message on completion). */
+  appendMessage: (message: NotebookChatMessage) => void
   persist: (args: {
     userMessage: string
     userMessageId?: string
@@ -423,6 +454,7 @@ export function reconcileDeepResearchMessages({
   queryClient,
   isActive,
   applyContent,
+  appendMessage,
   persist,
 }: ReconcileDeepResearchParams): void {
   messages.forEach((message, index) => {
@@ -446,9 +478,15 @@ export function reconcileDeepResearchMessages({
         applyContent(assistantMessageId, formatDeepResearchProgress(job.query, optionsFromJob(job, queryClient), jobId, job))
       },
       onComplete: (_content, job) => {
-        const content = formatDeepResearchResult(job.query, optionsFromJob(job, queryClient), job)
-        if (isActive()) applyContent(assistantMessageId, content)
-        persist({ userMessage, userMessageId, assistantMessage: content, assistantMessageId })
+        const completionContent = formatDeepResearchCompletion(job.query, optionsFromJob(job, queryClient), job)
+        const reportContent = formatDeepResearchReport(job)
+        const rptId = reportMessageId(jobId)
+        if (isActive()) {
+          applyContent(assistantMessageId, completionContent)
+          appendMessage({ id: rptId, type: 'ai', content: reportContent, timestamp: new Date().toISOString() })
+        }
+        persist({ userMessage, userMessageId, assistantMessage: completionContent, assistantMessageId })
+        persist({ userMessage, userMessageId, assistantMessage: reportContent, assistantMessageId: rptId })
       },
       onFailure: (_content, job) => {
         // No job means a transient transport error (or timeout): don't burn the

@@ -14,11 +14,13 @@ import {
   GlobalChatContextStats,
 } from '@/lib/types/api'
 import {
+  formatDeepResearchCompletion,
   formatDeepResearchFailure,
   formatDeepResearchProgress,
-  formatDeepResearchResult,
+  formatDeepResearchReport,
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
+  reportMessageId,
   reviseResearchReportMessage,
   runDeepResearchAgent,
   runDeepResearchReportEdit,
@@ -174,6 +176,11 @@ export function useGlobalChat() {
         if (currentSessionIdRef.current !== sessionId) return
         localMessagesDirtyRef.current = true
         setMessages(prev => prev.map(m => m.id === id ? { ...m, content } : m))
+      },
+      appendMessage: (msg) => {
+        if (currentSessionIdRef.current !== sessionId) return
+        localMessagesDirtyRef.current = true
+        setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
       },
       persist: ({ userMessage, userMessageId, assistantMessage, assistantMessageId }) => {
         void globalChatApi.persistExchange(sessionId, {
@@ -425,22 +432,33 @@ export function useGlobalChat() {
               setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: nextContent } : m))
             },
             onComplete: (_content, job) => {
-              const finalContent = formatDeepResearchResult(message, deepResearchOptions!, job)
+              const completionContent = formatDeepResearchCompletion(message, deepResearchOptions!, job)
+              const rptContent = formatDeepResearchReport(job)
+              const rptId = reportMessageId(content.jobId)
               if (currentSessionIdRef.current === sessionId) {
                 localMessagesDirtyRef.current = true
-                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: finalContent } : m))
+                setMessages(prev => {
+                  const updated = prev.map(m => m.id === aiMessageId ? { ...m, content: completionContent } : m)
+                  if (updated.some(m => m.id === rptId)) return updated
+                  return [...updated, { id: rptId, type: 'ai' as const, content: rptContent, timestamp: new Date().toISOString() }]
+                })
+              }
+              const invalidate = () => {
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
               }
               void globalChatApi.persistExchange(sessionId, {
                 user_message: userMessage.content,
-                assistant_message: finalContent,
+                assistant_message: completionContent,
                 user_message_id: userMessageId,
                 assistant_message_id: aiMessageId,
-              }).then(() => {
-                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
-                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
-              }).catch((persistError) => {
-                console.error('Failed to persist deep research exchange:', persistError)
-              })
+              }).then(invalidate).catch((e) => console.error('Failed to persist DR completion:', e))
+              void globalChatApi.persistExchange(sessionId, {
+                user_message: userMessage.content,
+                assistant_message: rptContent,
+                user_message_id: userMessageId,
+                assistant_message_id: rptId,
+              }).then(invalidate).catch((e) => console.error('Failed to persist DR report:', e))
             },
             onFailure: (_content, job) => {
               const failureContent = formatDeepResearchFailure(
@@ -884,13 +902,18 @@ export function useGlobalChat() {
     }
     localMessagesDirtyRef.current = true
     setMessages(prev => prev.map(m => m.id === result.targetMessageId ? { ...m, content: result.newContent } : m))
-    // Re-persist the original paired human (no-op replace by id) + the updated
-    // report (same id) so nothing new is appended.
-    const pairedHuman = index > 0 && messages[index - 1]?.type === 'human' ? messages[index - 1] : undefined
+    // Re-persist the original paired human (no-op upsert by id) + the updated
+    // report (same id) so nothing new is appended. Walk backwards past any AI
+    // messages (e.g. the completion-notification) to find the human request.
+    let pairedHuman: (typeof messages)[0] | undefined
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i].type === 'human') { pairedHuman = messages[i]; break }
+    }
+    if (!pairedHuman) return  // no human to pair with — skip persist to avoid blank message
     void globalChatApi.persistExchange(sessionId, {
-      user_message: pairedHuman?.content ?? '',
+      user_message: pairedHuman.content,
       assistant_message: result.newContent,
-      user_message_id: pairedHuman?.id,
+      user_message_id: pairedHuman.id,
       assistant_message_id: result.targetMessageId,
     }).then(() => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })

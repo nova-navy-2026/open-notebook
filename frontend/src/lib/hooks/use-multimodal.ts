@@ -17,11 +17,13 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import type { MultimodalResponse } from '@/lib/api/multimodal'
 import {
+  formatDeepResearchCompletion,
   formatDeepResearchFailure,
   formatDeepResearchProgress,
-  formatDeepResearchResult,
+  formatDeepResearchReport,
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
+  reportMessageId,
   reviseResearchReportMessage,
   runDeepResearchAgent,
   runDeepResearchReportEdit,
@@ -236,6 +238,10 @@ export function useMultimodalChat({
       applyContent: (id, content) => {
         if (notebookIdRef.current !== notebookId) return
         setMessages((prev) => prev.map((m) => m.id === id ? { ...m, content } : m))
+      },
+      appendMessage: (msg) => {
+        if (notebookIdRef.current !== notebookId) return
+        setMessages((prev) => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
       },
       persist: ({ userMessage, userMessageId, assistantMessage, assistantMessageId }) => {
         void chatApi.persistExchange(sessionId, {
@@ -530,23 +536,34 @@ export function useMultimodalChat({
                 setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: nextContent } : m))
               },
               onComplete: (_content, job) => {
-              const finalContent = formatDeepResearchResult(message, deepResearchOptions!, job)
+              const completionContent = formatDeepResearchCompletion(message, deepResearchOptions!, job)
+              const rptContent = formatDeepResearchReport(job)
+              const rptId = reportMessageId(content.jobId)
               if (notebookIdRef.current === notebookId) {
-                setMessages((prev) => prev.map((m) => m.id === aiMessageId ? { ...m, content: finalContent } : m))
+                setMessages((prev) => {
+                  const updated = prev.map((m) => m.id === aiMessageId ? { ...m, content: completionContent } : m)
+                  if (updated.some(m => m.id === rptId)) return updated
+                  return [...updated, { id: rptId, type: 'ai' as const, content: rptContent, timestamp: new Date().toISOString() }]
+                })
               }
-              // Persist even if the user navigated away from this notebook, so
-              // the report isn't lost when only the local view changed.
-              void chatApi.persistExchange(sessionId!, {
-                user_message: userMessage.content,
-                assistant_message: finalContent,
-                user_message_id: userMessageId,
-                assistant_message_id: aiMessageId,
-              }).then(() => {
+              // Persist both messages even if the user navigated away from this
+              // notebook, so neither is lost when only the local view changed.
+              const invalidate = () => {
                 queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
                 queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId!) })
-              }).catch((persistError) => {
-                console.error('Failed to persist completed notebook deep research exchange:', persistError)
-              })
+              }
+              void chatApi.persistExchange(sessionId!, {
+                user_message: userMessage.content,
+                assistant_message: completionContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
+              }).then(invalidate).catch((e) => console.error('Failed to persist DR completion:', e))
+              void chatApi.persistExchange(sessionId!, {
+                user_message: userMessage.content,
+                assistant_message: rptContent,
+                user_message_id: userMessageId,
+                assistant_message_id: rptId,
+              }).then(invalidate).catch((e) => console.error('Failed to persist DR report:', e))
             },
             onFailure: (_content, job) => {
                 const failureContent = formatDeepResearchFailure(
@@ -903,11 +920,17 @@ export function useMultimodalChat({
       return
     }
     setMessages((prev) => prev.map((m) => m.id === result.targetMessageId ? { ...m, content: result.newContent } : m))
-    const pairedHuman = index > 0 && messages[index - 1]?.type === 'human' ? messages[index - 1] : undefined
+    // Walk backwards past any AI messages (e.g. the completion-notification) to
+    // find the original human request; avoids creating a blank message in the DB.
+    let pairedHuman: (typeof messages)[0] | undefined
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i].type === 'human') { pairedHuman = messages[i]; break }
+    }
+    if (!pairedHuman) return  // no human to pair with — skip persist to avoid blank message
     void chatApi.persistExchange(sessionId, {
-      user_message: pairedHuman?.content ?? '',
+      user_message: pairedHuman.content,
       assistant_message: result.newContent,
-      user_message_id: pairedHuman?.id,
+      user_message_id: pairedHuman.id,
       assistant_message_id: result.targetMessageId,
     }).then(() => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })

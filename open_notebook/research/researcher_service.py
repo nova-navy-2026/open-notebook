@@ -1405,13 +1405,19 @@ async def revise_research_report(
 
     current_report = job.result.report
     prompt = (
-        "És um editor de relatórios. Tens um relatório existente em Markdown e uma "
-        "alteração pedida pelo utilizador. Devolve APENAS o relatório COMPLETO e "
-        "atualizado, em Markdown, na mesma língua do original. Não acrescentes "
-        "comentários, notas finais, nem expliques o que mudaste — devolve só o "
-        "relatório.\n\n"
-        f"## Alteração pedida\n{instruction.strip()}\n\n"
-        f"## Relatório atual\n{current_report}"
+        "És um editor de relatórios. A tua ÚNICA tarefa é aplicar a alteração pedida "
+        "ao relatório e devolver o relatório COMPLETO atualizado.\n\n"
+        "REGRAS ABSOLUTAS:\n"
+        "1. A tua resposta deve conter o relatório COMPLETO em Markdown — todas as "
+        "secções, do início ao fim.\n"
+        "2. Só alteras o que foi pedido. Tudo o resto permanece igual.\n"
+        "3. Não acrescentes comentários, explicações, prefácios nem notas finais.\n"
+        "4. Não respondas com uma síntese nem com apenas a parte alterada.\n"
+        "5. O relatório resultante deve ter comprimento igual ou maior ao original.\n\n"
+        f"## Alteração pedida pelo utilizador\n{instruction.strip()}\n\n"
+        f"## Relatório original completo (devolve tudo isto, com a alteração aplicada)\n"
+        f"{current_report}\n\n"
+        "LEMBRA: devolve o relatório COMPLETO, não apenas a secção alterada."
     )
 
     model = await provision_langchain_model(prompt, model_id or job.model_id, "chat", max_tokens=8000)
@@ -1429,6 +1435,19 @@ async def revise_research_report(
 
     if not revised:
         return None
+
+    # Guard: if the model returned only a fragment (< 65 % of original length),
+    # it likely produced just the edited section instead of the full report.
+    # Reject the result so the original is preserved.
+    if len(revised) < len(current_report) * 0.65:
+        logger.warning(
+            f"Revise {job_id}: model returned {len(revised)} chars "
+            f"vs {len(current_report)} original — likely truncated, rejecting."
+        )
+        raise ValueError(
+            "O modelo devolveu apenas uma parte do relatório em vez do relatório completo. "
+            "Tenta novamente ou usa um modelo com maior capacidade."
+        )
 
     job.result.report = revised
     job.updated_at = _now_iso()
