@@ -116,6 +116,7 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
       enableAttachments
       enableDeepResearch
       enableAgentControls
+      isDeepResearchSession={chat.isDeepResearchSession}
     />
   )
 }

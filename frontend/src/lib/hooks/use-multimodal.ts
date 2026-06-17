@@ -21,6 +21,7 @@ import {
   formatDeepResearchFailure,
   formatDeepResearchProgress,
   formatDeepResearchReport,
+  parseResearchJobId,
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
   reportMessageId,
@@ -941,12 +942,15 @@ export function useMultimodalChat({
     toast.success('Relatório atualizado.')
   }, [messages, currentSessionId, currentSession, notebookId, queryClient])
 
+  const isDeepResearchSession = messages.some(m => parseResearchJobId(m.id) !== null)
+
   return {
     sessions,
     currentSession: currentSession || sessions.find((session) => session.id === currentSessionId),
     currentSessionId,
     messages,
     isSending,
+    isDeepResearchSession,
     loadingSessions,
     tokenCount,
     charCount,

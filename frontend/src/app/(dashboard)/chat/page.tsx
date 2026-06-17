@@ -151,6 +151,7 @@ export default function GlobalChatPage() {
           visualModelLocked={chat.isVisualModelLocked}
           enableDeepResearch
           enableAgentControls
+          isDeepResearchSession={chat.isDeepResearchSession}
           onExportAll={handleExportAll}
           exportingAll={exportingAll}
         />

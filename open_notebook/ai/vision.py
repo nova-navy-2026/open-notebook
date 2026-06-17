@@ -392,6 +392,127 @@ async def generate_image_caption(
     raise ValueError("Failed to generate image caption")
 
 
+async def _extract_video_audio(video_path: str) -> Optional[bytes]:
+    """Extract audio from a video file as WAV bytes using ffmpeg.
+
+    Returns None if the video has no audio track or ffmpeg is unavailable.
+    """
+    import os as _os
+    import subprocess
+    import tempfile
+
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if "audio" not in probe.stdout:
+            logger.debug("Video has no audio stream; skipping audio transcription.")
+            return None
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_audio:
+            tmp_path = tmp_audio.name
+
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", video_path,
+                    "-vn",
+                    "-acodec", "pcm_s16le",
+                    "-ar", "16000",
+                    "-ac", "1",
+                    tmp_path,
+                ],
+                capture_output=True,
+                timeout=120,
+            )
+            if result.returncode != 0:
+                logger.debug(f"ffmpeg audio extraction returned non-zero: {result.returncode}")
+                return None
+
+            if _os.path.getsize(tmp_path) < 1024:
+                logger.debug("Extracted audio is too small; skipping transcription.")
+                return None
+
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                _os.remove(tmp_path)
+            except OSError:
+                pass
+
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        logger.debug(f"Could not extract video audio: {e}")
+        return None
+
+
+async def _transcribe_video_audio(
+    audio_bytes: bytes,
+    language: Optional[str] = None,
+) -> Optional[str]:
+    """Transcribe audio bytes via the Whisper service (best-effort).
+
+    Returns the transcript text, or None if the service is unavailable.
+    """
+    import os as _os
+    import tempfile
+
+    try:
+        from open_notebook.research.transcription_service import (
+            fetch_capabilities,
+            run_transcription,
+        )
+
+        caps = await fetch_capabilities()
+        if not caps.get("server_reachable"):
+            logger.debug("Whisper server not reachable; skipping video audio transcription.")
+            return None
+
+        lang_code: Optional[str] = None
+        if language:
+            lang_code = language.split(",")[0].strip().split(";")[0].split("-")[0].lower() or None
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        try:
+            result = await run_transcription(
+                audio_path=tmp_path,
+                filename="video_audio.wav",
+                content_type="audio/wav",
+                language=lang_code,
+                diarize=False,
+            )
+        finally:
+            try:
+                _os.remove(tmp_path)
+            except OSError:
+                pass
+
+        text = (result.get("dialog") or result.get("text") or "").strip()
+        if not text:
+            return None
+
+        logger.info(f"Transcribed video audio: {len(text)} chars")
+        return text
+
+    except Exception as e:
+        logger.warning(f"Video audio transcription failed (non-fatal): {e}")
+        return None
+
+
 async def generate_video_caption(
     video_bytes: bytes,
     mime_type: str = "video/mp4",
@@ -400,12 +521,15 @@ async def generate_video_caption(
     model_id: Optional[str] = None,
     language: Optional[str] = None,
 ) -> str:
-    """Generate a text description of a video by captioning sampled frames.
+    """Generate a text description of a video by captioning sampled frames
+    and, when available, transcribing the audio track via Whisper.
 
     Extracts up to `max_frames` evenly-spaced frames from the video and
-    captions each one, then combines them into a single description.
+    captions each one. If the Whisper transcription service is reachable
+    and the video has an audio track, the audio is also transcribed and
+    prepended to the frame captions.
 
-    Requires ffmpeg to be available on the system PATH.
+    Requires ffmpeg / ffprobe to be available on the system PATH.
 
     Args:
         video_bytes: Raw video file content.
@@ -413,10 +537,12 @@ async def generate_video_caption(
         max_frames: Maximum number of frames to extract and caption.
         prompt: Custom prompt per frame. Uses DEFAULT_CAPTION_PROMPT if None.
         model_id: Specific model ID to use.
+        language: Optional locale hint (e.g. "pt-PT") for captions and transcription.
 
     Returns:
-        Combined caption text from all sampled frames.
+        Combined description from frame captions and optional audio transcript.
     """
+    import os as _os
     import subprocess
     import tempfile
 
@@ -429,11 +555,17 @@ async def generate_video_caption(
         max_frames = VIDEO_CAPTION_MAX_FRAMES
 
     frames: list[bytes] = []
+    audio_transcript: Optional[str] = None
 
-    # Write video to temp file for ffmpeg
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as tmp_video:
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_video:
         tmp_video.write(video_bytes)
         tmp_video.flush()
+        video_path = tmp_video.name
+
+    try:
+        audio_bytes = await _extract_video_audio(video_path)
+        if audio_bytes:
+            audio_transcript = await _transcribe_video_audio(audio_bytes, language=language)
 
         # Get video duration
         try:
@@ -446,7 +578,7 @@ async def generate_video_caption(
                     "format=duration",
                     "-of",
                     "default=noprint_wrappers=1:nokey=1",
-                    tmp_video.name,
+                    video_path,
                 ],
                 capture_output=True,
                 text=True,
@@ -474,7 +606,7 @@ async def generate_video_caption(
                         "-ss",
                         str(ts),
                         "-i",
-                        tmp_video.name,
+                        video_path,
                         "-vframes",
                         "1",
                         "-f",
@@ -492,6 +624,11 @@ async def generate_video_caption(
                     frames.append(frame_result.stdout)
             except (subprocess.TimeoutExpired, FileNotFoundError) as e:
                 logger.warning(f"Failed to extract frame at {ts}s: {e}")
+    finally:
+        try:
+            _os.remove(video_path)
+        except OSError:
+            pass
 
     if not frames:
         raise ValueError(
@@ -523,8 +660,15 @@ async def generate_video_caption(
     if not captions:
         raise ValueError("Failed to generate captions for any video frames")
 
-    combined = "\n\n".join(captions)
+    parts: list[str] = []
+    if audio_transcript:
+        parts.append(f"## Transcrição de áudio\n\n{audio_transcript}")
+    parts.append("## Descrição visual (fotogramas)\n\n" + "\n\n".join(captions))
+
+    combined = "\n\n".join(parts)
     logger.info(
-        f"Generated video caption from {len(captions)} frames ({len(combined)} chars)"
+        f"Generated video caption: {len(captions)} frames"
+        + (f", audio transcript {len(audio_transcript)} chars" if audio_transcript else "")
+        + f" ({len(combined)} chars total)"
     )
     return combined

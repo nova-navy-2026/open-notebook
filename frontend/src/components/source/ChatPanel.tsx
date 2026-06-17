@@ -97,6 +97,7 @@ interface ChatPanelProps {
   visualModelLocked?: boolean
   enableDeepResearch?: boolean
   enableAgentControls?: boolean
+  isDeepResearchSession?: boolean
   // Export all conversations (optional). When provided, an "Export all" item is shown.
   onExportAll?: () => void | Promise<void>
   exportingAll?: boolean
@@ -203,6 +204,7 @@ export function ChatPanel({
   visualModelLocked = false,
   enableDeepResearch = false,
   enableAgentControls = false,
+  isDeepResearchSession = false,
   onExportAll,
   exportingAll = false,
 }: ChatPanelProps) {
@@ -237,8 +239,8 @@ export function ChatPanel({
   const selectedFileKind = getAttachmentKind(selectedFile)
   const selectedFileIsVisual = isVisualLikeFile(selectedFile)
   const selectedFileIsAudio = isAudioLikeFile(selectedFile)
-  const isVisualModelLocked = enableAttachments && (visualModelLocked || selectedFileIsVisual)
-  const canUseDeepResearch = enableDeepResearch && !selectedFile
+  const isVisualModelLocked = enableAttachments && !isDeepResearchSession && (visualModelLocked || selectedFileIsVisual)
+  const canUseDeepResearch = enableDeepResearch && !isDeepResearchSession && !selectedFile
   const showTranscriptionControls = enableAgentControls && !!selectedFile && (
     selectedFileIsAudio || isVideoLikeFile(selectedFile)
   )
@@ -601,6 +603,14 @@ export function ChatPanel({
           />
         )}
 
+        {/* DR session banner */}
+        {isDeepResearchSession && (
+          <div className="border-t px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/30">
+            <Search className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>Sessão de Deep Research — edita o relatório ou faz perguntas sobre ele.</span>
+          </div>
+        )}
+
         {/* Input Area */}
         <div className="flex-shrink-0 p-4 space-y-3 border-t">
           {/* Model selector */}
@@ -622,7 +632,7 @@ export function ChatPanel({
             </div>
           )}
 
-          {enableDeepResearch && (
+          {enableDeepResearch && !isDeepResearchSession && (
             <div className="space-y-2 rounded-md border bg-muted/20 p-2">
               <div className="flex items-center justify-between gap-2">
                 <Button
@@ -832,7 +842,7 @@ export function ChatPanel({
           )}
 
           <div className="flex gap-2 items-end min-w-0">
-            {enableAttachments && (
+            {enableAttachments && !isDeepResearchSession && (
               <>
                 <input
                   ref={fileInputRef}

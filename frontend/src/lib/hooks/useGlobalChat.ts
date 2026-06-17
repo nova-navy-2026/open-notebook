@@ -18,6 +18,7 @@ import {
   formatDeepResearchFailure,
   formatDeepResearchProgress,
   formatDeepResearchReport,
+  parseResearchJobId,
   pollDeepResearchJob,
   reconcileDeepResearchMessages,
   reportMessageId,
@@ -924,6 +925,8 @@ export function useGlobalChat() {
     toast.success('Relatório atualizado.')
   }, [messages, currentSessionId, currentSession, queryClient])
 
+  const isDeepResearchSession = messages.some(m => parseResearchJobId(m.id) !== null)
+
   return {
     sessions,
     currentSession: currentSession || sessions.find(s => s.id === currentSessionId),
@@ -931,6 +934,7 @@ export function useGlobalChat() {
     messages,
     isSending,
     isVisualModelLocked,
+    isDeepResearchSession,
     loadingSessions,
     pendingModelOverride,
     contextStats,
