@@ -735,6 +735,25 @@ export function useGlobalChat() {
     setContextStats(null)
   }, [])
 
+  // Start a fresh chat (OpenWebUI-style): clear the active session and message
+  // list without hitting the backend. The session is created lazily — and
+  // auto-titled — by sendMessage() on the first message. We mark
+  // autoSelectedRef so the "open most recent session" effect doesn't re-select
+  // a conversation behind the user's back.
+  const startNewChat = useCallback(() => {
+    autoSelectedRef.current = true
+    hasLocalMultimodalMessagesRef.current = false
+    localMessagesDirtyRef.current = false
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
+    setIsVisualModelLocked(false)
+    setCurrentSessionId(null)
+    setMessages([])
+    setContextStats(null)
+    setPendingModelOverride(null)
+  }, [])
+
   // Create session
   const createSession = useCallback((title?: string) => {
     hasLocalMultimodalMessagesRef.current = false
@@ -780,6 +799,7 @@ export function useGlobalChat() {
     contextStats,
 
     createSession,
+    startNewChat,
     updateSession,
     deleteSession,
     switchSession,

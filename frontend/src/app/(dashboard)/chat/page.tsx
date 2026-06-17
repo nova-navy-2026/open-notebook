@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import { useTranslation } from "@/lib/hooks/use-translation";
+import { useIsDesktop } from "@/lib/hooks/use-media-query";
 import { useGlobalChat } from "@/lib/hooks/useGlobalChat";
 import { useModels } from "@/lib/hooks/use-models";
 import { ChatPanel } from "@/components/source/ChatPanel";
+import { ChatSessionRail } from "@/components/source/ChatSessionRail";
+import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { Badge } from "@/components/ui/badge";
 import { FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +24,8 @@ export default function GlobalChatPage() {
   const { t } = useTranslation();
   const chat = useGlobalChat();
   const { data: models = [] } = useModels();
+  const { sessionRailCollapsed, toggleSessionRail } = useChatLayoutStore();
+  const isDesktop = useIsDesktop();
   const [docsExpanded, setDocsExpanded] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
 
@@ -76,7 +81,29 @@ export default function GlobalChatPage() {
     : chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined;
 
   return (
-    <div className="app-page-wide flex h-full flex-col">
+    // OpenWebUI-style two-column workspace: a persistent chat-history rail on
+    // the left (the global menu is auto-collapsed to its icon rail by AppShell),
+    // and the conversation on the right.
+    <div className="flex h-full w-full min-h-0">
+      {/* Session rail: desktop only. On mobile the session tab inside ChatPanel
+          remains available (see hideSessionTab below), so nothing is lost. */}
+      <div className="hidden lg:flex h-full flex-shrink-0">
+        <ChatSessionRail
+          sessions={chat.sessions}
+          currentSessionId={chat.currentSessionId ?? null}
+          loading={chat.loadingSessions}
+          collapsed={sessionRailCollapsed}
+          onToggleCollapsed={toggleSessionRail}
+          onNewChat={() => chat.startNewChat()}
+          onSelectSession={chat.switchSession}
+          onRenameSession={(sessionId, title) =>
+            chat.updateSession(sessionId, { title })
+          }
+          onDeleteSession={chat.deleteSession}
+        />
+      </div>
+
+      <div className="min-w-0 flex-1 app-page-wide flex h-full flex-col">
       <div className="mb-4">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold">{t.common.chat ?? "Chat"}</h1>
@@ -126,7 +153,9 @@ export default function GlobalChatPage() {
         </div>
       )}
 
-      {/* Full-height chat panel */}
+      {/* Full-height chat panel. On desktop the session rail (left) owns session
+          switching, so the panel's own session tab is hidden; on mobile the rail
+          is hidden and the in-panel tab takes over. */}
       <div className="flex-1 min-h-0">
         <ChatPanel
           messages={chat.messages}
@@ -144,6 +173,7 @@ export default function GlobalChatPage() {
             chat.updateSession(sessionId, { title })
           }
           loadingSessions={chat.loadingSessions}
+          hideSessionTab={isDesktop}
           title={t.common.chat ?? "Chat"}
           contextType="notebook"
           enableAttachments
@@ -153,6 +183,7 @@ export default function GlobalChatPage() {
           onExportAll={handleExportAll}
           exportingAll={exportingAll}
         />
+      </div>
       </div>
     </div>
   );

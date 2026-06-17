@@ -83,6 +83,10 @@ interface ChatPanelProps {
   onDeleteSession?: (sessionId: string) => void
   onUpdateSession?: (sessionId: string, title: string) => void
   loadingSessions?: boolean
+  // When true, the panel does NOT render its own in-panel session tab/manager.
+  // Used when an external session rail (OpenWebUI-style) owns session switching
+  // — typically on desktop, where the tab would otherwise duplicate the rail.
+  hideSessionTab?: boolean
   // Generic props for reusability
   title?: string
   contextType?: 'source' | 'notebook'
@@ -113,6 +117,7 @@ export function ChatPanel({
   onDeleteSession,
   onUpdateSession,
   loadingSessions = false,
+  hideSessionTab = false,
   title,
   contextType = 'source',
   notebookContextStats,
@@ -279,6 +284,7 @@ export function ChatPanel({
   const keyHint = isMac ? '⌘+Enter' : 'Ctrl+Enter'
 
   const hasSessions = onSelectSession && onCreateSession && onDeleteSession
+  const showSessionTab = hasSessions && !hideSessionTab
 
   const resolvedTitle = title || (contextType === 'source'
     ? t.chat.chatWith.replace('{name}', t.navigation.sources)
@@ -329,7 +335,7 @@ export function ChatPanel({
     <>
     <Card className="flex flex-col h-full flex-1 overflow-hidden">
       <CardHeader className="pb-3 flex-shrink-0">
-        {hasSessions ? (
+        {showSessionTab ? (
           <div className="flex items-center gap-2">
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'chat' | 'sessions')} className="flex-1 min-w-0">
               <TabsList className="grid w-full grid-cols-2">
@@ -357,7 +363,7 @@ export function ChatPanel({
       </CardHeader>
 
       {/* Sessions Tab Content */}
-      {hasSessions && activeTab === 'sessions' ? (
+      {showSessionTab && activeTab === 'sessions' ? (
         <CardContent className="flex-1 min-h-0 p-0 overflow-hidden">
           <SessionManager
             sessions={sessions}
