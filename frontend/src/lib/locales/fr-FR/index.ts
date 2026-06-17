@@ -489,6 +489,15 @@ export const frFR = {
     sessionUpdated: "Session mise à jour",
     sessionDeleted: "Session supprimée",
     globalChatDescription: "Discutez avec tous vos documents indexés",
+    voiceInput: "Dicter votre message",
+    voiceListening: "À l'écoute… parlez maintenant",
+    voiceStop: "Arrêter et transcrire",
+    voiceTranscribing: "Transcription…",
+    voiceNoSpeech: "Aucune parole détectée",
+    voicePermissionDenied: "Accès au microphone refusé",
+    voiceUnsupported:
+      "La saisie vocale n'est pas disponible dans ce navigateur (nécessite HTTPS ou localhost)",
+    voiceFailed: "Impossible de transcrire l'audio",
   },
   searchPage: {
     askAndSearch: "Poser une question et Rechercher",

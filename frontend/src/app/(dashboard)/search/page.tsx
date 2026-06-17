@@ -21,6 +21,7 @@ import { useModelDefaults } from "@/lib/hooks/use-models";
 import { useModalManager } from "@/lib/hooks/use-modal-manager";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
+import { VoiceInputButton } from "@/components/common/VoiceInputButton";
 
 const RECENT_SEARCHES_KEY = "open-notebook:recent-searches";
 const MAX_RECENT = 8;
@@ -125,6 +126,14 @@ export default function SearchPage() {
       handleSearch();
     }
   };
+
+  // Dictated speech just fills the search bar; the user reviews it and runs the
+  // search themselves (same flow as the chat prompt box).
+  const handleVoiceTranscript = useCallback((text: string) => {
+    const query = text.trim();
+    if (!query) return;
+    setSearchQuery(query);
+  }, []);
 
   // Auto-trigger search from URL params
   useEffect(() => {
@@ -275,6 +284,11 @@ export default function SearchPage() {
                 className="flex-1"
                 aria-label={t.common.accessibility.enterSearch}
                 autoComplete="off"
+              />
+              <VoiceInputButton
+                onTranscript={handleVoiceTranscript}
+                disabled={searchMutation.isPending}
+                className="w-full sm:w-auto"
               />
               <Button
                 onClick={handleSearch}

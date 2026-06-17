@@ -531,6 +531,15 @@ export const ptPT = {
     noMessagesToExport: "Não há mensagens para exportar",
     noConversationsToExport: "Não há conversas para exportar",
     exportFailed: "Falha ao exportar conversas",
+    voiceInput: "Ditar a mensagem",
+    voiceListening: "A ouvir… fale agora",
+    voiceStop: "Parar e transcrever",
+    voiceTranscribing: "A transcrever…",
+    voiceNoSpeech: "Não foi detetada fala",
+    voicePermissionDenied: "Acesso ao microfone negado",
+    voiceUnsupported:
+      "A entrada por voz não está disponível neste navegador (requer HTTPS ou localhost)",
+    voiceFailed: "Não foi possível transcrever o áudio",
   },
   searchPage: {
     askAndSearch: "Perguntar e Pesquisar",

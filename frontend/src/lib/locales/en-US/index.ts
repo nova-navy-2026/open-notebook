@@ -525,6 +525,15 @@ export const enUS = {
     noMessagesToExport: "No messages to export",
     noConversationsToExport: "No conversations to export",
     exportFailed: "Failed to export conversations",
+    voiceInput: "Speak your prompt",
+    voiceListening: "Listening… speak now",
+    voiceStop: "Stop and transcribe",
+    voiceTranscribing: "Transcribing…",
+    voiceNoSpeech: "No speech detected",
+    voicePermissionDenied: "Microphone access denied",
+    voiceUnsupported:
+      "Voice input isn't available in this browser (requires HTTPS or localhost)",
+    voiceFailed: "Could not transcribe the audio",
   },
   searchPage: {
     askAndSearch: "Ask and Search",

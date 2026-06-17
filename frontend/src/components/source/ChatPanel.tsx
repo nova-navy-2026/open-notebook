@@ -35,6 +35,7 @@ import {
 import { ModelSelector as ChatModelSelector } from './ModelSelector'
 import { ModelSelector as InlineModelSelector } from '@/components/common/ModelSelector'
 import { ContextIndicator } from '@/components/common/ContextIndicator'
+import { VoiceInputButton } from '@/components/common/VoiceInputButton'
 import { SessionManager } from '@/components/source/SessionManager'
 import { MessageActions } from '@/components/source/MessageActions'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
@@ -250,6 +251,17 @@ export function ChatPanel({
       setSelectedFile(file)
     }
   }
+
+  // Append dictated text to whatever is already in the prompt box, so the user
+  // can mix typing and speaking (and dictate several segments in a row).
+  const handleVoiceTranscript = useCallback((text: string) => {
+    const addition = text.trim()
+    if (!addition) return
+    setInput((prev) => {
+      const base = prev.trimEnd()
+      return base ? `${base} ${addition}` : addition
+    })
+  }, [])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Detect platform for correct modifier key
@@ -770,6 +782,12 @@ export function ChatPanel({
               disabled={isStreaming}
               className="flex-1 min-h-[40px] max-h-[100px] resize-none py-2 px-3 min-w-0"
               rows={1}
+            />
+            <VoiceInputButton
+              onTranscript={handleVoiceTranscript}
+              disabled={isStreaming}
+              surface={notebookId ? 'notebook_chat' : 'global_chat'}
+              notebookId={notebookId}
             />
             <Button
               onClick={handleSend}
