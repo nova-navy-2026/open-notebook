@@ -491,6 +491,7 @@ export const enUS = {
     classificationLevel: "Level",
     prev: "Prev",
     next: "Next",
+    loadError: "Error loading knowledge base",
   },
   chat: {
     sessions: "Sessions",

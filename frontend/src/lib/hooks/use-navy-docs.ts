@@ -16,10 +16,10 @@ export function useNavyDocuments() {
     // persist middleware, caching an empty result that then stays "fresh"
     // for 30 minutes and never re-fetches on subsequent mounts.
     enabled: isAuthenticated && !!token,
-    staleTime: 30 * 60 * 1000, // 30 minutes — treat as fresh, no refetch
+    staleTime: 5 * 60 * 1000, // 5 minutes — matches backend in-process cache TTL
     gcTime: 60 * 60 * 1000, // 1 hour — keep in cache across route changes
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: true, // refetch on mount if data is stale (>5 min) so empty results self-correct
     refetchOnReconnect: false,
     // Silent background poll so newly indexed corpus documents show up
     // without forcing the user to reload the page.

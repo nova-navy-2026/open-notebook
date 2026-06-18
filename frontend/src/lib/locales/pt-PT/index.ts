@@ -497,6 +497,7 @@ export const ptPT = {
     classificationLevel: "Nível",
     prev: "Anterior",
     next: "Seguinte",
+    loadError: "Erro ao carregar base de conhecimento",
   },
   chat: {
     sessions: "Sessões",
