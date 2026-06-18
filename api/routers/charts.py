@@ -324,6 +324,42 @@ def _column_metadata(df) -> List[Dict[str, str]]:
 # Spec generation (LLM with heuristic fallback)
 # ---------------------------------------------------------------------------
 
+async def _llm_profile_answer(
+    query: str, profile_text: str, model_id: Optional[str]
+) -> Optional[str]:
+    """Use an LLM to answer a specific question about the data profile.
+
+    Returns None on any failure so the caller can fall back to returning the
+    full profile text as-is.
+    """
+    try:
+        from open_notebook.ai.provision import provision_langchain_model
+
+        prompt = (
+            "Tens acesso ao perfil completo de um dataset tabular (abaixo). "
+            "Responde apenas à pergunta do utilizador de forma clara e concisa, "
+            "usando os dados reais do perfil. Não inventes valores. "
+            "Se a informação não estiver no perfil, diz isso explicitamente.\n\n"
+            f"## Perfil do dataset\n{profile_text}\n\n"
+            f"## Pergunta do utilizador\n{query}\n\n"
+            "Responde em português, de forma direta."
+        )
+        model = await provision_langchain_model(
+            prompt, model_id, "tools", max_tokens=1024
+        )
+        ai_message = await model.ainvoke(prompt)
+        content = ai_message.content
+        if isinstance(content, list):
+            content = " ".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        return str(content).strip() or None
+    except Exception as e:
+        logger.warning("Profile answer LLM failed, returning full profile: {}", e)
+        return None
+
+
 async def _llm_chart_spec(
     query: str, df, model_id: Optional[str]
 ) -> Optional[ChartSpec]:
@@ -768,6 +804,7 @@ async def generate_chart(
 
 @router.post("/charts/profile", response_model=DataProfileResponse)
 async def profile_chart_data(
+    query: Optional[str] = Form(None),
     data: Optional[str] = Form(None),
     surface: str = Form("global_chat"),
     run_id: Optional[str] = Form(None),
@@ -822,6 +859,15 @@ async def profile_chart_data(
         df = df.head(MAX_ROWS)
 
     response = _profile_table(df)
+
+    # When the user asks a specific question (not a generic "describe everything"
+    # request), use the LLM to generate a focused answer grounded in the profile
+    # text. This prevents hallucination on follow-ups like "what are the values
+    # of column X?" and avoids dumping the entire profile as the response.
+    focused_text: Optional[str] = None
+    if query and query.strip():
+        focused_text = await _llm_profile_answer(query.strip(), response.text, model_id)
+
     duration_ms = int((perf_counter() - started_at) * 1000)
     try:
         await write_chat_agent_event(
@@ -845,9 +891,17 @@ async def profile_chart_data(
                 details={
                     "rows": response.profile["rows"],
                     "columns": response.profile["columns"],
+                    "llm_answer_used": focused_text is not None,
                 },
             )
         )
     except Exception:
         pass
+
+    if focused_text:
+        return DataProfileResponse(
+            text=focused_text,
+            table_preview=response.table_preview,
+            profile=response.profile,
+        )
     return response
