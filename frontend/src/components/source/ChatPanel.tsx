@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square } from 'lucide-react'
 import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -47,6 +47,7 @@ import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
+import { useVoiceInput } from '@/lib/hooks/use-voice-input'
 
 interface NotebookContextStats {
   sourcesInsights: number
@@ -249,6 +250,14 @@ export function ChatPanel({
   const researchModelName = researchModelId
     ? models.find((model) => model.id === researchModelId || model.name === researchModelId)?.name
     : undefined
+  const { voiceState, handleMicClick } = useVoiceInput({
+    onTranscript: (text) => {
+      if (!isStreaming) {
+        onSendMessage(text, modelOverride)
+      }
+    },
+  })
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const scrollRoot = scrollAreaRef.current
     const viewport = scrollRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
@@ -875,9 +884,28 @@ export function ChatPanel({
               className="flex-1 min-h-[40px] max-h-[100px] resize-none py-2 px-3 min-w-0"
               rows={1}
             />
+            {enableAttachments && (
+              <Button
+                type="button"
+                variant={voiceState === 'recording' ? 'destructive' : 'outline'}
+                size="icon"
+                className={`h-[40px] w-[40px] flex-shrink-0 ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
+                onClick={handleMicClick}
+                disabled={isStreaming || voiceState === 'transcribing'}
+                title={voiceState === 'idle' ? 'Gravar mensagem de voz' : voiceState === 'recording' ? 'Parar gravação' : 'A transcrever…'}
+              >
+                {voiceState === 'transcribing' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : voiceState === 'recording' ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </Button>
+            )}
             <Button
               onClick={handleSend}
-              disabled={(!input.trim() && !selectedFile) || isStreaming}
+              disabled={(!input.trim() && !selectedFile) || isStreaming || voiceState !== 'idle'}
               size="icon"
               className="h-[40px] w-[40px] flex-shrink-0"
             >
