@@ -66,6 +66,8 @@ export async function runTranscriptionAgent(
     })
     return formatTranscriptionResponse(result)
   } catch (error) {
+    const status = (error as { response?: { status?: number } })?.response?.status
+    const errorMessage = error instanceof Error ? error.message : String(error)
     logChatAgentEvent({
       surface: context?.surface ?? 'global_chat',
       agent: 'transcription',
@@ -74,8 +76,17 @@ export async function runTranscriptionAgent(
       context,
       duration_ms: Math.round(performance.now() - startedAt),
       file: fileMetadata(file),
-      details: { error: error instanceof Error ? error.message : String(error) },
+      details: { error: errorMessage, http_status: status },
     })
-    throw error
+    if (status === 413) {
+      return 'O ficheiro de áudio é demasiado grande para transcrever. Tenta com um ficheiro menor.'
+    }
+    if (status === 415 || status === 422) {
+      return 'Este formato de áudio não é suportado. Tenta com MP3, WAV, OGG ou M4A.'
+    }
+    if (status === 503 || status === 502) {
+      return 'O serviço de transcrição não está disponível de momento. Tenta novamente mais tarde.'
+    }
+    return `Não consegui transcrever o ficheiro. Detalhe: ${errorMessage}`
   }
 }

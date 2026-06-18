@@ -10,7 +10,13 @@ AGENT = make_agent(
         "target": "objeto ou classe visual a detetar",
         "force_engine": "sam3 ou rfdetr se pedido explicitamente",
     },
-    fallback_keywords=("detetar", "detectar", "detect", "contar", "count", "segment", "identificar", "identify"),
+    fallback_keywords=(
+        "detetar", "detectar", "detect", "contar", "count", "segment",
+        "identificar", "identify",
+        # Engine-specific requests — "usa o sam3" / "usa o rfdetr" / "utiliza sam3"
+        "sam3", "sam-3", "sam 3", "rfdetr", "rf-detr", "rf detr",
+        "usa o sam", "utiliza o sam", "usa o rf", "utiliza o rf",
+    ),
     file_type_prefixes=("image/",),
 )
 

@@ -679,9 +679,16 @@ export function useGlobalChat() {
           context: isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
           mode: 'chat',
           file: visualFile,
-          force_engine: agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto'
-            ? agentOptions.vision.engine
-            : undefined,
+          // UI panel takes precedence; router parameter is the fallback so
+          // phrases like "usa o sam3" actually reach the correct engine.
+          force_engine: (() => {
+            if (agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto') {
+              return agentOptions.vision.engine
+            }
+            const fromRouter = routerDecision?.parameters?.force_engine
+            if (fromRouter === 'sam3' || fromRouter === 'rfdetr') return fromRouter
+            return undefined
+          })(),
           surface: agentContext.surface,
           run_id: agentContext.runId,
           session_id: agentContext.sessionId,
