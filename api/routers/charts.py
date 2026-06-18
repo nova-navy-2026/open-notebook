@@ -22,6 +22,7 @@ import base64
 import io
 import json
 import os
+import re
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional
@@ -37,7 +38,6 @@ router = APIRouter()
 
 # Hard limits to keep parsing/rendering bounded.
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
-MAX_ROWS = 100_000  # rows considered for aggregation/plotting
 MAX_SERIES = 6  # max number of y-series plotted at once
 MAX_PIE_SLICES = 20
 
@@ -337,9 +337,25 @@ async def _llm_profile_answer(
 
         prompt = (
             "Tens acesso ao perfil completo de um dataset tabular (abaixo). "
-            "Responde apenas à pergunta do utilizador de forma clara e concisa, "
-            "usando os dados reais do perfil. Não inventes valores. "
-            "Se a informação não estiver no perfil, diz isso explicitamente.\n\n"
+            "Responde apenas à pergunta do utilizador, usando EXCLUSIVAMENTE os "
+            "dados reais do perfil.\n\n"
+            "Regras importantes:\n"
+            "- Copia os valores exatamente como aparecem na secção "
+            "'## Detalhe por coluna'. Não os reordenes, não os alteres, não "
+            "inventes nenhum valor.\n"
+            "- Os valores já vêm envolvidos em backticks (`assim`). Mantém SEMPRE "
+            "cada valor dentro de backticks na tua resposta — muitos contêm "
+            "caracteres como *, _, # ou ~ que, sem backticks, seriam "
+            "interpretados como formatação markdown e apareceriam deformados.\n"
+            "- A secção '## Detalhe por coluna' contém TODOS os valores únicos de "
+            "cada coluna (indica o número de únicos). A pré-visualização da "
+            "tabela mostra apenas as primeiras linhas, por isso pode ter MENOS "
+            "valores do que a lista completa — isso é normal.\n"
+            "- Quando listares valores de uma coluna, indica quantos são (ex.: "
+            "'A coluna X tem 35 valores únicos:') e mantém a mesma ordem da "
+            "secção '## Detalhe por coluna'.\n"
+            "- Se a informação pedida não estiver no perfil, di-lo explicitamente "
+            "em vez de adivinhar.\n\n"
             f"## Perfil do dataset\n{profile_text}\n\n"
             f"## Pergunta do utilizador\n{query}\n\n"
             "Responde em português, de forma direta."
@@ -563,6 +579,24 @@ def _summary_text(df, spec: ChartSpec) -> str:
     )
 
 
+def _md_inline_code(value: Any) -> str:
+    """Wrap a value in markdown inline-code so its content renders literally.
+
+    Cell values frequently contain markdown-significant characters (``*``, ``_``,
+    ``#``, ``~``, backticks) that the chat would otherwise interpret as
+    formatting — turning e.g. ``0**Sm4CwCTmv`` into bold text and corrupting the
+    displayed value. Inline code disables that interpretation. When the value
+    itself contains backticks we use a longer backtick fence (and pad with
+    spaces) as the CommonMark spec requires.
+    """
+    text = str(value)
+    if "`" not in text:
+        return f"`{text}`"
+    longest_run = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest_run + 1)
+    return f"{fence} {text} {fence}"
+
+
 def _profile_table(df) -> DataProfileResponse:
     """Return a compact, deterministic profile for uploaded tabular data."""
     import pandas as pd
@@ -597,14 +631,13 @@ def _profile_table(df) -> DataProfileResponse:
             # Store top 5 for the profile metadata dict (used by UI charts).
             top5 = series.dropna().astype(str).value_counts().head(5)
             profile["top_values"] = top5.to_dict()
-            # Store ALL unique values when cardinality is low enough to be
-            # useful for grounding follow-up questions without blowing the
-            # context window. Above the threshold, keep top-50 by frequency.
+            # Store ALL unique values — no cardinality cap. The user requires the
+            # complete set so follow-up questions ("what are the values of X?")
+            # are always grounded in the full column. Keep first-occurrence order
+            # (pandas .unique() preserves it) so the values line up with the table
+            # preview and can be verified row-by-row.
             all_vals = series.dropna().astype(str).unique().tolist()
-            if unique <= 200:
-                profile["all_values"] = sorted(all_vals)
-            else:
-                profile["top_values_extended"] = series.dropna().astype(str).value_counts().head(50).index.tolist()
+            profile["all_values"] = all_vals
         column_profiles.append(profile)
 
     suggestions: List[str] = []
@@ -647,16 +680,19 @@ def _profile_table(df) -> DataProfileResponse:
     # Per-column value lists — critical for grounding follow-up questions.
     # For categorical columns list all unique values (≤200) or top-50; for
     # numeric columns list min/max/mean so the LLM doesn't have to guess.
+    # Wrap each value in inline-code backticks: cell values often contain
+    # markdown-significant characters (*, _, #, ~, etc.) that would otherwise be
+    # rendered as formatting in the chat, silently mangling the displayed value.
     lines.extend(["", "## Detalhe por coluna"])
     for p in column_profiles:
         col_name = p["name"]
         dtype = p["dtype"]
         unique = p["unique"]
         if p.get("all_values") is not None:
-            vals = ", ".join(str(v) for v in p["all_values"])
+            vals = ", ".join(_md_inline_code(v) for v in p["all_values"])
             lines.append(f"- **{col_name}** ({dtype}, {unique} únicos): {vals}")
         elif p.get("top_values_extended"):
-            vals = ", ".join(str(v) for v in p["top_values_extended"])
+            vals = ", ".join(_md_inline_code(v) for v in p["top_values_extended"])
             lines.append(f"- **{col_name}** ({dtype}, {unique} únicos — top 50): {vals}")
         elif "min" in p:
             lines.append(
@@ -665,7 +701,17 @@ def _profile_table(df) -> DataProfileResponse:
 
     table_preview = None
     try:
-        table_preview = df.head(20).to_markdown(index=False)
+        preview_df = df.head(20).copy()
+        # Wrap string-column cells in inline code so values containing markdown
+        # characters (*, _, #, ...) render literally inside the preview table
+        # instead of being turned into bold/italic. Numeric/datetime columns are
+        # left untouched so numbers stay clean.
+        for col in preview_df.columns:
+            if col in text_cols:
+                preview_df[col] = preview_df[col].apply(
+                    lambda v: _md_inline_code(v) if pd.notna(v) else v
+                )
+        table_preview = preview_df.to_markdown(index=False)
     except Exception:
         pass
 
@@ -747,9 +793,8 @@ async def generate_chart(
     if df is None or df.empty:
         raise HTTPException(status_code=422, detail="The provided data is empty.")
 
-    if len(df) > MAX_ROWS:
-        df = df.head(MAX_ROWS)
-
+    # No row truncation — charts aggregate over the FULL table so the result is
+    # never silently computed from a partial dataset.
     spec = await _llm_chart_spec(query, df, model_id) or _heuristic_chart_spec(query, df)
     spec = _validate_spec(spec, df)
 
@@ -855,9 +900,10 @@ async def profile_chart_data(
 
     if df is None or df.empty:
         raise HTTPException(status_code=422, detail="The provided data is empty.")
-    if len(df) > MAX_ROWS:
-        df = df.head(MAX_ROWS)
 
+    # No row truncation: profiling/evaluation must always reflect the FULL table
+    # (the upload size cap already bounds the input). The user relies on complete
+    # column statistics and value lists.
     response = _profile_table(df)
 
     # When the user asks a specific question (not a generic "describe everything"

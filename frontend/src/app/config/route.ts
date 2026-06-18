@@ -15,14 +15,14 @@ import { NextRequest, NextResponse } from 'next/server'
  * - API_URL: Used by browser clients, can be https://your-domain.com or http://server-ip:5055
  * - INTERNAL_API_URL: Used by Next.js rewrites for server-side proxying, typically http://localhost:5055
  *
- * Auto-detection logic for API_URL:
- * 1. If API_URL env var is set, use it (explicit override)
- * 2. Otherwise, detect from incoming HTTP request headers (zero-config)
- * 3. Fallback to localhost:5055 if detection fails
+ * Resolution logic for API_URL:
+ * 1. If API_URL env var is set, use it (explicit override for split-host setups)
+ * 2. Otherwise, use same-origin relative requests ("/api/*") proxied by Next.js
+ *    rewrites to INTERNAL_API_URL. Only the frontend port needs to be exposed.
  *
  * This allows the same Docker image to work in different deployment scenarios.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   // Priority 1: Check if API_URL is explicitly set
   const envApiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL
 
@@ -32,37 +32,19 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  // Priority 2: Auto-detect from request headers
-  try {
-    // Get the protocol (http or https)
-    // Check X-Forwarded-Proto first (for reverse proxies), then fallback to request scheme
-    const proto = request.headers.get('x-forwarded-proto') ||
-                  request.nextUrl.protocol.replace(':', '') ||
-                  'http'
-
-    // Get the host header (includes port if non-standard)
-    const hostHeader = request.headers.get('host')
-
-    if (hostHeader) {
-      // Extract just the hostname (remove port if present)
-      const hostname = hostHeader.split(':')[0]
-
-      // Construct the API URL with port 5055
-      const apiUrl = `${proto}://${hostname}:5055`
-
-      console.log(`[runtime-config] Auto-detected API URL: ${apiUrl} (proto=${proto}, host=${hostHeader})`)
-
-      return NextResponse.json({
-        apiUrl,
-      })
-    }
-  } catch (error) {
-    console.error('[runtime-config] Auto-detection failed:', error)
-  }
-
-  // Priority 3: Fallback to localhost
-  console.log('[runtime-config] Using fallback: http://localhost:5055')
+  // Priority 2: Use same-origin relative requests (zero-config default).
+  //
+  // The browser calls "/api/*" on whatever origin it loaded the app from, and
+  // Next.js rewrites (see next.config.ts) proxy that to INTERNAL_API_URL
+  // (localhost:5055) server-side. This is the intended deployment model: only
+  // the frontend port (e.g. 3675) needs to be exposed / reverse-proxied.
+  //
+  // We deliberately do NOT auto-build "<host>:5055": behind a reverse proxy
+  // (e.g. https://marinha.novasearch.org) port 5055 is not reachable from the
+  // browser, so that URL would hang every request and leave the app on a blank
+  // page. An empty apiUrl makes the client use relative "/api" paths instead.
+  // For deployments that expose the API on a separate public URL, set API_URL.
   return NextResponse.json({
-    apiUrl: 'http://localhost:5055',
+    apiUrl: '',
   })
 }

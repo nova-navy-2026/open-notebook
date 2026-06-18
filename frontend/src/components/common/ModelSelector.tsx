@@ -36,7 +36,7 @@ export function ModelSelector({
   return (
     <div className="space-y-2">
       {label && <Label htmlFor={selectId}>{label}</Label>}
-      <Select name={name} value={value || undefined} onValueChange={onChange} disabled={disabled || isLoading}>
+      <Select name={name} value={value || ""} onValueChange={onChange} disabled={disabled || isLoading}>
         <SelectTrigger id={selectId}>
           <SelectValue placeholder={placeholder || t.settings.embeddingOptionPlaceholder} />
         </SelectTrigger>

@@ -30,7 +30,7 @@ import {
 import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
-import { runGraphAgent } from '@/lib/chat-agents/graph-agent'
+import { runGraphAgent, isGraphRequest } from '@/lib/chat-agents/graph-agent'
 import { runDataProfilerAgent } from '@/lib/chat-agents/data-profiler-agent'
 import {
   createChatAgentRunId,
@@ -564,10 +564,17 @@ export function useGlobalChat() {
         }
       }
 
+      // A table follow-up that asks for a chart ("gráfico de barras da coluna X")
+      // must go to the graph agent, not the profiler — even though it mentions a
+      // column. Detect chart intent up front so the profiler defers to the graph
+      // block below instead of intercepting and returning a profile.
+      const wantsGraph = preferredAgent === 'graph_generator' || isGraphRequest(message)
+
       // Data profiler: runs when a file is attached OR when the user is asking
       // a follow-up question about a table from a previous turn (re-uses the
       // stored last data file so the model sees the actual column values).
-      const isDataFollowUp = !file && !!lastDataFileRef.current && looksLikeDataFollowUp(message)
+      const isDataFollowUp =
+        !file && !!lastDataFileRef.current && looksLikeDataFollowUp(message) && !wantsGraph
       const dataFile = file ?? (isDataFollowUp ? lastDataFileRef.current ?? undefined : undefined)
       if (dataFile) {
         const content = await runDataProfilerAgent(
@@ -598,8 +605,10 @@ export function useGlobalChat() {
 
       {
         // Graph agent: reuses last data file on follow-up questions, just like
-        // the data profiler block above.
-        const isGraphFollowUp = !file && !!lastDataFileRef.current && looksLikeDataFollowUp(message)
+        // the data profiler block above. Triggers when the follow-up references
+        // the table (column words) OR explicitly asks for a chart.
+        const isGraphFollowUp =
+          !file && !!lastDataFileRef.current && (looksLikeDataFollowUp(message) || wantsGraph)
         const graphFile = file ?? (isGraphFollowUp ? lastDataFileRef.current ?? undefined : undefined)
         const content = await runGraphAgent(
           message,
