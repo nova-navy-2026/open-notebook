@@ -85,6 +85,17 @@ export const researchApi = {
   },
 
   /**
+   * Directly replace the report text without AI processing.
+   */
+  directUpdateReport: async (jobId: string, report: string): Promise<ResearchJob> => {
+    const response = await apiClient.patch<ResearchJob>(
+      `/research/jobs/${jobId}/report`,
+      { report },
+    )
+    return response.data
+  },
+
+  /**
    * Save a research result as a Note in a Notebook
    */
   saveAsNote: async (payload: SaveAsNoteRequest): Promise<SaveAsNoteResponse> => {

@@ -153,6 +153,35 @@ export function useDeleteResearchJob() {
 }
 
 /**
+ * Hook to directly replace a report's text without AI processing.
+ */
+export function useDirectUpdateReport() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { t } = useTranslation();
+
+  return useMutation({
+    mutationFn: ({ jobId, report }: { jobId: string; report: string }) =>
+      researchApi.directUpdateReport(jobId, report),
+    onSuccess: (data) => {
+      queryClient.setQueryData(QUERY_KEYS.researchJob(data.id), data);
+      queryClient.refetchQueries({ queryKey: QUERY_KEYS.researchJobs });
+      toast({
+        title: t.research?.reportSaved ?? "Report saved",
+        description: t.research?.reportSavedDesc ?? "Your changes have been saved.",
+      });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: t.research?.failedToSave ?? "Failed to Save",
+        description: getApiErrorKey(error, t.common.error),
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+/**
  * Hook to save a research result as a notebook note
  */
 export function useSaveResearchAsNote() {

@@ -10,6 +10,9 @@ export function useNotebooks(archived?: boolean) {
   return useQuery({
     queryKey: [...QUERY_KEYS.notebooks, { archived }],
     queryFn: () => notebooksApi.list({ archived, order_by: 'updated desc' }),
+    staleTime: 30_000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   })
 }
 

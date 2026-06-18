@@ -91,9 +91,11 @@ const getNavigationItems = (t: TranslationKeys) => [
 ];
 
 const getCreateItems = (t: TranslationKeys) => [
-  { name: t.common.newSource, action: "source", icon: FileText },
-  { name: t.common.newNotebook, action: "notebook", icon: Book },
-  { name: t.common.newPodcast, action: "podcast", icon: Mic },
+  { name: t.common.newSource ?? "New Source", action: "source", icon: FileText },
+  { name: t.common.newNotebook ?? "New Notebook", action: "notebook", icon: Book },
+  { name: t.common.newPodcast ?? "New Podcast", action: "podcast", icon: Mic },
+  { name: t.navigation.research ?? "Deep Research", action: "research", icon: FlaskConical },
+  { name: t.navigation.transcription ?? "Transcription", action: "transcription", icon: Bot },
 ];
 
 const getThemeItems = (t: TranslationKeys) => [
@@ -198,9 +200,11 @@ export function CommandPalette() {
         if (action === "source") openSourceDialog();
         else if (action === "notebook") openNotebookDialog();
         else if (action === "podcast") openPodcastDialog();
+        else if (action === "research") router.push("/research");
+        else if (action === "transcription") router.push("/transcription");
       });
     },
-    [handleSelect, openSourceDialog, openNotebookDialog, openPodcastDialog],
+    [handleSelect, openSourceDialog, openNotebookDialog, openPodcastDialog, router],
   );
 
   const handleTheme = useCallback(

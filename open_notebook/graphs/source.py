@@ -19,9 +19,11 @@ from typing_extensions import Annotated, TypedDict
 
 from open_notebook.ai.models import Model, ModelManager
 from open_notebook.ai.vision import (
+    generate_audio_transcript,
     generate_image_caption,
     generate_video_caption,
     guess_mime_from_filename,
+    is_audio_mime,
     is_image_mime,
     is_video_mime,
     is_visual_mime,
@@ -139,6 +141,17 @@ async def content_process(state: SourceState) -> dict:
             extract_content(content_state),
             timeout=EXTRACT_CONTENT_TIMEOUT_SECONDS,
         )
+    except ValueError as e:
+        msg = str(e).lower()
+        if "api key" in msg or "speech" in msg or "audio" in msg or "openai" in msg:
+            # content_core tried to transcribe audio but no STT provider is configured.
+            # Surface a clear message rather than a cryptic key-not-found failure.
+            raise ValueError(
+                "Could not process audio/video content: no Speech-to-Text model is configured. "
+                "Go to Settings → Models and configure a Speech-to-Text model, or upload a "
+                "text-based version of the file instead."
+            ) from e
+        raise
     except asyncio.TimeoutError:
         logger.error(
             f"[source_graph] content_process: extract_content TIMED OUT after "
@@ -181,12 +194,17 @@ async def content_process(state: SourceState) -> dict:
     return {"content_state": processed_state}
 
 
+def _is_media_mime(mime: Optional[str]) -> bool:
+    """True for any image, video, or audio MIME type — all go to vision_process."""
+    return is_visual_mime(mime) or is_audio_mime(mime)
+
+
 async def route_by_content_type(state: SourceState) -> str:
-    """Route to vision processing for images/video, normal processing otherwise."""
+    """Route images/video/audio to vision_process, everything else to content_process."""
     # Check source's file_mime (set during upload via store_file)
     try:
         source = await Source.get(state["source_id"])
-        if source and source.file_mime and is_visual_mime(source.file_mime):
+        if source and source.file_mime and _is_media_mime(source.file_mime):
             logger.info(
                 f"Routing source {source.id} to vision processing (mime: {source.file_mime})"
             )
@@ -199,7 +217,7 @@ async def route_by_content_type(state: SourceState) -> str:
     file_path = content_state.get("file_path", "")
     if file_path:
         mime = guess_mime_from_filename(file_path)
-        if is_visual_mime(mime):
+        if _is_media_mime(mime):
             logger.info(f"Routing to vision processing (file: {file_path}, mime: {mime})")
             return "vision_process"
 
@@ -207,7 +225,7 @@ async def route_by_content_type(state: SourceState) -> str:
     url = content_state.get("url", "")
     if url:
         mime = guess_mime_from_filename(url.split("?")[0])  # strip query params
-        if is_visual_mime(mime):
+        if _is_media_mime(mime):
             logger.info(f"Routing to vision processing (url: {url}, mime: {mime})")
             return "vision_process"
 
@@ -254,7 +272,7 @@ async def vision_process(state: SourceState) -> dict:
             "The file may not have been uploaded correctly."
         )
 
-    # Generate caption
+    # Generate caption / transcript
     caption_language = state.get("caption_language") or content_state.get(
         "caption_language"
     )
@@ -265,6 +283,12 @@ async def vision_process(state: SourceState) -> dict:
                 mime_type=mime_type,
                 language=caption_language,
             )
+        elif is_audio_mime(mime_type):
+            caption = await generate_audio_transcript(
+                audio_bytes=image_bytes,
+                mime_type=mime_type,
+                language=caption_language,
+            )
         else:
             caption = await generate_image_caption(
                 image_bytes=image_bytes,
@@ -272,10 +296,11 @@ async def vision_process(state: SourceState) -> dict:
                 language=caption_language,
             )
     except Exception as e:
-        logger.error(f"Vision captioning failed: {e}")
+        logger.error(f"Vision/audio processing failed: {e}")
         raise ValueError(
-            f"Failed to generate caption for visual content: {e}. "
-            "Ensure a vision-capable model is configured in Settings → Models."
+            f"Failed to process media content: {e}. "
+            "For audio/video files, ensure ffmpeg is installed and the Whisper service is running. "
+            "For images, ensure a vision-capable model is configured in Settings → Models."
         ) from e
 
     logger.info(f"Generated caption ({len(caption)} chars) for source {source.id}")

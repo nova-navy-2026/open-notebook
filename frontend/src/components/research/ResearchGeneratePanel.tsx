@@ -69,25 +69,42 @@ export function ResearchGeneratePanel({
 
   const availableReportTypes = reportTypes ?? EMPTY_REPORT_TYPES;
   const availableTones = tones ?? EMPTY_TONES;
+
+  // For display only (description text beneath the select)
   const selectedReportTypeInfo = useMemo(
-    () =>
-      availableReportTypes.find((rt) => rt.value === reportType) ??
-      availableReportTypes[0],
+    () => availableReportTypes.find((rt) => rt.value === reportType),
     [availableReportTypes, reportType],
   );
   const selectedToneInfo = useMemo(
-    () => availableTones.find((tn) => tn.value === tone) ?? availableTones[0],
+    () => availableTones.find((tn) => tn.value === tone),
     [availableTones, tone],
   );
-  const selectedReportTypeValue = selectedReportTypeInfo?.value ?? "";
-  const selectedToneValue = selectedToneInfo?.value ?? "";
+
+  // When the list loads, make sure the current value is actually available.
+  // If the initial default ("research_report") isn't in the list, fall back
+  // to the first option. Without this, the controlled Select would receive a
+  // value that doesn't match any SelectItem, and Radix's useControllableState
+  // would try to reconcile it on every render — causing an infinite loop.
+  useEffect(() => {
+    if (availableReportTypes.length === 0) return;
+    if (!availableReportTypes.some((rt) => rt.value === reportType)) {
+      setReportType(availableReportTypes[0].value);
+    }
+  }, [availableReportTypes, reportType]);
+
+  useEffect(() => {
+    if (availableTones.length === 0) return;
+    if (!availableTones.some((tn) => tn.value === tone)) {
+      setTone(availableTones[0].value);
+    }
+  }, [availableTones, tone]);
 
   const handleReportTypeChange = useCallback((value: string) => {
-    setReportType((current) => (current === value ? current : value));
+    setReportType(value);
   }, []);
 
   const handleToneChange = useCallback((value: string) => {
-    setTone((current) => (current === value ? current : value));
+    setTone(value);
   }, []);
 
   const handleModelChange = useCallback((value: string) => {
@@ -130,16 +147,16 @@ export function ResearchGeneratePanel({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || !selectedReportTypeValue || !selectedToneValue) return;
+    if (!query.trim() || !reportType || !tone) return;
 
     await generateMutation.mutateAsync({
       query: query.trim(),
       // A meeting transcript is turned into structured minutes (ATA) via a
       // dedicated, retrieval-free backend path. Otherwise honour the
       // selected report type.
-      report_type: fromTranscript ? "meeting_minutes" : selectedReportTypeValue,
+      report_type: fromTranscript ? "meeting_minutes" : reportType,
       report_source: "local",
-      tone: selectedToneValue,
+      tone: tone,
       source_urls: [],
       model_id: modelId || undefined,
       // Meeting minutes never touch OpenSearch (the report type forces a
@@ -198,7 +215,7 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent className="space-y-3">
             <Select
-              value={selectedReportTypeValue}
+              value={reportType}
               onValueChange={handleReportTypeChange}
               disabled={isSubmitting || availableReportTypes.length === 0}
             >
@@ -231,7 +248,7 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent>
             <Select
-              value={selectedToneValue}
+              value={tone}
               onValueChange={handleToneChange}
               disabled={isSubmitting || availableTones.length === 0}
             >
@@ -284,8 +301,8 @@ export function ResearchGeneratePanel({
             !query.trim() ||
             isSubmitting ||
             isLoading ||
-            !selectedReportTypeValue ||
-            !selectedToneValue
+            !reportType ||
+            !tone
           }
           className="min-w-[200px]"
         >

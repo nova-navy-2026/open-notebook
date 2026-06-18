@@ -155,6 +155,40 @@ async def transcribe(
     with open(saved_path, "wb") as f:
         f.write(audio_bytes)
 
+    # Normalize to 16 kHz mono WAV before sending to Whisper.
+    # VBR-encoded MP3/OGG/AAC files can cause Whisper to return HTTP 500 with
+    # "X samples instead of expected Y samples" when the chunk boundary doesn't
+    # align perfectly with the VBR frame grid.
+    norm_path = saved_path
+    if ext != ".wav":
+        _norm_path = saved_path + "_norm.wav"
+        try:
+            import subprocess
+            _ffmpeg_result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", saved_path,
+                    "-vn",
+                    "-acodec", "pcm_s16le",
+                    "-ar", "16000",
+                    "-ac", "1",
+                    _norm_path,
+                ],
+                capture_output=True,
+                timeout=120,
+            )
+            if _ffmpeg_result.returncode == 0 and os.path.getsize(_norm_path) > 1024:
+                norm_path = _norm_path
+                logger.info(
+                    f"Normalized audio to 16 kHz WAV: {os.path.getsize(norm_path)} bytes"
+                )
+            else:
+                logger.warning(
+                    f"ffmpeg normalization returned {_ffmpeg_result.returncode}; "
+                    "sending original to Whisper"
+                )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as _e:
+            logger.warning(f"ffmpeg not available for audio normalization: {_e}")
+
     norm_lang = (language or "").strip() or None
     logger.info(
         "ChatAgent tool start | agent=transcription tool=transcription.transcribe "
@@ -245,7 +279,7 @@ async def transcribe(
             call_kwargs = {}
             if norm_lang is not None:
                 call_kwargs["language"] = norm_lang
-            raw = transcribe_fn(saved_path, **call_kwargs)
+            raw = transcribe_fn(norm_path, **call_kwargs)
             if inspect.isawaitable(raw):
                 raw = await raw
             # Normalise to the shape the frontend expects.
@@ -299,9 +333,9 @@ async def transcribe(
 
         # Default path: local NOVA-Researcher whisper server
         result = await run_transcription(
-            audio_path=saved_path,
-            filename=audio.filename,
-            content_type=audio.content_type,
+            audio_path=norm_path,
+            filename=audio.filename if norm_path == saved_path else (Path(audio.filename or "audio").stem + ".wav"),
+            content_type=audio.content_type if norm_path == saved_path else "audio/wav",
             language=norm_lang,
             diarize=bool(diarize),
             num_speakers=num_speakers,
@@ -367,7 +401,8 @@ async def transcribe(
         )
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
     finally:
-        try:
-            os.remove(saved_path)
-        except OSError:
-            pass
+        for _cleanup_path in {saved_path, norm_path}:
+            try:
+                os.remove(_cleanup_path)
+            except OSError:
+                pass

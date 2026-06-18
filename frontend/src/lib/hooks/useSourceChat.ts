@@ -153,51 +153,54 @@ export function useSourceChat(sourceId: string) {
 
       const reader = response.getReader()
       const decoder = new TextDecoder()
-      let aiMessage: SourceChatMessage | null = null
+      const aiMessageId = `ai-${Date.now()}`
+      let aiContent = ''
+      let buffer = ''
+
+      const ensureAiMessage = () => {
+        setMessages(prev => {
+          if (prev.some(m => m.id === aiMessageId)) return prev
+          return [...prev, {
+            id: aiMessageId,
+            type: 'ai' as const,
+            content: '',
+            timestamp: new Date().toISOString(),
+          }]
+        })
+      }
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() ?? ''
 
-        const text = decoder.decode(value)
-        const lines = text.split('\n')
+        for (const evt of events) {
+          const line = evt.split('\n').find(l => l.startsWith('data: '))
+          if (!line) continue
+          try {
+            const data = JSON.parse(line.slice(6))
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              
-              if (data.type === 'ai_message') {
-                // Create AI message on first content chunk to avoid empty bubble
-                if (!aiMessage) {
-                  aiMessage = {
-                    id: `ai-${Date.now()}`,
-                    type: 'ai',
-                    content: data.content || '',
-                    timestamp: new Date().toISOString()
-                  }
-                  setMessages(prev => [...prev, aiMessage!])
-                } else {
-                  aiMessage.content += data.content || ''
-                  setMessages(prev =>
-                    prev.map(msg => msg.id === aiMessage!.id
-                      ? { ...msg, content: aiMessage!.content }
-                      : msg
-                    )
-                  )
-                }
-              } else if (data.type === 'context_indicators') {
-                setContextIndicators(data.data)
-              } else if (data.type === 'error') {
-                throw new Error(data.message || 'Stream error')
-              }
-            } catch (e) {
-              if (e instanceof SyntaxError) {
-                console.error('Error parsing SSE data:', e)
-              } else {
-                throw e
-              }
+            if (data.type === 'delta') {
+              ensureAiMessage()
+              aiContent += data.content || ''
+              setMessages(prev =>
+                prev.map(m => m.id === aiMessageId ? { ...m, content: aiContent } : m)
+              )
+            } else if (data.type === 'complete') {
+              ensureAiMessage()
+              aiContent = data.content || aiContent
+              setMessages(prev =>
+                prev.map(m => m.id === aiMessageId ? { ...m, content: aiContent } : m)
+              )
+            } else if (data.type === 'context_indicators') {
+              setContextIndicators(data.data)
+            } else if (data.type === 'error') {
+              throw new Error(data.message || 'Stream error')
             }
+          } catch (e) {
+            if (!(e instanceof SyntaxError)) throw e
           }
         }
       }

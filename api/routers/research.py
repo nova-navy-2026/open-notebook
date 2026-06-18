@@ -29,6 +29,7 @@ from open_notebook.research.researcher_service import (
     revise_research_report,
     run_research,
     submit_research_job,
+    update_report_directly,
 )
 from open_notebook.domain.notebook import Notebook
 
@@ -305,6 +306,31 @@ async def delete_job(
 class ReviseResearchRequest(BaseModel):
     instruction: str
     model_id: Optional[str] = None
+
+
+class DirectUpdateReportRequest(BaseModel):
+    report: str
+
+
+@router.patch("/research/jobs/{job_id}/report")
+async def direct_update_report(
+    job_id: str,
+    request: DirectUpdateReportRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    """Replace a report's text verbatim — no AI processing."""
+    job = get_research_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Research job not found")
+    if not _job_visible_to_user(job, user_id, auth_user_id):
+        raise HTTPException(status_code=404, detail="Research job not found")
+    if not job.result:
+        raise HTTPException(status_code=400, detail="Research job has no result to update")
+    updated = update_report_directly(job_id, request.report)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update report")
+    return _job_to_response(updated)
 
 
 @router.post("/research/jobs/{job_id}/revise")

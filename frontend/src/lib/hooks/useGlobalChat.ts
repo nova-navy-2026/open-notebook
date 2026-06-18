@@ -64,7 +64,22 @@ function normaliseForMatching(text: string): string {
 
 function looksLikeVisualFollowUp(message: string): boolean {
   const text = normaliseForMatching(message)
-  return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
+  // Only match visual-specific keywords — generic "again" words ("again", "de novo",
+  // "outra vez") are deliberately excluded: they apply to any domain and caused
+  // non-visual follow-ups (e.g. table questions) to incorrectly reuse the last photo.
+  return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|anexo|ficheiro|anterior|anteriores|previous|before|last photo|last image|foto anterior|imagem anterior|foto de antes|imagem de antes)\b/.test(text)
+}
+
+// Specifically detects explicit "give me the previous photo/image" intent, so we
+// can show a helpful message when no file is stored in memory.
+function looksLikePreviousPhotoRequest(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(foto anterior|imagem anterior|foto de antes|imagem de antes|previous photo|previous image|last photo|last image|ultima foto|ultima imagem|a foto de ha pouco|a imagem de ha pouco|que enviaste antes|que enviei antes)\b/.test(text)
+}
+
+function looksLikeDataFollowUp(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(coluna|colunas|column|columns|linha|linhas|row|rows|valor|valores|value|values|dados|data|celula|celulas|cell|cells|campo|campos|field|fields|tabela|table|filtrar|filter|ordenar|sort|media|mean|min|max|soma|sum|contagem|count|unique|unicos|missing|nulos|null|outlier)\b/.test(text)
 }
 
 function buildVisualContext(previousResponse: string): string | undefined {
@@ -119,6 +134,7 @@ export function useGlobalChat() {
   const lastVisualFileRef = useRef<File | null>(null)
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
+  const lastDataFileRef = useRef<File | null>(null)
   const currentSessionIdRef = useRef<string | null>(currentSessionId)
   // Deep research jobs already being polled by this hook instance (inline or
   // reconciled), so the reconciler never double-polls the same job.
@@ -269,6 +285,7 @@ export function useGlobalChat() {
         lastVisualFileRef.current = null
         lastVisualQueryRef.current = ''
         lastVisualContextRef.current = ''
+        lastDataFileRef.current = null
         setIsVisualModelLocked(false)
         setCurrentSessionId(null)
         setMessages([])
@@ -319,6 +336,14 @@ export function useGlobalChat() {
         toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
         return
       }
+    }
+
+    // If the user explicitly asks for a "previous photo" but we have none stored,
+    // show a helpful message and bail out early rather than sending a broken request.
+    if (!file && looksLikePreviousPhotoRequest(message) && !lastVisualFileRef.current) {
+      toast.info('Não encontrei uma imagem anterior nesta conversa. Envia uma nova imagem para eu poder analisá-la.')
+      setIsSending(false)
+      return
     }
 
     const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
@@ -539,14 +564,21 @@ export function useGlobalChat() {
         }
       }
 
-      if (file) {
+      // Data profiler: runs when a file is attached OR when the user is asking
+      // a follow-up question about a table from a previous turn (re-uses the
+      // stored last data file so the model sees the actual column values).
+      const isDataFollowUp = !file && !!lastDataFileRef.current && looksLikeDataFollowUp(message)
+      const dataFile = file ?? (isDataFollowUp ? lastDataFileRef.current ?? undefined : undefined)
+      if (dataFile) {
         const content = await runDataProfilerAgent(
           message,
-          file,
+          dataFile,
           agentContext,
-          preferredAgent === 'data_profiler',
+          preferredAgent === 'data_profiler' || isDataFollowUp,
         )
         if (content) {
+          // Remember the file for future follow-ups.
+          if (file) lastDataFileRef.current = file
           const aiMessage: NotebookChatMessage = {
             id: `ai-${Date.now()}`,
             type: 'ai',
@@ -565,13 +597,18 @@ export function useGlobalChat() {
       }
 
       {
+        // Graph agent: reuses last data file on follow-up questions, just like
+        // the data profiler block above.
+        const isGraphFollowUp = !file && !!lastDataFileRef.current && looksLikeDataFollowUp(message)
+        const graphFile = file ?? (isGraphFollowUp ? lastDataFileRef.current ?? undefined : undefined)
         const content = await runGraphAgent(
           message,
-          file,
+          graphFile,
           agentContext,
-          preferredAgent === 'graph_generator',
+          preferredAgent === 'graph_generator' || isGraphFollowUp,
         )
         if (content) {
+          if (file) lastDataFileRef.current = file
           const aiMessage: NotebookChatMessage = {
             id: `ai-${Date.now()}`,
             type: 'ai',

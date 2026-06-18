@@ -558,8 +558,17 @@ def _profile_table(df) -> DataProfileResponse:
                 }
             )
         else:
-            top = series.dropna().astype(str).value_counts().head(5)
-            profile["top_values"] = top.to_dict()
+            # Store top 5 for the profile metadata dict (used by UI charts).
+            top5 = series.dropna().astype(str).value_counts().head(5)
+            profile["top_values"] = top5.to_dict()
+            # Store ALL unique values when cardinality is low enough to be
+            # useful for grounding follow-up questions without blowing the
+            # context window. Above the threshold, keep top-50 by frequency.
+            all_vals = series.dropna().astype(str).unique().tolist()
+            if unique <= 200:
+                profile["all_values"] = sorted(all_vals)
+            else:
+                profile["top_values_extended"] = series.dropna().astype(str).value_counts().head(50).index.tolist()
         column_profiles.append(profile)
 
     suggestions: List[str] = []
@@ -599,9 +608,28 @@ def _profile_table(df) -> DataProfileResponse:
     lines.extend(["", "## Sugestões"])
     lines.extend(f"- {suggestion}" for suggestion in suggestions[:6])
 
+    # Per-column value lists — critical for grounding follow-up questions.
+    # For categorical columns list all unique values (≤200) or top-50; for
+    # numeric columns list min/max/mean so the LLM doesn't have to guess.
+    lines.extend(["", "## Detalhe por coluna"])
+    for p in column_profiles:
+        col_name = p["name"]
+        dtype = p["dtype"]
+        unique = p["unique"]
+        if p.get("all_values") is not None:
+            vals = ", ".join(str(v) for v in p["all_values"])
+            lines.append(f"- **{col_name}** ({dtype}, {unique} únicos): {vals}")
+        elif p.get("top_values_extended"):
+            vals = ", ".join(str(v) for v in p["top_values_extended"])
+            lines.append(f"- **{col_name}** ({dtype}, {unique} únicos — top 50): {vals}")
+        elif "min" in p:
+            lines.append(
+                f"- **{col_name}** ({dtype}): min={p['min']}, max={p['max']}, média={p.get('mean', 'n/a')}"
+            )
+
     table_preview = None
     try:
-        table_preview = df.head(10).to_markdown(index=False)
+        table_preview = df.head(20).to_markdown(index=False)
     except Exception:
         pass
 

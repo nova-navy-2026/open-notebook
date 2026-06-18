@@ -47,6 +47,24 @@ VIDEO_MIME_TYPES = frozenset(
     }
 )
 
+# MIME types that are audio-only (need Whisper transcription)
+AUDIO_MIME_TYPES = frozenset(
+    {
+        "audio/mpeg",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/ogg",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/aac",
+        "audio/x-aac",
+        "audio/flac",
+        "audio/x-flac",
+        "audio/webm",
+        "audio/opus",
+    }
+)
+
 # Default prompt for image captioning
 DEFAULT_CAPTION_PROMPT = (
     "Describe this image in detail. Include:\n"
@@ -227,7 +245,16 @@ def is_image_mime(mime_type: Optional[str]) -> bool:
 
 def is_video_mime(mime_type: Optional[str]) -> bool:
     """Check whether a MIME type is a video (needs frame extraction)."""
-    return mime_type in VIDEO_MIME_TYPES if mime_type else False
+    if not mime_type:
+        return False
+    return mime_type in VIDEO_MIME_TYPES or mime_type.startswith("video/")
+
+
+def is_audio_mime(mime_type: Optional[str]) -> bool:
+    """Check whether a MIME type is audio-only (needs Whisper transcription)."""
+    if not mime_type:
+        return False
+    return mime_type in AUDIO_MIME_TYPES or mime_type.startswith("audio/")
 
 
 def is_visual_mime(mime_type: Optional[str]) -> bool:
@@ -511,6 +538,83 @@ async def _transcribe_video_audio(
     except Exception as e:
         logger.warning(f"Video audio transcription failed (non-fatal): {e}")
         return None
+
+
+async def generate_audio_transcript(
+    audio_bytes: bytes,
+    mime_type: str = "audio/mpeg",
+    language: Optional[str] = None,
+) -> str:
+    """Transcribe an audio-only file (MP3, WAV, OGG …) using the local Whisper service.
+
+    Normalises to 16 kHz mono WAV via ffmpeg before sending so that VBR-encoded
+    files (which cause sample-count mismatches in Whisper) are processed cleanly.
+
+    Args:
+        audio_bytes: Raw audio file content.
+        mime_type: MIME type of the audio (e.g. "audio/mpeg").
+        language: Optional locale hint (e.g. "pt-PT") for transcription.
+
+    Returns:
+        The transcribed text.
+
+    Raises:
+        ValueError: If ffmpeg conversion fails or Whisper returns no text.
+    """
+    import os as _os
+    import tempfile
+
+    if not audio_bytes:
+        raise ValueError("Empty audio data")
+
+    # Pick a sensible suffix so ffmpeg can auto-detect the input format.
+    suffix_map = {
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/ogg": ".ogg",
+        "audio/mp4": ".m4a",
+        "audio/x-m4a": ".m4a",
+        "audio/aac": ".aac",
+        "audio/flac": ".flac",
+        "audio/x-flac": ".flac",
+        "audio/webm": ".webm",
+        "audio/opus": ".opus",
+    }
+    suffix = suffix_map.get(mime_type, mimetypes.guess_extension(mime_type) or ".mp3")
+    if suffix in (".mpga", ".mp2", ".mp2a"):
+        suffix = ".mp3"
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        audio_path = tmp.name
+
+    try:
+        # Reuse the video audio-extraction pipeline — ffmpeg normalises to
+        # 16 kHz mono WAV, which Whisper requires and which avoids VBR
+        # sample-count mismatches for MP3/OGG/AAC input files.
+        wav_bytes = await _extract_video_audio(audio_path)
+        if not wav_bytes:
+            raise ValueError(
+                "Could not convert audio to WAV. "
+                "Ensure ffmpeg is installed and the file contains a valid audio track."
+            )
+
+        text = await _transcribe_video_audio(wav_bytes, language=language)
+        if not text:
+            raise ValueError(
+                "Audio transcription returned no text. "
+                "Ensure the Whisper service is running, or configure a "
+                "Speech-to-Text model in Settings → Models."
+            )
+
+        logger.info(f"Generated audio transcript: {len(text)} chars")
+        return text
+    finally:
+        try:
+            _os.remove(audio_path)
+        except OSError:
+            pass
 
 
 async def generate_video_caption(

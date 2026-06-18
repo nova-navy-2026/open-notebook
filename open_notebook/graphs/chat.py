@@ -1,20 +1,19 @@
 import asyncio
-import sqlite3
 from typing import Annotated, Any, AsyncGenerator, Optional
 
 from ai_prompter import Prompter
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from open_notebook.ai.provision import provision_langchain_model
-from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import OpenNotebookError
+from open_notebook.graphs.checkpoint import checkpointer
 from open_notebook.utils import clean_thinking_content
+from open_notebook.utils.chat_compress import compress_chat_history, compress_checkpoint_if_needed
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.text_utils import extract_text_content
 
@@ -37,9 +36,7 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
             "model_override"
         )
 
-        # Handle async model provisioning from sync context
         def run_in_new_loop():
-            """Run the async function in a new event loop"""
             new_loop = asyncio.new_event_loop()
             try:
                 asyncio.set_event_loop(new_loop)
@@ -53,16 +50,13 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
                 asyncio.set_event_loop(None)
 
         try:
-            # Try to get the current event loop
             asyncio.get_running_loop()
-            # If we're in an event loop, run in a thread with a new loop
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_new_loop)
                 model = future.result()
         except RuntimeError:
-            # No event loop running, safe to use asyncio.run()
             model = asyncio.run(
                 provision_langchain_model(
                     str(payload),
@@ -74,7 +68,6 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
 
         ai_message = model.invoke(payload)
 
-        # Clean thinking content from AI response (e.g., <think>...</think> tags)
         content = extract_text_content(ai_message.content)
         cleaned_content = clean_thinking_content(content)
         cleaned_message = ai_message.model_copy(update={"content": cleaned_content})
@@ -87,22 +80,11 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         raise error_class(user_message) from e
 
 
-conn = sqlite3.connect(
-    LANGGRAPH_CHECKPOINT_FILE,
-    check_same_thread=False,
-)
-# WAL mode allows multiple reader processes and serialises writers without
-# returning "database is locked" errors; busy_timeout lets a writer wait up
-# to 5 s for another writer to finish instead of failing immediately.
-conn.execute("PRAGMA journal_mode=WAL")
-conn.execute("PRAGMA busy_timeout=5000")
-memory = SqliteSaver(conn)
-
 agent_state = StateGraph(ThreadState)
 agent_state.add_node("agent", call_model_with_messages)
 agent_state.add_edge(START, "agent")
 agent_state.add_edge("agent", END)
-graph = agent_state.compile(checkpointer=memory)
+graph = agent_state.compile(checkpointer=checkpointer)
 
 
 async def astream_chat_response(
@@ -119,23 +101,27 @@ async def astream_chat_response(
       - {"type": "complete", "content": <full text>}
       - {"type": "error", "message": <user-facing message>}
 
-    On success, persists the human + AI messages back to the LangGraph
-    checkpoint so subsequent ``GET /chat/sessions/{id}`` reflects the
-    exchange.
+    On success, persists the human + AI messages to the LangGraph checkpoint and
+    then durably compresses the checkpoint if it has grown beyond the token budget.
     """
     try:
         config = RunnableConfig(configurable={"thread_id": session_id})
 
-        # Get current messages from checkpoint
         current_state = await asyncio.to_thread(graph.get_state, config=config)
         existing_messages = []
         if current_state and current_state.values:
             existing_messages = current_state.values.get("messages", [])
 
-        # Build state for prompt rendering (mirrors call_model_with_messages)
         human_msg = HumanMessage(content=user_message)
+        all_messages = existing_messages + [human_msg]
+
+        # In-memory compression for this LLM call only.
+        compressed_messages = await compress_chat_history(
+            all_messages, model_id=model_override
+        )
+
         prompt_state = {
-            "messages": existing_messages + [human_msg],
+            "messages": compressed_messages,
             "context": context,
             "model_override": model_override,
             "prompt_template": prompt_template,
@@ -146,12 +132,10 @@ async def astream_chat_response(
         )
         payload = [SystemMessage(content=system_prompt)] + prompt_state["messages"]
 
-        # Provision model
         model = await provision_langchain_model(
             str(payload), model_override, "chat", max_tokens=8192
         )
 
-        # Stream tokens
         full_text_parts: list[str] = []
         try:
             async for chunk in model.astream(payload):
@@ -160,7 +144,6 @@ async def astream_chat_response(
                     full_text_parts.append(content)
                     yield {"type": "delta", "content": content}
         except NotImplementedError:
-            # Fallback: model doesn't support astream — call invoke
             ai = await asyncio.to_thread(model.invoke, payload)
             content = extract_text_content(getattr(ai, "content", ""))
             full_text_parts.append(content)
@@ -169,7 +152,7 @@ async def astream_chat_response(
         full_text = "".join(full_text_parts)
         cleaned = clean_thinking_content(full_text)
 
-        # Persist to checkpoint via add_messages reducer
+        # Persist to checkpoint (add_messages reducer appends).
         ai_message = AIMessage(content=cleaned)
         await asyncio.to_thread(
             graph.update_state,
@@ -178,6 +161,10 @@ async def astream_chat_response(
         )
 
         yield {"type": "complete", "content": cleaned}
+
+        # Durably compress the checkpoint if it has grown too large.
+        await compress_checkpoint_if_needed(graph, config, model_id=model_override)
+
     except OpenNotebookError as e:
         yield {"type": "error", "message": str(e)}
     except Exception as e:

@@ -1383,6 +1383,18 @@ def delete_research_job(job_id: str) -> bool:
     return True
 
 
+def update_report_directly(job_id: str, new_report: str) -> Optional[ResearchJob]:
+    """Replace a report's content verbatim (no AI processing). Persists the change."""
+    job = _get_job(job_id)
+    if not job or not job.result:
+        return None
+    job.result.report = new_report.strip()
+    job.updated_at = _now_iso()
+    _persist_job(job)
+    logger.info(f"Directly updated research report {job_id} ({len(new_report)} chars)")
+    return job
+
+
 async def revise_research_report(
     job_id: str, instruction: str, model_id: Optional[str] = None
 ) -> Optional[ResearchJob]:

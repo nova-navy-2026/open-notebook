@@ -261,7 +261,7 @@ async def create_session(
         # Create new session
         session = ChatSession(
             title=request.title
-            or f"Chat Session {asyncio.get_event_loop().time():.0f}",
+            or f"Chat Session {asyncio.get_running_loop().time():.0f}",
             model_override=request.model_override,
             owner=user_id,
         )
@@ -527,10 +527,11 @@ async def execute_chat(
         user_message = HumanMessage(content=request.message)
         state_values["messages"].append(user_message)
 
-        # Execute chat graph
-        result = chat_graph.invoke(
-            input=state_values,  # type: ignore[arg-type]
-            config=RunnableConfig(
+        # Execute chat graph (wrapped in thread — SqliteSaver is sync).
+        result = await asyncio.to_thread(
+            chat_graph.invoke,
+            state_values,
+            RunnableConfig(
                 configurable={
                     "thread_id": full_session_id,
                     "model_id": model_override,
