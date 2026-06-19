@@ -4,6 +4,12 @@ const nextConfig: NextConfig = {
   // Enable standalone output for optimized Docker deployment
   output: "standalone",
 
+  // Hosts allowed to load Next.js dev resources (HMR / webpack) when running
+  // `next dev` behind a domain/reverse proxy. Without this, Next.js blocks the
+  // dev assets cross-origin and the app renders a blank page. Only relevant in
+  // dev mode — a production build (`next build` + `next start`) ignores this.
+  allowedDevOrigins: ["marinha.novasearch.org"],
+
   // Pin the workspace root to this directory.
   // An orphan package-lock.json in the parent (open-notebook/) makes Next.js
   // infer the wrong root, breaking module resolution (e.g. tailwindcss).
