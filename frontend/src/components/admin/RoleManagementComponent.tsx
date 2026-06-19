@@ -45,7 +45,7 @@ interface UserWithRoles {
   email: string;
   name?: string;
   roles: UserRole[];
-  provider: "local" | "azure" | "google" | "github";
+  provider: "local" | "azure";
 }
 
 export function RoleManagementComponent() {

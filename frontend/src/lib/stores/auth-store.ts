@@ -10,7 +10,7 @@ export interface UserInfo {
   email: string;
   name?: string;
   roles: UserRole[];
-  provider?: "local" | "azure" | "google" | "github";
+  provider?: "local" | "azure";
   avatar?: string;
 }
 
@@ -80,16 +80,16 @@ interface AuthState {
   authRequired: boolean | null;
   // New additions for OAuth and RBAC
   oauthState?: string;
-  oauthProvider?: "azure" | "google" | "github";
+  oauthProvider?: "azure";
 
   setHasHydrated: (state: boolean) => void;
   checkAuthRequired: () => Promise<boolean>;
   login: (email: string, password: string) => Promise<boolean>;
-  loginWithOAuth: (provider: "azure" | "google" | "github") => Promise<string>;
+  loginWithOAuth: (provider: "azure") => Promise<string>;
   handleOAuthCallback: (
     code: string,
     state: string,
-    provider: "azure" | "google" | "github",
+    provider: "azure",
   ) => Promise<boolean>;
   logout: () => void;
   checkAuth: () => Promise<boolean>;
@@ -266,7 +266,7 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      loginWithOAuth: async (provider: "azure" | "google" | "github") => {
+      loginWithOAuth: async (provider: "azure") => {
         set({ isLoading: true, error: null, oauthProvider: provider });
         try {
           const apiUrl = await getApiUrl();
@@ -307,7 +307,7 @@ export const useAuthStore = create<AuthState>()(
       handleOAuthCallback: async (
         code: string,
         state: string,
-        provider: "azure" | "google" | "github",
+        provider: "azure",
       ) => {
         set({ isLoading: true, error: null });
         try {

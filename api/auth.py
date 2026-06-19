@@ -39,6 +39,22 @@ def is_admin(request: Request) -> bool:
     return "admin" in roles
 
 
+def assert_owns(resource_owner: Optional[str], request: Request) -> None:
+    """Fail-closed per-user ownership check for direct-by-ID access.
+
+    Raises 404 (not 403, to avoid leaking that the resource exists) unless the
+    caller owns the resource or is an admin. Resources with no owner
+    (``owner is None``) are treated as private to admins — they are NOT public.
+    Use this on every GET/PUT/DELETE-by-id and link endpoint so that list
+    filtering (which already scopes by owner) cannot be bypassed via a known id.
+    """
+    if is_admin(request):
+        return
+    user_id = getattr(request.state, "user_id", "anonymous")
+    if resource_owner is None or resource_owner != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 def get_navy_acl_user_id(request: Request) -> Optional[str]:
     """FastAPI dependency that returns the navy user id to use for ACL filtering.
 

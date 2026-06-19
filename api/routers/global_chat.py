@@ -45,16 +45,15 @@ def _owner_tag(user_id: str) -> str:
 
 
 def _session_belongs_to_user(session: "ChatSession", user_id: str) -> bool:
-    """Return True if the session is owned by ``user_id``.
+    """Return True only if the session is owned by ``user_id`` (fail-closed).
 
-    Sessions created before per-user isolation (owner=None or
-    owner=GLOBAL_CHAT_TAG) are treated as legacy and accessible by any
-    authenticated user, the same way notebooks without an owner are handled.
+    Sessions created before per-user isolation (owner=None or the old shared
+    GLOBAL_CHAT_TAG) are NOT treated as public — they are denied to regular
+    users, so one user can never read another user's global chat history.
     """
     owner = getattr(session, "owner", None)
-    # Legacy: no owner set, or the old hardcoded tag — accessible to all.
     if not owner or owner == GLOBAL_CHAT_TAG:
-        return True
+        return False
     return owner == _owner_tag(user_id)
 
 
@@ -396,18 +395,15 @@ def _format_global_context_for_prompt(context: Dict[str, Any]) -> str:
 
 
 async def _get_global_sessions(user_id: str) -> List[ChatSession]:
-    """Return all chat sessions tagged as global for the given user.
+    """Return the global chat sessions owned by the given user (fail-closed).
 
-    Includes legacy sessions (owner IS NULL or owner = 'global_chat') so
-    that pre-existing sessions remain visible and deletable by the current
-    user.
+    Legacy sessions (owner IS NULL or the old shared 'global_chat' tag) are NOT
+    returned to regular users, so global chat history never leaks across users.
     """
     rows = await repo_query(
         "SELECT * FROM chat_session WHERE owner = $tag "
-        "OR owner IS NULL "
-        "OR owner = $legacy_tag "
         "ORDER BY updated DESC",
-        {"tag": _owner_tag(user_id), "legacy_tag": GLOBAL_CHAT_TAG},
+        {"tag": _owner_tag(user_id)},
     )
     sessions: List[ChatSession] = []
     for row in rows:

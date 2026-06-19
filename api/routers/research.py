@@ -37,8 +37,9 @@ router = APIRouter()
 
 
 def _object_belongs_to_user(obj, user_id: str) -> bool:
+    # Fail-closed: ownerless objects are not public.
     owner = getattr(obj, "owner", None)
-    return owner is None or owner == user_id
+    return owner is not None and owner == user_id
 
 
 def _job_visible_to_user(job, navy_user_id: Optional[str], auth_user_id: str) -> bool:

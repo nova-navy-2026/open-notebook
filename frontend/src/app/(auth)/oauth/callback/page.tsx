@@ -27,10 +27,8 @@ export default function OAuthCallbackPage() {
         // Extract OAuth parameters from URL
         const code = searchParams.get("code");
         const state = searchParams.get("state");
-        const provider = (searchParams.get("provider") || "azure") as
-          | "azure"
-          | "google"
-          | "github";
+        // Only Azure AD is supported as an OAuth provider.
+        const provider = "azure" as const;
 
         if (!code) {
           const errorCode = searchParams.get("error");

@@ -42,7 +42,9 @@ OPENSEARCH_SCHEME = os.environ.get("OPENSEARCH_SCHEME", "https").strip()
 OPENSEARCH_URL_PREFIX = os.environ.get("OPENSEARCH_URL_PREFIX", "").strip().strip("/")
 OPENSEARCH_USER = os.environ.get("OPENSEARCH_USER", "").strip()
 OPENSEARCH_PASSWORD = os.environ.get("OPENSEARCH_PASSWORD", "").strip()
-OPENSEARCH_INDEX_PREFIX = os.environ.get("OPENSEARCH_INDEX_PREFIX", "open_notebook").strip()
+# Default to the navy corpus index — it is the only index this deployment has.
+# (Override with OPENSEARCH_INDEX_PREFIX only if a separate user-sources index exists.)
+OPENSEARCH_INDEX_PREFIX = os.environ.get("OPENSEARCH_INDEX_PREFIX", "amalia_navy_test").strip()
 OPENSEARCH_VERIFY_CERTS = os.environ.get(
     "OPENSEARCH_VERIFY_CERTS", "true"
 ).strip().lower() in ("true", "1", "yes")

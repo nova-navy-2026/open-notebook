@@ -2,13 +2,13 @@ import asyncio
 import json
 from typing import AsyncGenerator, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from api.auth import get_current_user_id
+from api.auth import assert_owns, get_current_user_id
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Source
 from open_notebook.exceptions import (
@@ -90,6 +90,7 @@ class SuccessResponse(BaseModel):
 )
 async def create_source_chat_session(
     request: CreateSourceChatSessionRequest,
+    http_request: Request,
     source_id: str = Path(..., description="Source ID"),
     _user_id: str = Depends(get_current_user_id),
 ):
@@ -102,6 +103,7 @@ async def create_source_chat_session(
         source = await Source.get(full_source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
 
         # Create new session with model_override support
         session = ChatSession(
@@ -135,6 +137,7 @@ async def create_source_chat_session(
     "/sources/{source_id}/chat/sessions", response_model=List[SourceChatSessionResponse]
 )
 async def get_source_chat_sessions(
+    http_request: Request,
     source_id: str = Path(..., description="Source ID"),
     _user_id: str = Depends(get_current_user_id),
 ):
@@ -147,6 +150,7 @@ async def get_source_chat_sessions(
         source = await Source.get(full_source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
 
         # Get sessions that refer to this source - first get relations, then sessions
         relations = await repo_query(
@@ -198,6 +202,7 @@ async def get_source_chat_sessions(
     response_model=SourceChatSessionWithMessagesResponse,
 )
 async def get_source_chat_session(
+    http_request: Request,
     source_id: str = Path(..., description="Source ID"),
     session_id: str = Path(..., description="Session ID"),
     _user_id: str = Depends(get_current_user_id),
@@ -211,6 +216,7 @@ async def get_source_chat_session(
         source = await Source.get(full_source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
 
         # Get session
         full_session_id = (
@@ -297,6 +303,7 @@ async def get_source_chat_session(
 )
 async def update_source_chat_session(
     request: UpdateSourceChatSessionRequest,
+    http_request: Request,
     source_id: str = Path(..., description="Source ID"),
     session_id: str = Path(..., description="Session ID"),
     _user_id: str = Depends(get_current_user_id),
@@ -310,6 +317,7 @@ async def update_source_chat_session(
         source = await Source.get(full_source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
 
         # Get session
         full_session_id = (
@@ -368,6 +376,7 @@ async def update_source_chat_session(
     "/sources/{source_id}/chat/sessions/{session_id}", response_model=SuccessResponse
 )
 async def delete_source_chat_session(
+    http_request: Request,
     source_id: str = Path(..., description="Source ID"),
     session_id: str = Path(..., description="Session ID"),
     _user_id: str = Depends(get_current_user_id),
@@ -381,6 +390,7 @@ async def delete_source_chat_session(
         source = await Source.get(full_source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
 
         # Get session
         full_session_id = (
@@ -441,6 +451,7 @@ async def stream_source_chat_response(
 @router.post("/sources/{source_id}/chat/sessions/{session_id}/messages")
 async def send_message_to_source_chat(
     request: SendMessageRequest,
+    http_request: Request,
     source_id: str = Path(..., description="Source ID"),
     session_id: str = Path(..., description="Session ID"),
     _user_id: str = Depends(get_current_user_id),
@@ -454,6 +465,7 @@ async def send_message_to_source_chat(
         source = await Source.get(full_source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
 
         # Verify session exists and is related to source
         full_session_id = (
