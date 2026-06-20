@@ -89,26 +89,39 @@ export function useSourceChat(sourceId: string) {
     }
   })
 
-  // Delete session mutation
+  // Delete session mutation (optimistic: remove instantly, roll back on failure)
   const deleteSessionMutation = useMutation({
-    mutationFn: (sessionId: string) => 
+    mutationFn: (sessionId: string) =>
       sourceChatApi.deleteSession(sourceId, sessionId),
-    onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
-      // Drop the cached session so its stale messages cannot repopulate
-      // the panel after we clear it below.
-      queryClient.removeQueries({ queryKey: ['sourceChatSession', sourceId, deletedId] })
+    onMutate: async (deletedId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['sourceChatSessions', sourceId] })
+      const previousSessions = queryClient.getQueryData<SourceChatSession[]>(['sourceChatSessions', sourceId])
+      queryClient.setQueryData<SourceChatSession[]>(
+        ['sourceChatSessions', sourceId],
+        (old) => (Array.isArray(old) ? old.filter((s) => s.id !== deletedId) : old),
+      )
       if (currentSessionId === deletedId) {
         autoSelectedRef.current = true
         setCurrentSessionId(null)
         setMessages([])
       }
-      toast.success(t.chat.sessionDeleted)
+      return { previousSessions }
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _deletedId, context) => {
+      if (context?.previousSessions !== undefined) {
+        queryClient.setQueryData(['sourceChatSessions', sourceId], context.previousSessions)
+      }
       const error = err as { response?: { data?: { detail?: string } }, message?: string };
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
-    }
+    },
+    onSuccess: (_, deletedId) => {
+      // Drop the cached session so its stale messages cannot repopulate the panel.
+      queryClient.removeQueries({ queryKey: ['sourceChatSession', sourceId, deletedId] })
+      toast.success(t.chat.sessionDeleted)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+    },
   })
 
   // Send message with streaming

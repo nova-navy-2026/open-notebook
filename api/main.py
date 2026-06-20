@@ -3,9 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+import secrets
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -90,6 +95,35 @@ async def lifespan(app: FastAPI):
             "OPEN_NOTEBOOK_ENCRYPTION_KEY not set. "
             "API key encryption will fail until this is configured. "
             "Set OPEN_NOTEBOOK_ENCRYPTION_KEY to any secret string."
+        )
+
+    # Production-readiness security checks. Loud warnings (or hard failure in
+    # strict mode) when insecure defaults are detected. Set APP_ENV=production
+    # and STRICT_SECURITY=1 to refuse to boot with insecure config.
+    _strict = os.environ.get("STRICT_SECURITY", "").lower() in ("1", "true", "yes")
+    _problems: list[str] = []
+    _jwt = os.environ.get("JWT_SECRET", "")
+    if not _jwt or "change-me" in _jwt.lower():
+        _problems.append(
+            "JWT_SECRET is unset or still the default — anyone can forge login "
+            "tokens. Set it to a long random secret (e.g. `openssl rand -hex 32`)."
+        )
+    _admin_pw = os.environ.get("ADMIN_PASSWORD", "")
+    if _admin_pw and _admin_pw.lower() in ("admin", "password", "changeme", "open-notebook"):
+        _problems.append(
+            "ADMIN_PASSWORD is a trivial/default value — set a strong admin password."
+        )
+    if not get_secret_from_env("OPEN_NOTEBOOK_PASSWORD") and not _admin_pw:
+        _problems.append(
+            "No OPEN_NOTEBOOK_PASSWORD and no ADMIN_PASSWORD set — the API may "
+            "accept unauthenticated (anonymous) requests."
+        )
+    for _p in _problems:
+        logger.warning(f"[SECURITY] {_p}")
+    if _problems and _strict:
+        raise RuntimeError(
+            "STRICT_SECURITY is on and insecure configuration was detected: "
+            + " | ".join(_problems)
         )
 
     # Run database migrations
@@ -332,7 +366,49 @@ app = FastAPI(
     title="Open Notebook API",
     description="API for Open Notebook - Research Assistant",
     lifespan=lifespan,
+    # Disable the public auto-generated docs. Custom admin-protected routes for
+    # /docs, /redoc and /openapi.json are registered below so the full API
+    # surface is not exposed to anonymous users in production.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+# ── Admin-only API docs ────────────────────────────────────────────────────
+# Swagger/ReDoc/OpenAPI are gated behind HTTP Basic auth using the admin
+# account (ADMIN_EMAIL / ADMIN_PASSWORD). The browser prompts for credentials
+# and reuses them for the /openapi.json fetch. These paths are exempt from the
+# JWT/password middleware (see EXEMPT_PATHS), so this Basic check is the gate.
+_docs_basic = HTTPBasic(auto_error=True)
+
+
+def _require_docs_admin(credentials: HTTPBasicCredentials = Depends(_docs_basic)) -> bool:
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@open-notebook.local")
+    admin_pw = os.environ.get("ADMIN_PASSWORD", "")
+    user_ok = secrets.compare_digest(credentials.username, admin_email)
+    pw_ok = bool(admin_pw) and secrets.compare_digest(credentials.password, admin_pw)
+    if not (user_ok and pw_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Admin authentication required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def _protected_openapi(_: bool = Depends(_require_docs_admin)):
+    return app.openapi()
+
+
+@app.get("/docs", include_in_schema=False)
+async def _protected_swagger(_: bool = Depends(_require_docs_admin)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="Open Notebook API — Docs")
+
+
+@app.get("/redoc", include_in_schema=False)
+async def _protected_redoc(_: bool = Depends(_require_docs_admin)):
+    return get_redoc_html(openapi_url="/openapi.json", title="Open Notebook API — ReDoc")
 
 # Middleware execution order: last-added = outermost = runs first.
 # Desired request flow: AuditLogging → CORS → JWT → RBAC → PasswordAuth → App
@@ -352,10 +428,21 @@ app.add_middleware(
 )
 app.add_middleware(RBACMiddleware)
 app.add_middleware(JWTAuthMiddleware)
+# CORS origins are configurable for production. Set CORS_ALLOW_ORIGINS to a
+# comma-separated allowlist (e.g. "https://marinha.novasearch.org"); leave unset
+# (or "*") for open access in development.
+_cors_raw = os.environ.get("CORS_ALLOW_ORIGINS", "*").strip()
+_cors_origins = (
+    ["*"]
+    if _cors_raw in ("", "*")
+    else [o.strip() for o in _cors_raw.split(",") if o.strip()]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # Wildcard origin + credentials is invalid per the CORS spec and rejected by
+    # browsers; only enable credentials when an explicit allowlist is set.
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

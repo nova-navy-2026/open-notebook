@@ -12,6 +12,7 @@ import {
   NotebookChatMessage,
   UpdateGlobalChatSessionRequest,
   GlobalChatContextStats,
+  GlobalChatSession,
 } from '@/lib/types/api'
 import {
   formatDeepResearchCompletion,
@@ -267,18 +268,22 @@ export function useGlobalChat() {
   const deleteSessionMutation = useMutation({
     mutationFn: (sessionId: string) =>
       globalChatApi.deleteSession(sessionId),
-    onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.globalChatSessions
-      })
-      // Drop the cached session so the messages effect can't repopulate
-      // from stale data after we clear it below.
-      queryClient.removeQueries({
-        queryKey: QUERY_KEYS.globalChatSession(deletedId)
-      })
-      if (currentSessionId === deletedId) {
-        // Mark auto-select as already done so we don't immediately
-        // jump into another session — the user wants the panel cleared.
+    // Optimistic delete: remove the session from the UI instantly and fire the
+    // request in the background. If the server rejects it, we roll back and the
+    // session reappears with an error toast.
+    onMutate: async (deletedId: string) => {
+      await queryClient.cancelQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+      const previousSessions = queryClient.getQueryData<GlobalChatSession[]>(
+        QUERY_KEYS.globalChatSessions,
+      )
+      // Remove from the sidebar list immediately.
+      queryClient.setQueryData<GlobalChatSession[]>(
+        QUERY_KEYS.globalChatSessions,
+        (old) => (Array.isArray(old) ? old.filter((s) => s.id !== deletedId) : old),
+      )
+      // If the deleted session was open, clear the panel immediately too.
+      const wasActive = currentSessionId === deletedId
+      if (wasActive) {
         autoSelectedRef.current = true
         hasLocalMultimodalMessagesRef.current = false
         localMessagesDirtyRef.current = false
@@ -290,12 +295,26 @@ export function useGlobalChat() {
         setCurrentSessionId(null)
         setMessages([])
       }
-      toast.success(t.chat.sessionDeleted)
+      return { previousSessions, wasActive }
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _deletedId, context) => {
+      // Roll back the optimistic removal.
+      if (context?.previousSessions !== undefined) {
+        queryClient.setQueryData(QUERY_KEYS.globalChatSessions, context.previousSessions)
+      }
       const error = err as { response?: { data?: { detail?: string } }, message?: string }
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
-    }
+    },
+    onSuccess: (_, deletedId) => {
+      queryClient.removeQueries({
+        queryKey: QUERY_KEYS.globalChatSession(deletedId),
+      })
+      toast.success(t.chat.sessionDeleted)
+    },
+    // Reconcile with the server in the background (confirms the delete).
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+    },
   })
 
   // Send message

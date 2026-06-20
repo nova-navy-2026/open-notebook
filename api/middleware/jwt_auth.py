@@ -4,6 +4,7 @@ Verifies JWT tokens and sets user context in requests.
 Falls back to password authentication if JWT is not provided.
 """
 
+import os
 from typing import Optional
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -103,12 +104,21 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         
         # No valid JWT token - try password authentication
         if not self.password:
-            # No auth method configured, allow access
-            logger.debug("ℹ️ No authentication configured, allowing access")
-            request.state.user = {"id": "anonymous", "email": "anonymous", "roles": ["viewer"]}
-            request.state.user_id = "anonymous"
-            request.state.user_role = "viewer"
-            return await call_next(request)
+            # No password configured. Fail-closed by default: deny unauthenticated
+            # requests so the API never silently grants anonymous access in
+            # production. Set ALLOW_ANONYMOUS=1 to restore the old open-access
+            # behaviour (development / single-user only).
+            if os.environ.get("ALLOW_ANONYMOUS", "").lower() in ("1", "true", "yes"):
+                logger.debug("ℹ️ ALLOW_ANONYMOUS set — allowing unauthenticated access")
+                request.state.user = {"id": "anonymous", "email": "anonymous", "roles": ["viewer"]}
+                request.state.user_id = "anonymous"
+                request.state.user_role = "viewer"
+                return await call_next(request)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         
         # Check password auth header
         if not auth_header:

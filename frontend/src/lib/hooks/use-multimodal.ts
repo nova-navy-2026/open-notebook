@@ -294,20 +294,36 @@ export function useMultimodalChat({
 
   const deleteSessionMutation = useMutation({
     mutationFn: (sessionId: string) => chatApi.deleteSession(sessionId),
-    onSuccess: (_result, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
-      queryClient.removeQueries({ queryKey: QUERY_KEYS.notebookChatSession(deletedId) })
+    // Optimistic delete: remove instantly, roll back if the server rejects it.
+    onMutate: async (deletedId: string) => {
+      const key = QUERY_KEYS.notebookChatSessions(notebookId)
+      await queryClient.cancelQueries({ queryKey: key })
+      const previousSessions = queryClient.getQueryData<{ id: string }[]>(key)
+      queryClient.setQueryData<{ id: string }[]>(
+        key,
+        (old) => (Array.isArray(old) ? old.filter((s) => s.id !== deletedId) : old),
+      )
       if (currentSessionId === deletedId) {
         autoSelectedRef.current = true
         syncedSessionRef.current = null
         setCurrentSessionId(null)
         setMessages([])
       }
-      toast.success(t.chat.sessionDeleted)
+      return { previousSessions }
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _deletedId, context) => {
+      if (context?.previousSessions !== undefined) {
+        queryClient.setQueryData(QUERY_KEYS.notebookChatSessions(notebookId), context.previousSessions)
+      }
       const error = err as { response?: { data?: { detail?: string } }; message?: string }
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
+    },
+    onSuccess: (_result, deletedId) => {
+      queryClient.removeQueries({ queryKey: QUERY_KEYS.notebookChatSession(deletedId) })
+      toast.success(t.chat.sessionDeleted)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
     },
   })
 
