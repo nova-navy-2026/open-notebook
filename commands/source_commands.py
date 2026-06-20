@@ -35,6 +35,7 @@ class SourceProcessingInput(CommandInput):
     notebook_ids: List[str]
     transformations: List[str]
     embed: bool
+    language: Optional[str] = None
 
 
 class SourceProcessingOutput(CommandOutput):
@@ -80,6 +81,7 @@ async def process_source_command(
         logger.info(f"Notebook IDs: {input_data.notebook_ids}")
         logger.info(f"Transformations: {input_data.transformations}")
         logger.info(f"Embed: {input_data.embed}")
+        logger.info(f"Caption language: {input_data.language or 'default'}")
 
         # 1. Load transformation objects from IDs
         transformations = []
@@ -118,6 +120,7 @@ async def process_source_command(
                 "apply_transformations": transformations,
                 "embed": input_data.embed,
                 "source_id": input_data.source_id,  # Add the source_id to the state
+                "caption_language": input_data.language,
             }
         )
 

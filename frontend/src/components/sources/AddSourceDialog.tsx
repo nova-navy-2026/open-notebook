@@ -90,7 +90,7 @@ export function AddSourceDialog({
   onOpenChange, 
   defaultNotebookId 
 }: AddSourceDialogProps) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
 
   const WIZARD_STEPS: readonly WizardStep[] = [
     { number: 1, title: t.sources.addSource, description: t.sources.processDescription },
@@ -307,6 +307,7 @@ export function AddSourceDialog({
       content: data.type === 'text' ? data.content : undefined,
       title: data.title,
       transformations: selectedTransformations,
+      language,
       embed: data.embed,
       delete_source: false,
       async_processing: true,
@@ -357,6 +358,7 @@ export function AddSourceDialog({
           notebooks: selectedNotebooks,
           url: item.type === 'url' ? item.value as string : undefined,
           transformations: selectedTransformations,
+          language,
           embed: data.embed,
           delete_source: false,
           async_processing: true,

@@ -50,7 +50,7 @@ async function formatChartResponse(
     parts.push(`![Gráfico gerado](${imageUrl})`)
   }
   if (tablePreview) {
-    parts.push(`<details>\n<summary>Pré-visualização dos dados</summary>\n\n${tablePreview}\n\n</details>`)
+    parts.push(`### Pré-visualização dos dados\n\n${tablePreview}`)
   }
   return parts.filter((part) => part && part.trim()).join('\n\n')
 }

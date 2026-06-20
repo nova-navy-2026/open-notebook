@@ -6,6 +6,7 @@ importing its modules directly.  The server URL is configured via the
 NOVA_RESEARCHER_URL environment variable (default: http://localhost:8001).
 """
 
+import asyncio
 import json
 import os
 import re
@@ -20,12 +21,14 @@ from pydantic import BaseModel
 
 from open_notebook.access_control import build_opensearch_filter
 from open_notebook.config import DATA_FOLDER, NAVY_OPENSEARCH_INDEX
+from open_notebook.database.repository import ensure_record_id, repo_query
 
 # NOVA-Researcher API base URL
 NOVA_RESEARCHER_URL = os.environ.get("NOVA_RESEARCHER_URL", "http://localhost:3800").rstrip("/")
 RESPONSE_LANGUAGE_POLICY = (
     "português europeu (pt-PT) por defeito; se o utilizador escrever claramente "
-    "noutro idioma, responde nesse idioma"
+    "noutro idioma, responde nesse idioma; quando responderes em português, usa "
+    "português europeu e não português do Brasil"
 )
 # RESPONSE_LANGUAGE_POLICY = "português europeu (pt-PT)"
 
@@ -90,11 +93,18 @@ class ResearchRequest(BaseModel):
     # Authenticated user id (e.g. "m24409"). Used to build the navy
     # OpenSearch access-control filter (classification + department).
     user_id: Optional[str] = None
+    # Platform/app user id. Used to load private uploads from SurrealDB.
+    auth_user_id: str = "anonymous"
     # Optional response language (human-readable, e.g. "English" or
     # "português europeu (pt-PT)"). Used by retrieval-free flows such as the
     # meeting-minutes (ATA) path so the output matches the conversation
     # language. When None, falls back to RESPONSE_LANGUAGE_POLICY.
     language: Optional[str] = None
+    # Transcript document style for the meeting-minutes path:
+    # "ata" | "conversation" | "summary" | "literal". When None, defaults to ATA.
+    report_style: Optional[str] = None
+    # Optional user-supplied document title.
+    title: Optional[str] = None
 
 
 class RetrievedDocument(BaseModel):
@@ -135,6 +145,7 @@ class ResearchJob(BaseModel):
     tone: Optional[str] = None
     model_id: Optional[str] = None
     notebook_id: Optional[str] = None
+    updated_at: Optional[str] = None
     # Authenticated user id this job belongs to. Used to enforce that users
     # only see / poll / delete their own research reports.
     user_id: Optional[str] = None
@@ -144,6 +155,68 @@ class ResearchJob(BaseModel):
 
 _jobs_file = os.path.join(DATA_FOLDER, "research_jobs.json")
 _jobs: Dict[str, ResearchJob] = {}
+_running_jobs: Dict[str, ResearchJob] = {}
+_background_tasks: set[asyncio.Task] = set()
+RESEARCH_JOB_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_JOB_TIMEOUT_SECONDS", "2700"))
+RESEARCH_JOB_STALE_SECONDS = int(os.environ.get("RESEARCH_JOB_STALE_SECONDS", "3600"))
+RESEARCH_PREFETCH_TIMEOUT_SECONDS = float(os.environ.get("RESEARCH_PREFETCH_TIMEOUT_SECONDS", "45"))
+RESEARCH_MAX_APP_DOCS = int(os.environ.get("RESEARCH_MAX_APP_DOCS", "25"))
+RESEARCH_MAX_APP_DOC_CHARS = int(os.environ.get("RESEARCH_MAX_APP_DOC_CHARS", "12000"))
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_job_time(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None
+
+
+def _mark_stale_job_if_needed(job: ResearchJob) -> bool:
+    if job.status not in ("pending", "running"):
+        return False
+    reference = _parse_job_time(job.updated_at) or _parse_job_time(job.created_at)
+    if not reference:
+        return False
+    age_seconds = (datetime.now(timezone.utc) - reference).total_seconds()
+    if age_seconds <= RESEARCH_JOB_STALE_SECONDS:
+        return False
+
+    job.status = "failed"
+    job.error = (
+        "Research job timed out without progress. "
+        "It may have been interrupted or the research backend stopped responding."
+    )
+    job.progress = "Falhou (sem progresso durante demasiado tempo)"
+    job.updated_at = _now_iso()
+    logger.warning(
+        f"Marked stale research job {job.id} as failed after {int(age_seconds)}s without progress"
+    )
+    return True
+
+
+def _read_jobs_from_disk() -> Dict[str, ResearchJob]:
+    if not os.path.exists(_jobs_file):
+        return {}
+    with open(_jobs_file, "r", encoding="utf-8") as f:
+        data = json.load(f) or {}
+    return {jid: ResearchJob.model_validate(raw) for jid, raw in data.items()}
+
+
+def _job_time(value: Any) -> Optional[datetime]:
+    if isinstance(value, dict):
+        return _parse_job_time(value.get("updated_at")) or _parse_job_time(value.get("created_at"))
+    return _parse_job_time(getattr(value, "updated_at", None)) or _parse_job_time(
+        getattr(value, "created_at", None)
+    )
 
 
 def _save_jobs(_deleted: Optional[set] = None) -> None:
@@ -176,8 +249,29 @@ def _save_jobs(_deleted: Optional[set] = None) -> None:
             for jid in _deleted:
                 merged.pop(jid, None)
 
-        # … then overlay this worker's view (we own the latest state for our jobs).
+        # Active background jobs are the authoritative in-process objects for
+        # this worker. Polling can refresh _jobs from disk, so restore these
+        # references before serialising or progress/completion updates can be
+        # overwritten by stale disk snapshots.
+        _jobs.update(_running_jobs)
+
+        # … then overlay this worker's view when it is at least as recent as
+        # the on-disk state. This avoids resurrecting stale "running" jobs from
+        # a polling worker after another worker already persisted completion.
         for jid, job in _jobs.items():
+            existing = merged.get(jid)
+            if existing:
+                existing_time = _job_time(existing)
+                job_time = _job_time(job)
+                if existing_time and job_time and existing_time > job_time:
+                    continue
+                existing_status = str(existing.get("status") or "")
+                if (
+                    existing_status in ("completed", "failed")
+                    and job.status in ("pending", "running")
+                    and (not job_time or not existing_time or existing_time >= job_time)
+                ):
+                    continue
             merged[jid] = job.model_dump()
 
         # Write to a sibling temp file then rename so readers on other workers
@@ -198,30 +292,30 @@ def _save_jobs(_deleted: Optional[set] = None) -> None:
         logger.warning(f"Could not save research jobs to disk: {exc}")
 
 
+def _persist_job(job: ResearchJob) -> None:
+    _jobs[job.id] = job
+    _save_jobs()
+
+
 def _load_jobs() -> None:
     """Load persisted research jobs from disk on startup.
 
-    Any job left in ``pending`` or ``running`` state is considered orphaned
-    (the API process died mid-execution) and is marked as ``failed`` so the
-    UI does not show a forever-spinning progress bar.
+    Active jobs are only marked failed after a stale-progress threshold. This
+    avoids incorrectly failing a job owned by another worker during rolling
+    startup, while still preventing forever-spinning progress bars.
     """
     if not os.path.exists(_jobs_file):
         return
     try:
-        with open(_jobs_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        _jobs.update({jid: ResearchJob.model_validate(job) for jid, job in data.items()})
+        _jobs.update(_read_jobs_from_disk())
 
-        orphaned = 0
+        stale = 0
         for job in _jobs.values():
-            if job.status in ("pending", "running"):
-                job.status = "failed"
-                job.error = "Interrupted: server restarted while job was running"
-                job.progress = "Falhou (servidor reiniciado)"
-                orphaned += 1
-        if orphaned:
+            if _mark_stale_job_if_needed(job):
+                stale += 1
+        if stale:
             _save_jobs()
-            logger.warning(f"Marked {orphaned} orphaned research job(s) as failed on startup")
+            logger.warning(f"Marked {stale} stale research job(s) as failed on startup")
 
         logger.info(f"Loaded {len(_jobs)} research jobs from disk")
     except Exception as exc:
@@ -232,39 +326,51 @@ _load_jobs()
 
 
 def _get_job(job_id: str) -> Optional[ResearchJob]:
-    job = _jobs.get(job_id)
-    if job is not None:
-        return job
-    # Job may have been created by a different Uvicorn worker — fall back to disk.
-    # Retry a few times with brief sleeps to survive a concurrent atomic rename.
+    active_job = _running_jobs.get(job_id)
+    if active_job is not None:
+        if _mark_stale_job_if_needed(active_job):
+            _persist_job(active_job)
+        return active_job
+
+    # Always refresh from disk first. In multi-worker deployments, the worker
+    # receiving the poll may have a stale in-memory copy while another worker
+    # has already completed and persisted the job.
     import time
     for attempt in range(4):
         try:
-            if os.path.exists(_jobs_file):
-                with open(_jobs_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if job_id in data:
-                    loaded = ResearchJob.model_validate(data[job_id])
-                    _jobs[job_id] = loaded  # cache locally for subsequent polls
-                    return loaded
+            disk_jobs = _read_jobs_from_disk()
+            if job_id in disk_jobs:
+                loaded = disk_jobs[job_id]
+                _jobs[job_id] = loaded
+                if _mark_stale_job_if_needed(loaded):
+                    _save_jobs()
+                return loaded
         except Exception as exc:
             logger.debug(f"Could not reload job {job_id} from disk (attempt {attempt+1}): {exc}")
         if attempt < 3:
             time.sleep(0.05 * (2 ** attempt))  # 50ms, 100ms, 200ms
-    return None
+
+    job = _jobs.get(job_id)
+    if job and _mark_stale_job_if_needed(job):
+        _save_jobs()
+    return job
 
 
 def _list_jobs() -> List[ResearchJob]:
-    # Merge any jobs persisted by other workers that we haven't seen yet.
+    # Refresh all jobs from disk so listing does not preserve stale active
+    # state in a worker-local cache.
     try:
-        if os.path.exists(_jobs_file):
-            with open(_jobs_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for jid, raw in data.items():
-                if jid not in _jobs:
-                    _jobs[jid] = ResearchJob.model_validate(raw)
+        disk_jobs = _read_jobs_from_disk()
+        if disk_jobs:
+            _jobs.update(disk_jobs)
+        _jobs.update(_running_jobs)
     except Exception as exc:
         logger.debug(f"Could not merge jobs from disk: {exc}")
+    changed = False
+    for job in _jobs.values():
+        changed = _mark_stale_job_if_needed(job) or changed
+    if changed:
+        _save_jobs()
     return sorted(_jobs.values(), key=lambda j: j.created_at, reverse=True)
 
 
@@ -319,6 +425,7 @@ async def _prefetch_opensearch_docs(
                 "max_results": max_results,
                 "retriever_filter": build_opensearch_filter(user_id),
             },
+            timeout=RESEARCH_PREFETCH_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -328,6 +435,119 @@ async def _prefetch_opensearch_docs(
     except Exception as exc:
         logger.error(f"OpenSearch pre-fetch via API failed: {exc}")
         return []
+
+
+def _research_terms(query: str) -> List[str]:
+    words = re.findall(r"[\wÀ-ÿ]{3,}", (query or "").lower())
+    stop = {
+        "com", "das", "dos", "para", "por", "que", "uma", "este", "esta",
+        "isto", "sobre", "the", "and", "for", "with", "what", "from",
+    }
+    return [word for word in words if word not in stop]
+
+
+def _row_to_research_document(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    source_id = str(row.get("id") or "")
+    title = str(row.get("title") or row.get("file_name") or source_id or "Source")
+    caption = str(row.get("caption") or "")
+    full_text = str(row.get("full_text") or "")
+    content = "\n\n".join(part for part in [caption, full_text] if part.strip()).strip()
+    if not content:
+        return None
+    if len(content) > RESEARCH_MAX_APP_DOC_CHARS:
+        content = content[:RESEARCH_MAX_APP_DOC_CHARS].rstrip() + "\n\n[excerto truncado]"
+    return {
+        "page_content": content,
+        "metadata": {
+            "source": source_id,
+            "title": title,
+            "file_mime": row.get("file_mime"),
+            "storage": "surrealdb",
+        },
+    }
+
+
+async def _load_app_upload_documents(request: ResearchRequest) -> List[Dict[str, Any]]:
+    """Load private SurrealDB uploads eligible for this research request.
+
+    Research launched inside a notebook is restricted to sources linked to that
+    notebook. Research launched from the Research menu can use the authenticated
+    user's private uploaded sources.
+    """
+    if not request.auth_user_id:
+        return []
+
+    params: Dict[str, Any] = {"owner": request.auth_user_id}
+    if request.notebook_id:
+        query = """
+            SELECT id, title, full_text, caption, file_mime, file_name, owner, updated
+            FROM (SELECT VALUE in FROM reference WHERE out = $notebook_id)
+            WHERE owner = $owner
+            AND (full_text != NONE OR caption != NONE)
+            LIMIT 250
+        """
+        params["notebook_id"] = ensure_record_id(request.notebook_id)
+    else:
+        query = """
+            SELECT id, title, full_text, caption, file_mime, file_name, owner, updated
+            FROM source
+            WHERE owner = $owner
+            AND (full_text != NONE OR caption != NONE)
+            ORDER BY updated DESC
+            LIMIT 250
+        """
+
+    try:
+        rows = await repo_query(query, params)
+    except Exception as exc:
+        logger.warning(f"Could not load app upload documents for research: {exc}")
+        return []
+
+    terms = _research_terms(request.query)
+    scored: List[tuple[int, Dict[str, Any]]] = []
+    for row in rows or []:
+        doc = _row_to_research_document(row)
+        if not doc:
+            continue
+        haystack = (
+            f"{doc['metadata'].get('title', '')}\n{doc.get('page_content', '')}"
+        ).lower()
+        score = sum(haystack.count(term) for term in terms) if terms else 1
+        scored.append((score, doc))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    docs = [doc for _, doc in scored[:RESEARCH_MAX_APP_DOCS]]
+    scope = f"notebook {request.notebook_id}" if request.notebook_id else "research menu"
+    logger.info(f"Loaded {len(docs)} app upload document(s) for {scope} research")
+    return docs
+
+
+async def _build_accessible_research_documents(
+    request: ResearchRequest,
+    job_id: str,
+    progress_callback=None,
+    progress_steps: tuple[int, int, int] = (11, 13, 18),
+) -> List[Dict[str, Any]]:
+    app_pct, navy_pct, ready_pct = progress_steps
+    if progress_callback:
+        await progress_callback(app_pct, "Fase 1: A carregar sources privadas autorizadas...")
+    app_docs = await _load_app_upload_documents(request)
+    if progress_callback:
+        await progress_callback(navy_pct, "Fase 1: A pesquisar documentos Navy autorizados...")
+    navy_docs = await _prefetch_opensearch_docs(
+        query=request.query,
+        index=NAVY_OPENSEARCH_INDEX,
+        max_results=int(os.environ.get("AMALIA_PREFETCH_DOCS", "30")),
+        user_id=request.user_id,
+    )
+    docs = [*app_docs, *navy_docs]
+    if progress_callback:
+        await progress_callback(ready_pct, "Fase 1: Documentos acessíveis preparados.")
+    logger.info(
+        f"Job {job_id}: accessible research docs: "
+        f"{len(app_docs)} app upload(s), {len(navy_docs)} navy chunk(s)"
+    )
+    return docs
 
 
 def _strip_references(report: str) -> str:
@@ -468,12 +688,16 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
         if progress_callback:
             await progress_callback(5, "A iniciar TTD-DR...")
 
-        # NOTE: We deliberately do NOT pre-fetch from OpenSearch here.
-        # The TTD-DR flow (NOVA-Researcher) runs its own per-sub-query
-        # retrieval against the same index via CustomRetriever, so a
-        # client-side prefetch would be a wasted round-trip whose results
-        # are never consumed by the LLM. The full source set is returned
-        # in `source_urls` on the `done` event.
+        documents = await _build_accessible_research_documents(
+            request,
+            job_id,
+            progress_callback=progress_callback,
+            progress_steps=(7, 9, 12),
+        )
+        if not documents:
+            raise RuntimeError(
+                "No accessible documents were found for this research request."
+            )
 
         if progress_callback:
             await progress_callback(15, "A executar TTD-DR...")
@@ -483,9 +707,9 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
         payload = {
             "query": request.query,
             "source_urls": request.source_urls,
+            "report_source": "langchain_documents",
             "language": RESPONSE_LANGUAGE_POLICY,
-            "opensearch_index": NAVY_OPENSEARCH_INDEX,
-            "retriever_filter": build_opensearch_filter(request.user_id),
+            "documents": documents,
         }
         params: Dict[str, Any] = {"stream": "true"}
         if provider:
@@ -529,6 +753,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
                         fallback_title=request.query,
                     )
                     source_urls = event.get("source_urls", []) or []
+                    break
                 elif etype == "error":
                     stream_error = str(event.get("detail", "Unknown TTD-DR error"))
 
@@ -537,6 +762,13 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
 
         if progress_callback:
             await progress_callback(95, "A finalizar...")
+
+        if not source_urls:
+            source_urls = [
+                d.get("metadata", {}).get("source", "")
+                for d in documents
+                if d.get("metadata", {}).get("source")
+            ]
 
         # Build retrieved documents list for the UI from the page-level
         # sources that TTD-DR collected during its iterative retrieval.
@@ -595,14 +827,26 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
         if progress_callback:
             await progress_callback(5, "A iniciar ReAct-DR...")
 
+        documents = await _build_accessible_research_documents(
+            request,
+            job_id,
+            progress_callback=progress_callback,
+            progress_steps=(7, 9, 12),
+        )
+        if not documents:
+            raise RuntimeError(
+                "No accessible documents were found for this research request."
+            )
+
         if progress_callback:
             await progress_callback(15, "A executar ReAct-DR...")
 
         payload = {
             "query": request.query,
             "source_urls": request.source_urls,
-            "opensearch_index": NAVY_OPENSEARCH_INDEX,
-            "retriever_filter": build_opensearch_filter(request.user_id),
+            "report_source": "langchain_documents",
+            "language": RESPONSE_LANGUAGE_POLICY,
+            "documents": documents,
         }
         params: Dict[str, Any] = {"stream": "true"}
         if provider:
@@ -640,6 +884,7 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
                 elif etype == "done":
                     report = _strip_references(event.get("report", ""))
                     source_urls = event.get("source_urls", []) or []
+                    break
                 elif etype == "error":
                     stream_error = str(event.get("detail", "Unknown ReAct-DR error"))
 
@@ -648,6 +893,13 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
 
         if progress_callback:
             await progress_callback(95, "A finalizar...")
+
+        if not source_urls:
+            source_urls = [
+                d.get("metadata", {}).get("source", "")
+                for d in documents
+                if d.get("metadata", {}).get("source")
+            ]
 
         retrieved_docs = [
             RetrievedDocument(title=s, source=s, snippet="")
@@ -702,9 +954,16 @@ async def _run_plan_and_execute_dr(request: ResearchRequest, job_id: str, progre
         if progress_callback:
             await progress_callback(5, "A iniciar Plan-and-Execute DR...")
 
-        # As with TTD-DR / ReAct-DR, we do NOT pre-fetch from OpenSearch: the
-        # flow runs its own plan-bounded retrieval against the same index via
-        # CustomRetriever and returns the full source set on the `done` event.
+        documents = await _build_accessible_research_documents(
+            request,
+            job_id,
+            progress_callback=progress_callback,
+            progress_steps=(7, 9, 12),
+        )
+        if not documents:
+            raise RuntimeError(
+                "No accessible documents were found for this research request."
+            )
 
         if progress_callback:
             await progress_callback(15, "A executar Plan-and-Execute DR...")
@@ -714,9 +973,9 @@ async def _run_plan_and_execute_dr(request: ResearchRequest, job_id: str, progre
         payload = {
             "query": request.query,
             "source_urls": request.source_urls,
+            "report_source": "langchain_documents",
             "language": RESPONSE_LANGUAGE_POLICY,
-            "opensearch_index": NAVY_OPENSEARCH_INDEX,
-            "retriever_filter": build_opensearch_filter(request.user_id),
+            "documents": documents,
         }
         params: Dict[str, Any] = {"stream": "true"}
         if provider:
@@ -759,6 +1018,7 @@ async def _run_plan_and_execute_dr(request: ResearchRequest, job_id: str, progre
                         fallback_title=request.query,
                     )
                     source_urls = event.get("source_urls", []) or []
+                    break
                 elif etype == "error":
                     stream_error = str(event.get("detail", "Unknown Plan-and-Execute DR error"))
 
@@ -767,6 +1027,13 @@ async def _run_plan_and_execute_dr(request: ResearchRequest, job_id: str, progre
 
         if progress_callback:
             await progress_callback(95, "A finalizar...")
+
+        if not source_urls:
+            source_urls = [
+                d.get("metadata", {}).get("source", "")
+                for d in documents
+                if d.get("metadata", {}).get("source")
+            ]
 
         retrieved_docs = [
             RetrievedDocument(title=s, source=s, snippet="")
@@ -829,20 +1096,28 @@ async def _run_meeting_minutes(
         if progress_callback:
             await progress_callback(20, "A redigir a ATA da reunião...")
 
+        # report_style lets NOVA-Researcher vary the prompt (ATA / conversa /
+        # resumo / literal). Older NOVA versions ignore it and produce an ATA.
+        style = (request.report_style or "ata").strip().lower()
         resp = await _http_client.post(
             f"{NOVA_RESEARCHER_URL}/meeting-minutes",
-            json={"transcript": request.query, "language": language},
+            json={
+                "transcript": request.query,
+                "language": language,
+                "style": style,
+                "title": request.title or None,
+            },
             params={"provider": provider} if provider else {},
         )
         resp.raise_for_status()
         data = resp.json()
 
         if progress_callback:
-            await progress_callback(90, "A finalizar a ATA...")
+            await progress_callback(90, "A finalizar o documento...")
 
         report = _normalize_report_headings(
             data.get("report", ""),
-            fallback_title="Ata da Reunião",
+            fallback_title=request.title or "Ata da Reunião",
         )
 
         return ResearchResult(
@@ -912,18 +1187,15 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
         if progress_callback:
             await progress_callback(10, "Fase 1: A obter documentos do OpenSearch...")
 
-        # Pre-fetch from the navy OpenSearch corpus
-        os_docs = await _prefetch_opensearch_docs(
-            query=request.query,
-            index=NAVY_OPENSEARCH_INDEX,
-            max_results=int(os.environ.get("AMALIA_PREFETCH_DOCS", "30")),
-            user_id=request.user_id,
+        documents = await _build_accessible_research_documents(
+            request,
+            job_id,
+            progress_callback=progress_callback,
         )
-
-        if os_docs:
-            logger.info(f"Job {job_id}: Using {len(os_docs)} pre-fetched OpenSearch docs.")
-        else:
-            logger.warning(f"Job {job_id}: OpenSearch returned no docs; falling back to web search.")
+        if not documents:
+            raise RuntimeError(
+                "No accessible documents were found for this research request."
+            )
 
         if progress_callback:
             await progress_callback(20, "Fase 2: A executar pesquisa...")
@@ -932,19 +1204,11 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
         payload = {
             "query": request.query,
             "report_type": request.report_type.value,
-            "report_source": "langchain_documents" if os_docs else request.report_source.value,
+            "report_source": "langchain_documents",
             "tone": request.tone.value,
             "language": RESPONSE_LANGUAGE_POLICY,
             "source_urls": request.source_urls,
-            "documents": os_docs,
-            # Tell NOVA-Researcher which OpenSearch index this app uses so
-            # that — on follow-up / cross-corpus queries — the server-side
-            # CustomRetriever targets the right index.
-            "opensearch_index": NAVY_OPENSEARCH_INDEX,
-            # Navy-specific access-control filter (classification +
-            # department). NOVA-Researcher applies it verbatim as the
-            # OpenSearch kNN filter.
-            "retriever_filter": build_opensearch_filter(request.user_id),
+            "documents": documents,
         }
 
         resp = await _http_client.post(
@@ -966,11 +1230,11 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
         costs = data.get("costs", 0.0)
         images = data.get("images", [])
 
-        # Fallback source URLs from pre-fetched docs
-        if not source_urls and os_docs:
+        # Fallback source URLs from the server-built accessible documents.
+        if not source_urls and documents:
             source_urls = [
                 d.get("metadata", {}).get("source", "")
-                for d in os_docs
+                for d in documents
                 if d.get("metadata", {}).get("source")
             ]
 
@@ -983,7 +1247,7 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
                 source=d.get("metadata", {}).get("source", ""),
                 snippet=(d.get("page_content", ""))[:300],
             )
-            for d in os_docs
+            for d in documents
         ]
         existing_sources = {rd.source for rd in retrieved_docs if rd.source}
         for s in source_urls:
@@ -1035,8 +1299,6 @@ async def submit_research_job(request: ResearchRequest) -> ResearchJob:
     Submit a research job for background execution.
     Returns immediately with a job ID for status tracking.
     """
-    import asyncio
-
     job_id = str(uuid.uuid4())[:8]
     now = datetime.now(timezone.utc).isoformat()
 
@@ -1046,43 +1308,67 @@ async def submit_research_job(request: ResearchRequest) -> ResearchJob:
         report_type=request.report_type.value,
         status="pending",
         created_at=now,
+        updated_at=now,
         tone=request.tone.value,
         model_id=request.model_id,
         notebook_id=request.notebook_id,
-        user_id=request.user_id,
+        user_id=request.user_id or request.auth_user_id,
     )
     _jobs[job_id] = job
-    _save_jobs()
+    _running_jobs[job_id] = job
+    _persist_job(job)
 
     async def _run():
         job.status = "running"
         job.progress = "A conduzir pesquisa..."
         job.progress_pct = 5
-        _save_jobs()
+        job.updated_at = _now_iso()
+        _persist_job(job)
 
         async def _progress_callback(pct: int, message: str) -> None:
             """Update job progress in-place so polling clients see live updates."""
             job.progress_pct = pct
             job.progress = message
-            _save_jobs()
+            job.updated_at = _now_iso()
+            _persist_job(job)
 
         try:
-            result = await run_research(request, progress_callback=_progress_callback)
+            result = await asyncio.wait_for(
+                run_research(request, progress_callback=_progress_callback),
+                timeout=RESEARCH_JOB_TIMEOUT_SECONDS,
+            )
             job.result = result
             job.status = result.status
             job.error = result.error
             job.progress = "Concluído" if result.status == "completed" else "Falhou"
             job.progress_pct = 100 if result.status == "completed" else job.progress_pct
 
+        except asyncio.TimeoutError:
+            job.status = "failed"
+            job.error = (
+                f"Research job exceeded the configured timeout "
+                f"({RESEARCH_JOB_TIMEOUT_SECONDS}s)."
+            )
+            job.progress = "Falhou (tempo limite excedido)"
+        except asyncio.CancelledError:
+            job.status = "failed"
+            job.error = "Research job was cancelled before completion."
+            job.progress = "Falhou (job cancelado)"
+            raise
         except Exception as e:
             job.status = "failed"
             job.error = str(e)
             job.progress = f"Falhou: {e}"
         finally:
-            _save_jobs()
+            job.updated_at = _now_iso()
+            _persist_job(job)
+            _running_jobs.pop(job_id, None)
 
-    # Run in background
-    asyncio.create_task(_run())
+    # Keep a strong reference while the task is running; otherwise long-lived
+    # jobs can be garbage-collected before they persist a terminal state.
+    task = asyncio.create_task(_run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return job
 
@@ -1108,6 +1394,91 @@ def delete_research_job(job_id: str) -> bool:
     # reappear in the job list.
     _save_jobs(_deleted={job_id})
     return True
+
+
+def update_report_directly(job_id: str, new_report: str) -> Optional[ResearchJob]:
+    """Replace a report's content verbatim (no AI processing). Persists the change."""
+    job = _get_job(job_id)
+    if not job or not job.result:
+        return None
+    job.result.report = new_report.strip()
+    job.updated_at = _now_iso()
+    _persist_job(job)
+    logger.info(f"Directly updated research report {job_id} ({len(new_report)} chars)")
+    return job
+
+
+async def revise_research_report(
+    job_id: str, instruction: str, model_id: Optional[str] = None
+) -> Optional[ResearchJob]:
+    """Apply a user instruction to an existing report and store the revision.
+
+    Uses a full language model (not the token-capped multimodal path) so long
+    reports are not truncated, and persists the revised report back onto the job
+    so the change is durable (chat + Deep Research history).
+
+    Returns the updated job, or None if the job/report is missing or the model
+    returned nothing usable.
+    """
+    job = _get_job(job_id)
+    if not job or not job.result or not (job.result.report or "").strip():
+        return None
+
+    from open_notebook.ai.provision import provision_langchain_model
+    from open_notebook.utils import clean_thinking_content
+    from open_notebook.utils.text_utils import extract_text_content
+
+    current_report = job.result.report
+    prompt = (
+        "És um editor de relatórios. A tua ÚNICA tarefa é aplicar a alteração pedida "
+        "ao relatório e devolver o relatório COMPLETO atualizado.\n\n"
+        "REGRAS ABSOLUTAS:\n"
+        "1. A tua resposta deve conter o relatório COMPLETO em Markdown — todas as "
+        "secções, do início ao fim.\n"
+        "2. Só alteras o que foi pedido. Tudo o resto permanece igual.\n"
+        "3. Não acrescentes comentários, explicações, prefácios nem notas finais.\n"
+        "4. Não respondas com uma síntese nem com apenas a parte alterada.\n"
+        "5. O relatório resultante deve ter comprimento igual ou maior ao original.\n\n"
+        f"## Alteração pedida pelo utilizador\n{instruction.strip()}\n\n"
+        f"## Relatório original completo (devolve tudo isto, com a alteração aplicada)\n"
+        f"{current_report}\n\n"
+        "LEMBRA: devolve o relatório COMPLETO, não apenas a secção alterada."
+    )
+
+    model = await provision_langchain_model(prompt, model_id or job.model_id, "chat", max_tokens=8000)
+    ai_message = await model.ainvoke(prompt)
+    revised = clean_thinking_content(extract_text_content(ai_message.content)).strip()
+
+    # Strip an accidental code fence wrapping the whole report.
+    if revised.startswith("```"):
+        lines = revised.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        revised = "\n".join(lines).strip()
+
+    if not revised:
+        return None
+
+    # Guard: if the model returned only a fragment (< 65 % of original length),
+    # it likely produced just the edited section instead of the full report.
+    # Reject the result so the original is preserved.
+    if len(revised) < len(current_report) * 0.65:
+        logger.warning(
+            f"Revise {job_id}: model returned {len(revised)} chars "
+            f"vs {len(current_report)} original — likely truncated, rejecting."
+        )
+        raise ValueError(
+            "O modelo devolveu apenas uma parte do relatório em vez do relatório completo. "
+            "Tenta novamente ou usa um modelo com maior capacidade."
+        )
+
+    job.result.report = revised
+    job.updated_at = _now_iso()
+    _persist_job(job)
+    logger.info(f"Revised research report {job_id} ({len(revised)} chars)")
+    return job
 
 
 def get_report_type_info() -> List[Dict[str, str]]:

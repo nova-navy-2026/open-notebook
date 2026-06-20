@@ -299,6 +299,10 @@ class SourceCreate(BaseModel):
     transformations: Optional[List[str]] = Field(
         default_factory=list, description="Transformation IDs to apply"
     )
+    language: Optional[str] = Field(
+        None,
+        description="Preferred language/locale for generated source captions",
+    )
     embed: bool = Field(False, description="Whether to embed content for vector search")
     delete_source: bool = Field(
         False, description="Whether to delete uploaded file after processing"

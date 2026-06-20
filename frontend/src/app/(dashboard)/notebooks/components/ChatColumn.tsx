@@ -1,12 +1,14 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useMultimodalChat } from '@/lib/hooks/use-multimodal'
 import { useNotes } from '@/lib/hooks/use-notes'
 import { ChatPanel } from '@/components/source/ChatPanel'
+import { SessionManager } from '@/components/source/SessionManager'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card, CardContent } from '@/components/ui/card'
-import { AlertCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { AlertCircle, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { ContextSelections } from '../[id]/page'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { SourceListResponse } from '@/lib/types/api'
@@ -21,6 +23,7 @@ interface ChatColumnProps {
 
 export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoading, selectedNavyDocIds }: ChatColumnProps) {
   const { t } = useTranslation()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Fetch notes for this notebook
   const { data: notes = [], isLoading: notesLoading } = useNotes(notebookId)
@@ -94,18 +97,70 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
   }
 
   return (
-    <ChatPanel
-      title={t.chat.chatWithNotebook}
-      contextType="notebook"
-      messages={chat.messages}
-      isStreaming={chat.isSending}
-      contextIndicators={null}
-      onSendMessage={(message, _modelOverride, file, deepResearch, agentOptions) => chat.sendMessage(message, file, deepResearch, agentOptions)}
-      notebookContextStats={contextStats}
-      notebookId={notebookId}
-      enableAttachments
-      enableDeepResearch
-      enableAgentControls
-    />
+    <div className="h-full min-h-0 flex gap-3">
+      {/* Persistent session sidebar (ChatGPT-style), consistent with global chat.
+          Collapsed by default here because the notebook chat lives in a narrow
+          column; the toggle expands/collapses it. */}
+      {sidebarOpen ? (
+        <div className="w-56 flex-shrink-0 flex flex-col rounded-lg border bg-card/40 min-h-0">
+          <div className="flex items-center justify-end px-2 pt-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setSidebarOpen(false)}
+              title={t.common.collapse ?? 'Recolher'}
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0">
+            <SessionManager
+              variant="sidebar"
+              sessions={chat.sessions}
+              currentSessionId={chat.currentSessionId}
+              onNewChat={() => chat.createSession()}
+              onCreateSession={(title) => chat.createSession(title)}
+              onSelectSession={chat.switchSession}
+              onUpdateSession={(sessionId, title) => chat.updateSession(sessionId, { title })}
+              onDeleteSession={chat.deleteSession}
+              loadingSessions={chat.loadingSessions}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="flex-shrink-0 pt-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setSidebarOpen(true)}
+            title={t.chat.sessions}
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0">
+        <ChatPanel
+          title={t.chat.chatWithNotebook}
+          contextType="notebook"
+          messages={chat.messages}
+          isStreaming={chat.isSending}
+          contextIndicators={null}
+          onSendMessage={(message, modelOverride, file, deepResearch, agentOptions) => chat.sendMessage(message, modelOverride, file, deepResearch, agentOptions)}
+          onReviseReport={chat.reviseReport}
+          modelOverride={chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined}
+          onModelChange={(model) => chat.setModelOverride(model ?? null)}
+          notebookContextStats={contextStats}
+          notebookId={notebookId}
+          enableAttachments
+          enableDeepResearch
+          enableAgentControls
+          isDeepResearchSession={chat.isDeepResearchSession}
+        />
+      </div>
+    </div>
   )
 }

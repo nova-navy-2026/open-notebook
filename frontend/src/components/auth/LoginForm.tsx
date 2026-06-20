@@ -15,7 +15,7 @@ import {
   CardTitle,
   CardFooter,
 } from "@/components/ui/card";
-import { AlertCircle, Loader2, Github, Mail } from "lucide-react";
+import { AlertCircle, Loader2, Mail } from "lucide-react";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { useTheme } from "@/components/providers/ThemeProvider";
@@ -100,7 +100,7 @@ export function LoginForm() {
     }
   }, [hasHydrated, authRequired, checkAuthRequired, router, isAuthenticated]);
 
-  const handleOAuthLogin = async (provider: "azure" | "google" | "github") => {
+  const handleOAuthLogin = async (provider: "azure") => {
     setOauthLoading(provider);
     try {
       const authUrl = await loginWithOAuth(provider);
@@ -217,44 +217,6 @@ export function LoginForm() {
                   <>
                     <Mail className="h-4 w-4 mr-2" />
                     Azure AD
-                  </>
-                )}
-              </Button>
-
-              <Button
-                onClick={() => handleOAuthLogin("google")}
-                disabled={oauthLoading !== null}
-                variant="outline"
-                className="w-full"
-              >
-                {oauthLoading === "google" ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Redirecting...
-                  </>
-                ) : (
-                  <>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Google
-                  </>
-                )}
-              </Button>
-
-              <Button
-                onClick={() => handleOAuthLogin("github")}
-                disabled={oauthLoading !== null}
-                variant="outline"
-                className="w-full"
-              >
-                {oauthLoading === "github" ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Redirecting...
-                  </>
-                ) : (
-                  <>
-                    <Github className="h-4 w-4 mr-2" />
-                    GitHub
                   </>
                 )}
               </Button>

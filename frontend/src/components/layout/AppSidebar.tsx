@@ -49,7 +49,6 @@ import {
   MessageCircleQuestion,
   Image as ImageIcon,
   Video,
-  MapPin,
   Captions,
 } from "lucide-react";
 
@@ -95,16 +94,8 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
         },
       ],
     },
-    {
-      title: t.navigation.navigationSection ?? "Navigation",
-      items: [
-        {
-          name: t.navigation.routePlanner ?? "Route Planner",
-          href: "/navigation",
-          icon: MapPin,
-        },
-      ],
-    },
+    // Route Planner is intentionally NOT shown in the sidebar — it is available
+    // only inside chat (the route agent handles "from X to Y" requests).
     {
       title: t.navigation.audio ?? "Audio",
       items: [
@@ -154,7 +145,9 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
 type CreateTarget =
   | "chat"
   | "notebook"
+  | "source"
   | "research"
+  | "transcription"
   | "image-analysis"
   | "video-analysis";
 
@@ -195,8 +188,14 @@ export function AppSidebar() {
       case "notebook":
         openNotebookDialog();
         break;
+      case "source":
+        router.push("/sources");
+        break;
       case "research":
         router.push("/research");
+        break;
+      case "transcription":
+        router.push("/transcription");
         break;
       case "image-analysis":
         router.push("/vision/image-analysis");
@@ -335,6 +334,26 @@ export function AppSidebar() {
                 >
                   <Book className="h-4 w-4" />
                   {t.common.notebook}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleCreateSelection("source");
+                  }}
+                  className="gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  {t.common.newSource ?? "New Source"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleCreateSelection("transcription");
+                  }}
+                  className="gap-2"
+                >
+                  <Captions className="h-4 w-4" />
+                  {t.navigation.transcription ?? "Transcription"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={(event) => {

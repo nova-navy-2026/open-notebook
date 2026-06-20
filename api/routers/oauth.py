@@ -4,9 +4,6 @@ Handles OAuth login, callback, token refresh, and logout.
 
 Supported providers:
 - Azure AD / Entra ID (OIDC)
-- Google OAuth2
-- GitHub OAuth
-- Custom OIDC providers
 """
 
 from datetime import datetime, timedelta
@@ -28,11 +25,7 @@ class OAuthConfig:
     AZURE_CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
     AZURE_AUTHORITY = os.getenv("AZURE_AUTHORITY", "https://login.microsoftonline.com/common")
     AZURE_REDIRECT_URI = os.getenv("AZURE_REDIRECT_URI", "http://localhost:5055/oauth/azure/callback")
-    
-    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-    GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5055/oauth/google/callback")
-    
+
     JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
     JWT_ALGORITHM = "HS256"
     JWT_EXPIRY = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
@@ -46,8 +39,6 @@ async def oauth_login(provider: str, request: Request):
     """
     if provider == "azure":
         return oauth_azure_login()
-    elif provider == "google":
-        return oauth_google_login()
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
@@ -78,35 +69,6 @@ async def oauth_azure_callback(
         }
     except Exception as e:
         logger.error(f"Azure OAuth callback error: {e}")
-        raise HTTPException(status_code=500, detail="Authentication failed")
-
-
-@router.get("/google/callback")
-async def oauth_google_callback(
-    code: str,
-    state: Optional[str] = None,
-    request: Request = None
-):
-    """
-    Google OAuth2 callback handler.
-    Exchanges authorization code for access token.
-    """
-    try:
-        # TODO: Implement Google OAuth flow
-        # 1. Exchange code for token
-        # 2. Fetch user info
-        # 3. Create/update user in database
-        # 4. Generate JWT token
-        # 5. Redirect to frontend with token
-        
-        logger.info(f"Processing Google OAuth callback: code={code}")
-        
-        return {
-            "status": "pending",
-            "message": "Google OAuth callback handler not yet implemented"
-        }
-    except Exception as e:
-        logger.error(f"Google OAuth callback error: {e}")
         raise HTTPException(status_code=500, detail="Authentication failed")
 
 
@@ -176,11 +138,5 @@ async def verify_token(request: Request):
 
 def oauth_azure_login():
     """Initiate Azure AD login flow"""
-    # TODO: Implement
-    pass
-
-
-def oauth_google_login():
-    """Initiate Google OAuth2 login flow"""
     # TODO: Implement
     pass

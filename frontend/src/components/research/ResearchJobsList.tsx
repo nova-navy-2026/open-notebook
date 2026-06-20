@@ -39,13 +39,18 @@ import {
   ExternalLink,
   Copy,
   Trash2,
+  Pencil,
+  X,
+  Save,
 } from "lucide-react";
 import {
   useResearchJobs,
   useResearchJob,
   useSaveResearchAsNote,
   useDeleteResearchJob,
+  useDirectUpdateReport,
 } from "@/lib/hooks/use-research";
+import { Textarea } from "@/components/ui/textarea";
 import { useModels } from "@/lib/hooks/use-models";
 import { useQuery } from "@tanstack/react-query";
 import { QUERY_KEYS } from "@/lib/api/query-client";
@@ -100,6 +105,7 @@ function ReportTypeLabel({ type }: { type: string }) {
     ttd_dr: "TTD-DR Deep Research",
     react_deep: "ReAct Deep Research",
     plan_and_execute_dr: "Plan-and-Execute Deep Research",
+    meeting_minutes: "Ata da Reunião",
   };
   return (
     <span className="text-xs text-muted-foreground">
@@ -300,7 +306,10 @@ export function ResearchJobsList() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveJobId, setSaveJobId] = useState<string | null>(null);
   const [selectedNotebookId, setSelectedNotebookId] = useState<string>("");
+  const [editMode, setEditMode] = useState(false);
+  const [editContent, setEditContent] = useState("");
   const reportScrollRef = useRef<HTMLDivElement | null>(null);
+  const directUpdate = useDirectUpdateReport();
 
   // Fetch the full job with result when selected
   const { data: selectedJob } = useResearchJob(selectedJobId);
@@ -383,7 +392,9 @@ export function ResearchJobsList() {
               <div className="flex items-start justify-between">
                 <div className="space-y-1 flex-1 mr-4">
                   <CardTitle className="text-base line-clamp-2">
-                    {job.query}
+                    {job.report_type === "meeting_minutes"
+                      ? "Ata da Reunião"
+                      : job.query}
                   </CardTitle>
                   <div className="flex items-center gap-2 flex-wrap">
                     <ReportTypeLabel type={job.report_type} />
@@ -474,13 +485,28 @@ export function ResearchJobsList() {
       {/* Report Viewer Dialog */}
       <Dialog
         open={!!selectedJobId}
-        onOpenChange={(open) => !open && setSelectedJobId(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedJobId(null);
+            setEditMode(false);
+            setEditContent("");
+          }
+        }}
       >
         <DialogContent className="!max-w-4xl sm:!max-w-4xl w-[min(896px,calc(100vw-2rem))] max-h-[90vh] overflow-hidden p-0 flex flex-col">
           <DialogHeader className="px-6 pt-6">
-            <DialogTitle>{selectedJob?.query ?? "Research Report"}</DialogTitle>
-            <DialogDescription>
+            <DialogTitle>
+              {selectedJob?.report_type === "meeting_minutes"
+                ? "Ata da Reunião"
+                : (selectedJob?.query ?? "Research Report")}
+            </DialogTitle>
+            <DialogDescription className="flex items-center gap-3 flex-wrap">
               <ReportTypeLabel type={selectedJob?.report_type ?? ""} />
+              {selectedJob?.created_at && (
+                <span className="text-xs text-muted-foreground">
+                  {formatDateTime(selectedJob.created_at)}
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
 
@@ -524,14 +550,22 @@ export function ResearchJobsList() {
 
               <div ref={reportScrollRef} className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-6 space-y-4">
               {/* Report Content */}
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={headingComponents}
-                >
-                  {reportMarkdown}
-                </ReactMarkdown>
-              </div>
+              {editMode ? (
+                <Textarea
+                  className="min-h-[60vh] font-mono text-xs resize-none"
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                />
+              ) : (
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={headingComponents}
+                  >
+                    {reportMarkdown}
+                  </ReactMarkdown>
+                </div>
+              )}
 
               {/* Source Documents */}
               {selectedJob.result.retrieved_documents &&
@@ -588,30 +622,72 @@ export function ResearchJobsList() {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-2 border-t pt-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    handleCopyReport(
-                      normalizeReportMarkdown(selectedJob.result!.report, selectedJob.query),
-                    )
-                  }
-                >
-                  <Copy className="mr-1 h-3 w-3" />
-                  {t.research?.copyReport ?? "Copy Report"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSaveJobId(selectedJob.id);
-                    setSaveDialogOpen(true);
-                  }}
-                >
-                  <BookmarkPlus className="mr-1 h-3 w-3" />
-                  {t.research?.saveToNotebook ?? "Save to Notebook"}
-                </Button>
+              <div className="flex gap-2 border-t pt-4 flex-wrap">
+                {!editMode && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        handleCopyReport(
+                          normalizeReportMarkdown(selectedJob.result!.report, selectedJob.query),
+                        )
+                      }
+                    >
+                      <Copy className="mr-1 h-3 w-3" />
+                      {t.research?.copyReport ?? "Copy Report"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSaveJobId(selectedJob.id);
+                        setSaveDialogOpen(true);
+                      }}
+                    >
+                      <BookmarkPlus className="mr-1 h-3 w-3" />
+                      {t.research?.saveToNotebook ?? "Save to Notebook"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditContent(selectedJob.result!.report);
+                        setEditMode(true);
+                      }}
+                    >
+                      <Pencil className="mr-1 h-3 w-3" />
+                      {t.research?.editReport ?? "Edit"}
+                    </Button>
+                  </>
+                )}
+                {editMode && (
+                  <>
+                    <Button
+                      size="sm"
+                      disabled={directUpdate.isPending}
+                      onClick={async () => {
+                        await directUpdate.mutateAsync({ jobId: selectedJob.id, report: editContent });
+                        setEditMode(false);
+                      }}
+                    >
+                      {directUpdate.isPending ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Save className="mr-1 h-3 w-3" />
+                      )}
+                      {t.common?.save ?? "Save"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setEditMode(false); setEditContent(""); }}
+                    >
+                      <X className="mr-1 h-3 w-3" />
+                      {t.common?.cancel ?? "Cancel"}
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
                   </>

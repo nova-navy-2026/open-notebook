@@ -54,6 +54,9 @@ export const sourcesApi = {
     if (data.transformations !== undefined) {
       formData.append('transformations', JSON.stringify(data.transformations))
     }
+    if (data.language) {
+      formData.append('language', data.language)
+    }
     
     const dataWithFile = data as CreateSourceRequest & { file?: File }
     if (dataWithFile.file instanceof File) {
@@ -93,6 +96,10 @@ export const sourcesApi = {
     formData.append('notebook_id', notebook_id)
     formData.append('type', 'upload')
     formData.append('async_processing', 'true')
+    if (typeof window !== 'undefined') {
+      const language = localStorage.getItem('i18nextLng')
+      if (language) formData.append('language', language)
+    }
     
     const response = await apiClient.post<SourceResponse>('/sources', formData, {
       headers: {

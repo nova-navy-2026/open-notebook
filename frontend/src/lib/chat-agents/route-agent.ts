@@ -56,6 +56,8 @@ export async function runRouteAgent(
     })
     return formatRouteResponse(result, route.from, route.to)
   } catch (error) {
+    const status = (error as { response?: { status?: number } })?.response?.status
+    const errorMessage = error instanceof Error ? error.message : String(error)
     logChatAgentEvent({
       surface: context?.surface ?? 'global_chat',
       agent: 'route',
@@ -63,8 +65,14 @@ export async function runRouteAgent(
       status: 'failure',
       context,
       duration_ms: Math.round(performance.now() - startedAt),
-      details: { error: error instanceof Error ? error.message : String(error) },
+      details: { error: errorMessage, http_status: status, from: route.from, to: route.to },
     })
-    throw error
+    if (status === 404) {
+      return `Não consegui encontrar rota entre "${route.from}" e "${route.to}". Verifica os nomes dos locais ou coordenadas.`
+    }
+    if (status === 503 || status === 502) {
+      return 'O serviço de navegação não está disponível de momento. Tenta novamente mais tarde.'
+    }
+    return `Não consegui calcular a rota de "${route.from}" para "${route.to}". Detalhe: ${errorMessage}`
   }
 }

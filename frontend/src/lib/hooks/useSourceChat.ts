@@ -89,26 +89,39 @@ export function useSourceChat(sourceId: string) {
     }
   })
 
-  // Delete session mutation
+  // Delete session mutation (optimistic: remove instantly, roll back on failure)
   const deleteSessionMutation = useMutation({
-    mutationFn: (sessionId: string) => 
+    mutationFn: (sessionId: string) =>
       sourceChatApi.deleteSession(sourceId, sessionId),
-    onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
-      // Drop the cached session so its stale messages cannot repopulate
-      // the panel after we clear it below.
-      queryClient.removeQueries({ queryKey: ['sourceChatSession', sourceId, deletedId] })
+    onMutate: async (deletedId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['sourceChatSessions', sourceId] })
+      const previousSessions = queryClient.getQueryData<SourceChatSession[]>(['sourceChatSessions', sourceId])
+      queryClient.setQueryData<SourceChatSession[]>(
+        ['sourceChatSessions', sourceId],
+        (old) => (Array.isArray(old) ? old.filter((s) => s.id !== deletedId) : old),
+      )
       if (currentSessionId === deletedId) {
         autoSelectedRef.current = true
         setCurrentSessionId(null)
         setMessages([])
       }
-      toast.success(t.chat.sessionDeleted)
+      return { previousSessions }
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _deletedId, context) => {
+      if (context?.previousSessions !== undefined) {
+        queryClient.setQueryData(['sourceChatSessions', sourceId], context.previousSessions)
+      }
       const error = err as { response?: { data?: { detail?: string } }, message?: string };
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
-    }
+    },
+    onSuccess: (_, deletedId) => {
+      // Drop the cached session so its stale messages cannot repopulate the panel.
+      queryClient.removeQueries({ queryKey: ['sourceChatSession', sourceId, deletedId] })
+      toast.success(t.chat.sessionDeleted)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+    },
   })
 
   // Send message with streaming
@@ -153,51 +166,54 @@ export function useSourceChat(sourceId: string) {
 
       const reader = response.getReader()
       const decoder = new TextDecoder()
-      let aiMessage: SourceChatMessage | null = null
+      const aiMessageId = `ai-${Date.now()}`
+      let aiContent = ''
+      let buffer = ''
+
+      const ensureAiMessage = () => {
+        setMessages(prev => {
+          if (prev.some(m => m.id === aiMessageId)) return prev
+          return [...prev, {
+            id: aiMessageId,
+            type: 'ai' as const,
+            content: '',
+            timestamp: new Date().toISOString(),
+          }]
+        })
+      }
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() ?? ''
 
-        const text = decoder.decode(value)
-        const lines = text.split('\n')
+        for (const evt of events) {
+          const line = evt.split('\n').find(l => l.startsWith('data: '))
+          if (!line) continue
+          try {
+            const data = JSON.parse(line.slice(6))
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              
-              if (data.type === 'ai_message') {
-                // Create AI message on first content chunk to avoid empty bubble
-                if (!aiMessage) {
-                  aiMessage = {
-                    id: `ai-${Date.now()}`,
-                    type: 'ai',
-                    content: data.content || '',
-                    timestamp: new Date().toISOString()
-                  }
-                  setMessages(prev => [...prev, aiMessage!])
-                } else {
-                  aiMessage.content += data.content || ''
-                  setMessages(prev =>
-                    prev.map(msg => msg.id === aiMessage!.id
-                      ? { ...msg, content: aiMessage!.content }
-                      : msg
-                    )
-                  )
-                }
-              } else if (data.type === 'context_indicators') {
-                setContextIndicators(data.data)
-              } else if (data.type === 'error') {
-                throw new Error(data.message || 'Stream error')
-              }
-            } catch (e) {
-              if (e instanceof SyntaxError) {
-                console.error('Error parsing SSE data:', e)
-              } else {
-                throw e
-              }
+            if (data.type === 'delta') {
+              ensureAiMessage()
+              aiContent += data.content || ''
+              setMessages(prev =>
+                prev.map(m => m.id === aiMessageId ? { ...m, content: aiContent } : m)
+              )
+            } else if (data.type === 'complete') {
+              ensureAiMessage()
+              aiContent = data.content || aiContent
+              setMessages(prev =>
+                prev.map(m => m.id === aiMessageId ? { ...m, content: aiContent } : m)
+              )
+            } else if (data.type === 'context_indicators') {
+              setContextIndicators(data.data)
+            } else if (data.type === 'error') {
+              throw new Error(data.message || 'Stream error')
             }
+          } catch (e) {
+            if (!(e instanceof SyntaxError)) throw e
           }
         }
       }

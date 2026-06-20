@@ -5,9 +5,10 @@ import { QUERY_KEYS } from '@/lib/api/query-client'
 import type { NotebookChatMessage, NotebookResponse } from '@/lib/types/api'
 import {
   isSaveToNoteRequest,
-  lastAssistantMessage,
   normaliseForAgentMatching,
+  parseMessageOrdinalFromEnd,
   parseSaveToNoteTarget,
+  selectTargetAssistantMessage,
 } from '@/lib/utils/chat-agents'
 import {
   logChatAgentEvent,
@@ -99,6 +100,14 @@ function noteTitleForSave(message: string, fallback: string): string {
   return parseRequestedTitle(message) || fallback
 }
 
+/** Human-readable (pt-PT) description of which message was saved, counted from the end. */
+function describeMessagePosition(fromEnd: number): string {
+  if (fromEnd <= 1) return 'última resposta'
+  if (fromEnd === 2) return 'penúltima resposta'
+  if (fromEnd === 3) return 'antepenúltima resposta'
+  return `${fromEnd}ª resposta a contar do fim`
+}
+
 export async function runGlobalSaveNoteAgent({
   message,
   messages,
@@ -126,7 +135,8 @@ export async function runGlobalSaveNoteAgent({
     message_preview: previewMessage(message),
   })
 
-  const previous = lastAssistantMessage(messages)
+  const previous = selectTargetAssistantMessage(message, messages)
+  const positionLabel = describeMessagePosition(parseMessageOrdinalFromEnd(message))
   const notebooks = await notebooksApi.list({ archived: false })
   const target = parseSaveToNoteTarget(message)
   const targetNotebook = findNotebookForSave(notebooks, target, targetNotebookId)
@@ -197,9 +207,9 @@ export async function runGlobalSaveNoteAgent({
     status: 'success',
     context,
     duration_ms: Math.round(performance.now() - startedAt),
-    details: { notebook_id: targetNotebook.id, note_id: note.id },
+    details: { notebook_id: targetNotebook.id, note_id: note.id, message_position: positionLabel },
   })
-  return `Guardei a resposta anterior como nota em "${targetNotebook.name}": ${note.title || note.id}.`
+  return `Guardei a ${positionLabel} como nota em "${targetNotebook.name}": ${note.title || note.id}.`
 }
 
 export async function runNotebookSaveNoteAgent({
@@ -230,7 +240,8 @@ export async function runNotebookSaveNoteAgent({
     details: { notebook_id: notebookId },
   })
 
-  const previous = lastAssistantMessage(messages)
+  const previous = selectTargetAssistantMessage(message, messages)
+  const positionLabel = describeMessagePosition(parseMessageOrdinalFromEnd(message))
   if (!previous) {
     logChatAgentEvent({
       surface: context?.surface ?? 'notebook_chat',
@@ -273,7 +284,7 @@ export async function runNotebookSaveNoteAgent({
     status: 'success',
     context,
     duration_ms: Math.round(performance.now() - startedAt),
-    details: { notebook_id: notebookId, note_id: note.id },
+    details: { notebook_id: notebookId, note_id: note.id, message_position: positionLabel },
   })
-  return `Guardei a resposta anterior como nota neste notebook: ${note.title || note.id}.`
+  return `Guardei a ${positionLabel} como nota neste notebook: ${note.title || note.id}.`
 }

@@ -30,6 +30,8 @@ import {
   Building2,
   ShieldCheck,
   Tag,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { cn } from "@/lib/utils";
@@ -63,7 +65,7 @@ export function NavyDocsSection({
   readOnly = false,
 }: NavyDocsSectionProps) {
   const { t } = useTranslation();
-  const { data, isLoading, error } = useNavyDocuments();
+  const { data, isLoading, error, refetch, isFetching } = useNavyDocuments();
   const [isOpen, setIsOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -242,8 +244,31 @@ export function NavyDocsSection({
     );
   }
 
-  if (error || !documents.length) {
-    return null; // Don't show the section if no navy docs available
+  if (error) {
+    return (
+      <div className="border rounded-lg p-3 mt-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <span>{t.navyDocs?.loadError ?? "Erro ao carregar base de conhecimento"}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 gap-1 text-xs"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+            {t.common?.retry ?? "Tentar novamente"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!documents.length) {
+    return null; // User has no accessible corpus documents — don't show the section
   }
 
   return (

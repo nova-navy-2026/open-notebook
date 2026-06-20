@@ -39,6 +39,22 @@ _VIDEO_FRAME_STRIDE = 15   # sample every N-th frame by default
 _VIDEO_MAX_FRAMES   = 50   # hard cap; triggers adaptive stride when exceeded
 
 
+def _video_ocr_max_frames() -> int:
+    """How many frames to OCR for a video (spread evenly across the clip)."""
+    try:
+        return max(1, int(os.environ.get("VISION_VIDEO_OCR_MAX_FRAMES", "16")))
+    except ValueError:
+        return 16
+
+
+def _video_ocr_concurrency() -> int:
+    """Max number of frame-OCR jobs to run at once (Docling subprocesses are heavy)."""
+    try:
+        return max(1, int(os.environ.get("VISION_VIDEO_OCR_CONCURRENCY", "4")))
+    except ValueError:
+        return 4
+
+
 def _gemma_base_url() -> str:
     url = os.environ.get("GEMMA_BASE_URL", "").rstrip("/")
     if not url:
@@ -595,7 +611,8 @@ async def _run_gemma_ocr(
         "- Se houver várias zonas de texto, organiza por blocos/linhas.\n"
         "- Se algum texto estiver ilegível, marca como [ilegível] em vez de inventar.\n"
         "- Depois da transcrição, acrescenta uma nota curta sobre a confiança/leiturabilidade.\n"
-        "- Responde em pt-PT, exceto se o pedido do utilizador estiver claramente noutra língua.\n"
+        "- Responde em português europeu (pt-PT), exceto se o pedido do utilizador estiver claramente noutra língua.\n"
+        "- Se responderes em português, não uses português do Brasil. Evita formas como 'você', 'usuário', 'arquivo', 'mídia', 'tela', 'ônibus' e 'celular'; prefere pt-PT.\n"
     )
     if context and context.strip():
         prompt = f"{prompt}\n\nContexto visual anterior, se for útil:\n{context.strip()}"
@@ -818,6 +835,139 @@ async def _run_ocr_with_fallback(
             f"{gemma_result.get('text') or ''}"
         )
     return gemma_result
+
+
+def _extract_video_frames_timed(
+    video_path: str, max_frames: int
+) -> List[Tuple[bytes, float]]:
+    """Sample up to ``max_frames`` frames spread evenly across the whole video.
+
+    Returns a list of ``(jpeg_bytes, timestamp_seconds)`` in chronological order.
+    Unlike :func:`_extract_video_frames`, this keeps the timestamp of each frame
+    so OCR results can be labelled with where in the video they appeared.
+    """
+    cap = cv2.VideoCapture(video_path)
+    out: List[Tuple[bytes, float]] = []
+    try:
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        if total > 0:
+            count = min(max_frames, total)
+            # Evenly spaced frame indices across the full clip (inclusive ends).
+            indices = sorted(
+                {int(i * (total - 1) / max(count - 1, 1)) for i in range(count)}
+            )
+            for idx in indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    continue
+                ok, buf = cv2.imencode(".jpg", frame)
+                if ok:
+                    ts = (idx / fps) if fps > 0 else 0.0
+                    out.append((bytes(buf), ts))
+        else:
+            # Streams without frame-count metadata: sequential stride scan.
+            i = 0
+            while len(out) < max_frames:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                if i % _VIDEO_FRAME_STRIDE == 0:
+                    ok, buf = cv2.imencode(".jpg", frame)
+                    if ok:
+                        ts = (i / fps) if fps > 0 else 0.0
+                        out.append((bytes(buf), ts))
+                i += 1
+    finally:
+        cap.release()
+    return out
+
+
+def _format_video_timestamp(seconds: float) -> str:
+    """Format a timestamp in seconds as ``mm:ss`` (or ``h:mm:ss`` past an hour)."""
+    total = int(round(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+async def _ocr_one_frame_raw(
+    query: str, frame_bytes: bytes, context: Optional[str]
+) -> str:
+    """Run OCR on a single frame and return the raw extracted text (no preamble).
+
+    Tries Docling first (matching the single-image path) and falls back to Gemma
+    OCR. Never raises — returns an empty string when nothing is extracted so one
+    bad frame can't abort the whole video.
+    """
+    frame_id = uuid.uuid4().hex[:12]
+    frame_path = os.path.abspath(os.path.join(VISION_UPLOADS_DIR, f"{frame_id}.jpg"))
+    try:
+        with open(frame_path, "wb") as f:
+            f.write(frame_bytes)
+        if _docling_ocr_enabled():
+            try:
+                return (await _run_docling_ocr(frame_path)).strip()
+            except Exception as e:
+                logger.warning(
+                    "Docling OCR failed on a video frame ({}); falling back to Gemma.",
+                    type(e).__name__,
+                )
+        result = await _run_gemma_ocr(
+            query=query,
+            images=[(frame_bytes, "image/jpeg")],
+            context=context,
+            media_kind="fotograma de vídeo",
+        )
+        if result.get("route") == "ocr":
+            return (result.get("text") or "").strip()
+        return ""
+    except Exception as e:
+        logger.warning("OCR failed on a video frame: {}", e)
+        return ""
+    finally:
+        try:
+            os.remove(frame_path)
+        except OSError:
+            pass
+
+
+async def _ocr_video_frames_combined(
+    frames_timed: List[Tuple[bytes, float]],
+    query: str,
+    context: Optional[str],
+) -> Tuple[str, int]:
+    """OCR every sampled frame concurrently, dedupe, and combine into one block.
+
+    Consecutive frames that yield the same text (a static caption/overlay held on
+    screen) are collapsed to a single entry so the result stays readable. Returns
+    ``(combined_text, distinct_block_count)``.
+    """
+    semaphore = asyncio.Semaphore(_video_ocr_concurrency())
+
+    async def _bounded(idx: int, frame_bytes: bytes, ts: float):
+        async with semaphore:
+            text = await _ocr_one_frame_raw(query, frame_bytes, context)
+            return idx, ts, text
+
+    gathered = await asyncio.gather(
+        *(_bounded(i, fb, ts) for i, (fb, ts) in enumerate(frames_timed))
+    )
+    gathered.sort(key=lambda r: r[0])
+
+    blocks: List[str] = []
+    last_norm: Optional[str] = None
+    for _idx, ts, text in gathered:
+        if not text:
+            continue
+        norm = " ".join(text.split()).lower()
+        if norm == last_norm:
+            continue  # same text as the previous kept frame — skip the duplicate
+        last_norm = norm
+        blocks.append(f"**[{_format_video_timestamp(ts)}]**\n{text}")
+
+    return "\n\n".join(blocks), len(blocks)
 
 
 @router.post("/vision/multimodal")
@@ -1215,8 +1365,12 @@ async def multimodal_chat(
             frame = _first_frame_as_jpeg(saved_path)
             if frame:
                 if _looks_like_ocr_task(query):
+                    # OCR on a video: read text from frames sampled across the
+                    # WHOLE clip (text often changes frame-to-frame). The frame
+                    # OCR runs concurrently with Gemma's visual analysis of the
+                    # same frames, then the two results are merged into one reply.
                     logger.info(
-                        "ChatAgent tool start | agent=multimodal route=ocr media=video_frame "
+                        "ChatAgent tool start | agent=multimodal route=ocr media=video_frames "
                         "file={} bytes={} query={!r}",
                         file.filename,
                         len(file_bytes),
@@ -1233,28 +1387,75 @@ async def multimodal_chat(
                         duration_ms=None,
                         query=query,
                         file=log_file,
-                        details={"route": "ocr", "media": "video_frame"},
+                        details={"route": "ocr", "media": "video_frames"},
                     )
-                    frame_id = uuid.uuid4().hex[:12]
-                    frame_path = os.path.abspath(
-                        os.path.join(VISION_UPLOADS_DIR, f"{frame_id}.jpg")
+                    ocr_frames = _extract_video_frames_timed(
+                        saved_path, _video_ocr_max_frames()
                     )
-                    with open(frame_path, "wb") as f:
-                        f.write(frame)
+                    if not ocr_frames:
+                        ocr_frames = [(frame, 0.0)]
+                    analysis_prompt = (
+                        f"{prompt}\n\nNota: o ficheiro enviado é um vídeo e foram "
+                        f"amostrados {len(ocr_frames)} fotogramas ao longo de toda a "
+                        "duração. Descreve de forma breve o que se vê e como evolui "
+                        "(cenas, ações, mudanças). O texto detetado por OCR é tratado "
+                        "à parte, por isso foca-te na descrição visual."
+                    )
+                    analysis_images = [(fb, "image/jpeg") for fb, _ in ocr_frames]
                     try:
-                        result = await _run_ocr_with_fallback(
-                            query=query,
-                            image_path=frame_path,
-                            images=[(frame, "image/jpeg")],
-                            context=context,
-                            media_kind="primeiro fotograma do vídeo",
+                        # Run frame OCR and the visual analysis concurrently. The
+                        # analysis is allowed to fail without losing the OCR text
+                        # (the primary deliverable), so collect exceptions instead
+                        # of letting gather abort the whole request.
+                        ocr_combined, gemma_outcome = await asyncio.gather(
+                            _ocr_video_frames_combined(ocr_frames, query, context),
+                            _call_gemma(
+                                analysis_prompt,
+                                analysis_images,
+                                purpose="multimodal_chat",
+                            ),
+                            return_exceptions=True,
                         )
+                        # OCR is primary — if it failed, surface that error.
+                        if isinstance(ocr_combined, BaseException):
+                            raise ocr_combined
+                        ocr_text, distinct_blocks = ocr_combined
+                        ocr_section = (
+                            ocr_text
+                            if ocr_text
+                            else "_Não foi detetado texto legível nos fotogramas analisados._"
+                        )
+                        if isinstance(gemma_outcome, BaseException):
+                            logger.warning(
+                                "Video visual analysis failed ({}); returning OCR only.",
+                                type(gemma_outcome).__name__,
+                            )
+                            analysis_section = (
+                                "_A análise visual não ficou disponível desta vez; "
+                                "o texto detetado acima foi extraído com sucesso._"
+                            )
+                        else:
+                            analysis_section = gemma_outcome
+                        combined_text = (
+                            f"## Texto detetado no vídeo\n"
+                            f"_(OCR de {len(ocr_frames)} fotogramas; "
+                            f"{distinct_blocks} blocos distintos)_\n\n"
+                            f"{ocr_section}\n\n"
+                            f"## Análise visual\n{analysis_section}"
+                        )
+                        result = {
+                            "text": combined_text,
+                            "route": "ocr",
+                            "engine": "docling_gemma_video",
+                            "image_base64": None,
+                        }
                         logger.success(
                             "ChatAgent tool success | agent=multimodal route=ocr "
-                            "media=video_frame engine={} duration_ms={} chars={}",
-                            result.get("engine"),
+                            "media=video_frames frames={} blocks={} duration_ms={} chars={}",
+                            len(ocr_frames),
+                            distinct_blocks,
                             round((perf_counter() - started_at) * 1000),
-                            len(result.get("text") or ""),
+                            len(combined_text),
                         )
                         await _write_multimodal_tool_log(
                             user_id=user_id,
@@ -1269,9 +1470,10 @@ async def multimodal_chat(
                             file=log_file,
                             details={
                                 "route": "ocr",
-                                "media": "video_frame",
-                                "engine": result.get("engine"),
-                                "response_chars": len(result.get("text") or ""),
+                                "media": "video_frames",
+                                "frames": len(ocr_frames),
+                                "distinct_blocks": distinct_blocks,
+                                "response_chars": len(combined_text),
                             },
                         )
                         return result
@@ -1289,7 +1491,7 @@ async def multimodal_chat(
                             file=log_file,
                             details={
                                 "route": "ocr",
-                                "media": "video_frame",
+                                "media": "video_frames",
                                 "error_type": type(e).__name__,
                                 "error": str(e) or repr(e),
                             },
@@ -1300,14 +1502,21 @@ async def multimodal_chat(
                             os.remove(saved_path)
                         except OSError:
                             pass
-                        try:
-                            os.remove(frame_path)
-                        except OSError:
-                            pass
-                images.append((frame, "image/jpeg"))
+                # General video analysis: sample frames across the ENTIRE clip
+                # (not just the first frame) so the model can describe the whole
+                # video — scene changes, actions, and how it evolves over time.
+                # Falls back to the single first frame if sampling fails.
+                frames = _extract_video_frames(saved_path)
+                if not frames:
+                    frames = [frame]
+                for fr in frames:
+                    images.append((fr, "image/jpeg"))
                 prompt = (
                     f"{prompt}\n\nNota: o ficheiro enviado é um vídeo. "
-                    "Para esta resposta geral foi analisado apenas o primeiro fotograma. "
+                    f"Foram amostrados {len(frames)} fotogramas distribuídos cronologicamente "
+                    "ao longo de toda a duração do vídeo. Analisa a sequência completa: "
+                    "descreve a evolução temporal, mudanças de cena, ações e diferenças entre "
+                    "o início e o fim — NÃO te limites ao primeiro fotograma. "
                     "Para deteção/seguimento de objetos, pede explicitamente para detetar, "
                     "contar, identificar ou seguir o alvo."
                 )
@@ -1401,7 +1610,7 @@ async def multimodal_chat(
                 "Não consegui usar a análise multimodal da Gemma.",
             )
         raise HTTPException(status_code=503, detail=str(e))
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as e:
         logger.warning(
             f"Gemma multimodal timed out after {_gemma_multimodal_timeout()}s; "
             f"falling back where possible. query={repr(query[:80])}"

@@ -12,18 +12,26 @@ import {
   NotebookChatMessage,
   UpdateGlobalChatSessionRequest,
   GlobalChatContextStats,
+  GlobalChatSession,
 } from '@/lib/types/api'
 import {
+  formatDeepResearchCompletion,
   formatDeepResearchFailure,
   formatDeepResearchProgress,
-  formatDeepResearchResult,
+  formatDeepResearchReport,
+  parseResearchJobId,
   pollDeepResearchJob,
+  reconcileDeepResearchMessages,
+  reportMessageId,
+  reviseResearchReportMessage,
   runDeepResearchAgent,
+  runDeepResearchReportEdit,
+  withResolvedModelName,
 } from '@/lib/chat-agents/deep-research-agent'
 import { runGlobalSaveNoteAgent } from '@/lib/chat-agents/save-note-agent'
 import { runRouteAgent } from '@/lib/chat-agents/route-agent'
 import { runTranscriptionAgent } from '@/lib/chat-agents/transcription-agent'
-import { runGraphAgent } from '@/lib/chat-agents/graph-agent'
+import { runGraphAgent, isGraphRequest } from '@/lib/chat-agents/graph-agent'
 import { runDataProfilerAgent } from '@/lib/chat-agents/data-profiler-agent'
 import {
   createChatAgentRunId,
@@ -35,7 +43,6 @@ import { routeChatAgentWithGemma } from '@/lib/chat-agents/router'
 import {
   detectTextAgentInstruction,
   instructionForVisualMode,
-  instructionForAgent,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
@@ -58,7 +65,22 @@ function normaliseForMatching(text: string): string {
 
 function looksLikeVisualFollowUp(message: string): boolean {
   const text = normaliseForMatching(message)
-  return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|again|de novo|outra vez|anexo|ficheiro)\b/.test(text)
+  // Only match visual-specific keywords — generic "again" words ("again", "de novo",
+  // "outra vez") are deliberately excluded: they apply to any domain and caused
+  // non-visual follow-ups (e.g. table questions) to incorrectly reuse the last photo.
+  return /\b(image|picture|photo|foto|imagem|video|frame|ocr|texto|text|ler|read|extrair|extract|transcrever|transcribe|detetar|detectar|detect|identifica|identificar|identify|conta|contar|count|segment|segmenta|segmentar|sam-?3|rf-?\s?detr|rfdetr|anexo|ficheiro|anterior|anteriores|previous|before|last photo|last image|foto anterior|imagem anterior|foto de antes|imagem de antes)\b/.test(text)
+}
+
+// Specifically detects explicit "give me the previous photo/image" intent, so we
+// can show a helpful message when no file is stored in memory.
+function looksLikePreviousPhotoRequest(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(foto anterior|imagem anterior|foto de antes|imagem de antes|previous photo|previous image|last photo|last image|ultima foto|ultima imagem|a foto de ha pouco|a imagem de ha pouco|que enviaste antes|que enviei antes)\b/.test(text)
+}
+
+function looksLikeDataFollowUp(message: string): boolean {
+  const text = normaliseForMatching(message)
+  return /\b(coluna|colunas|column|columns|linha|linhas|row|rows|valor|valores|value|values|dados|data|celula|celulas|cell|cells|campo|campos|field|fields|tabela|table|filtrar|filter|ordenar|sort|media|mean|min|max|soma|sum|contagem|count|unique|unicos|missing|nulos|null|outlier)\b/.test(text)
 }
 
 function buildVisualContext(previousResponse: string): string | undefined {
@@ -113,7 +135,11 @@ export function useGlobalChat() {
   const lastVisualFileRef = useRef<File | null>(null)
   const lastVisualQueryRef = useRef('')
   const lastVisualContextRef = useRef('')
+  const lastDataFileRef = useRef<File | null>(null)
   const currentSessionIdRef = useRef<string | null>(currentSessionId)
+  // Deep research jobs already being polled by this hook instance (inline or
+  // reconciled), so the reconciler never double-polls the same job.
+  const polledResearchJobsRef = useRef<Set<string>>(new Set())
 
   // Fetch all global chat sessions
   const {
@@ -152,6 +178,43 @@ export function useGlobalChat() {
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId
   }, [currentSessionId])
+
+  // Resume any deep research jobs whose "em curso" message was loaded from the
+  // server (e.g. after a reload or navigating away and back). Without this the
+  // message would stay frozen on the progress placeholder forever.
+  useEffect(() => {
+    const sessionId = currentSessionId
+    if (!sessionId) return
+    reconcileDeepResearchMessages({
+      messages,
+      polledJobs: polledResearchJobsRef.current,
+      queryClient,
+      isActive: () => currentSessionIdRef.current === sessionId,
+      applyContent: (id, content) => {
+        if (currentSessionIdRef.current !== sessionId) return
+        localMessagesDirtyRef.current = true
+        setMessages(prev => prev.map(m => m.id === id ? { ...m, content } : m))
+      },
+      appendMessage: (msg) => {
+        if (currentSessionIdRef.current !== sessionId) return
+        localMessagesDirtyRef.current = true
+        setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
+      },
+      persist: ({ userMessage, userMessageId, assistantMessage, assistantMessageId }) => {
+        void globalChatApi.persistExchange(sessionId, {
+          user_message: userMessage,
+          assistant_message: assistantMessage,
+          user_message_id: userMessageId,
+          assistant_message_id: assistantMessageId,
+        }).then(() => {
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+        }).catch((persistError) => {
+          console.error('Failed to persist reconciled deep research exchange:', persistError)
+        })
+      },
+    })
+  }, [messages, currentSessionId, queryClient])
 
   // Auto-select most recent session — only on the very first load.
   useEffect(() => {
@@ -205,34 +268,53 @@ export function useGlobalChat() {
   const deleteSessionMutation = useMutation({
     mutationFn: (sessionId: string) =>
       globalChatApi.deleteSession(sessionId),
-    onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.globalChatSessions
-      })
-      // Drop the cached session so the messages effect can't repopulate
-      // from stale data after we clear it below.
-      queryClient.removeQueries({
-        queryKey: QUERY_KEYS.globalChatSession(deletedId)
-      })
-      if (currentSessionId === deletedId) {
-        // Mark auto-select as already done so we don't immediately
-        // jump into another session — the user wants the panel cleared.
+    // Optimistic delete: remove the session from the UI instantly and fire the
+    // request in the background. If the server rejects it, we roll back and the
+    // session reappears with an error toast.
+    onMutate: async (deletedId: string) => {
+      await queryClient.cancelQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+      const previousSessions = queryClient.getQueryData<GlobalChatSession[]>(
+        QUERY_KEYS.globalChatSessions,
+      )
+      // Remove from the sidebar list immediately.
+      queryClient.setQueryData<GlobalChatSession[]>(
+        QUERY_KEYS.globalChatSessions,
+        (old) => (Array.isArray(old) ? old.filter((s) => s.id !== deletedId) : old),
+      )
+      // If the deleted session was open, clear the panel immediately too.
+      const wasActive = currentSessionId === deletedId
+      if (wasActive) {
         autoSelectedRef.current = true
         hasLocalMultimodalMessagesRef.current = false
         localMessagesDirtyRef.current = false
         lastVisualFileRef.current = null
         lastVisualQueryRef.current = ''
         lastVisualContextRef.current = ''
+        lastDataFileRef.current = null
         setIsVisualModelLocked(false)
         setCurrentSessionId(null)
         setMessages([])
       }
-      toast.success(t.chat.sessionDeleted)
+      return { previousSessions, wasActive }
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _deletedId, context) => {
+      // Roll back the optimistic removal.
+      if (context?.previousSessions !== undefined) {
+        queryClient.setQueryData(QUERY_KEYS.globalChatSessions, context.previousSessions)
+      }
       const error = err as { response?: { data?: { detail?: string } }, message?: string }
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
-    }
+    },
+    onSuccess: (_, deletedId) => {
+      queryClient.removeQueries({
+        queryKey: QUERY_KEYS.globalChatSession(deletedId),
+      })
+      toast.success(t.chat.sessionDeleted)
+    },
+    // Reconcile with the server in the background (confirms the delete).
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+    },
   })
 
   // Send message
@@ -262,6 +344,7 @@ export function useGlobalChat() {
           model_override: pendingModelOverride ?? undefined
         })
         sessionId = newSession.id
+        currentSessionIdRef.current = sessionId
         setCurrentSessionId(sessionId)
         setPendingModelOverride(null)
         queryClient.invalidateQueries({
@@ -272,6 +355,14 @@ export function useGlobalChat() {
         toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
         return
       }
+    }
+
+    // If the user explicitly asks for a "previous photo" but we have none stored,
+    // show a helpful message and bail out early rather than sending a broken request.
+    if (!file && looksLikePreviousPhotoRequest(message) && !lastVisualFileRef.current) {
+      toast.info('Não encontrei uma imagem anterior nesta conversa. Envia uma nova imagem para eu poder analisá-la.')
+      setIsSending(false)
+      return
     }
 
     const isVisualFollowUp = !file && isVisualFile(lastVisualFileRef.current) && looksLikeVisualFollowUp(message)
@@ -300,6 +391,36 @@ export function useGlobalChat() {
         sessionId,
         modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
       }
+
+      // Follow-up edits to an existing deep-research report rewrite that same
+      // message in place instead of producing a new one.
+      if (!file) {
+        const reportEdit = await runDeepResearchReportEdit({
+          message,
+          messages,
+          queryClient,
+          modelId: modelOverride ?? (currentSession?.model_override ?? undefined),
+          context: agentContext,
+        })
+        if (reportEdit) {
+          localMessagesDirtyRef.current = true
+          setMessages(prev => prev.map(m => m.id === reportEdit.targetMessageId ? { ...m, content: reportEdit.newContent } : m))
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: reportEdit.newContent,
+            user_message_id: userMessage.id,
+            assistant_message_id: reportEdit.targetMessageId,
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+          }).catch((persistError) => {
+            console.error('Failed to persist report edit:', persistError)
+          })
+          toast.success('Relatório atualizado.')
+          return
+        }
+      }
+
       const routerDecision = await routeChatAgentWithGemma({
         message,
         file: visualFile,
@@ -310,16 +431,23 @@ export function useGlobalChat() {
       const preferredAgent = routerDecision && routerDecision.confidence >= 0.55
         ? routerDecision.agent
         : undefined
+      const deepResearchOptions = withResolvedModelName(
+        deepResearch ?? (preferredAgent === 'deep_research'
+          ? { reportType: 'research_report', tone: 'Objective' }
+          : undefined),
+        queryClient,
+      )
 
       if (!file) {
         const content = await runDeepResearchAgent({
           message,
-          options: deepResearch,
+          options: deepResearchOptions,
           queryClient,
           context: agentContext,
         })
         if (content) {
           const aiMessageId = `ai-research-${content.jobId}`
+          const userMessageId = userMessage.id
           const aiMessage: NotebookChatMessage = {
             id: aiMessageId,
             type: 'ai',
@@ -327,33 +455,60 @@ export function useGlobalChat() {
             timestamp: new Date().toISOString()
           }
           setMessages(prev => [...prev, aiMessage])
+          // Claim this job so the reconciler effect won't start a second poll.
+          polledResearchJobsRef.current.add(content.jobId)
+          void globalChatApi.persistExchange(sessionId, {
+            user_message: userMessage.content,
+            assistant_message: content.initialContent,
+            user_message_id: userMessageId,
+            assistant_message_id: aiMessageId,
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+          }).catch((persistError) => {
+            console.error('Failed to persist initial deep research exchange:', persistError)
+          })
           void pollDeepResearchJob({
             jobId: content.jobId,
             queryClient,
             onUpdate: (_content, job) => {
               if (currentSessionIdRef.current !== sessionId) return
-              const nextContent = formatDeepResearchProgress(message, deepResearch!, content.jobId, job)
+              const nextContent = formatDeepResearchProgress(message, deepResearchOptions!, content.jobId, job)
               setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: nextContent } : m))
             },
             onComplete: (_content, job) => {
-              const finalContent = formatDeepResearchResult(message, deepResearch!, job)
+              const completionContent = formatDeepResearchCompletion(message, deepResearchOptions!, job)
+              const rptContent = formatDeepResearchReport(job)
+              const rptId = reportMessageId(content.jobId)
               if (currentSessionIdRef.current === sessionId) {
                 localMessagesDirtyRef.current = true
-                setMessages(prev => prev.map(m => m.id === aiMessageId ? { ...m, content: finalContent } : m))
+                setMessages(prev => {
+                  const updated = prev.map(m => m.id === aiMessageId ? { ...m, content: completionContent } : m)
+                  if (updated.some(m => m.id === rptId)) return updated
+                  return [...updated, { id: rptId, type: 'ai' as const, content: rptContent, timestamp: new Date().toISOString() }]
+                })
+              }
+              const invalidate = () => {
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
               }
               void globalChatApi.persistExchange(sessionId, {
                 user_message: userMessage.content,
-                assistant_message: finalContent,
-              }).then(() => {
-                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
-              }).catch((persistError) => {
-                console.error('Failed to persist deep research exchange:', persistError)
-              })
+                assistant_message: completionContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
+              }).then(invalidate).catch((e) => console.error('Failed to persist DR completion:', e))
+              void globalChatApi.persistExchange(sessionId, {
+                user_message: userMessage.content,
+                assistant_message: rptContent,
+                user_message_id: userMessageId,
+                assistant_message_id: rptId,
+              }).then(invalidate).catch((e) => console.error('Failed to persist DR report:', e))
             },
             onFailure: (_content, job) => {
               const failureContent = formatDeepResearchFailure(
                 message,
-                deepResearch!,
+                deepResearchOptions!,
                 content.jobId,
                 job?.error ?? (typeof _content === 'string' ? _content : undefined),
               )
@@ -364,6 +519,8 @@ export function useGlobalChat() {
               void globalChatApi.persistExchange(sessionId, {
                 user_message: userMessage.content,
                 assistant_message: failureContent,
+                user_message_id: userMessageId,
+                assistant_message_id: aiMessageId,
               }).catch((persistError) => {
                 console.error('Failed to persist failed deep research exchange:', persistError)
               })
@@ -426,14 +583,28 @@ export function useGlobalChat() {
         }
       }
 
-      if (file) {
+      // A table follow-up that asks for a chart ("gráfico de barras da coluna X")
+      // must go to the graph agent, not the profiler — even though it mentions a
+      // column. Detect chart intent up front so the profiler defers to the graph
+      // block below instead of intercepting and returning a profile.
+      const wantsGraph = preferredAgent === 'graph_generator' || isGraphRequest(message)
+
+      // Data profiler: runs when a file is attached OR when the user is asking
+      // a follow-up question about a table from a previous turn (re-uses the
+      // stored last data file so the model sees the actual column values).
+      const isDataFollowUp =
+        !file && !!lastDataFileRef.current && looksLikeDataFollowUp(message) && !wantsGraph
+      const dataFile = file ?? (isDataFollowUp ? lastDataFileRef.current ?? undefined : undefined)
+      if (dataFile) {
         const content = await runDataProfilerAgent(
           message,
-          file,
+          dataFile,
           agentContext,
-          preferredAgent === 'data_profiler',
+          preferredAgent === 'data_profiler' || isDataFollowUp,
         )
         if (content) {
+          // Remember the file for future follow-ups.
+          if (file) lastDataFileRef.current = file
           const aiMessage: NotebookChatMessage = {
             id: `ai-${Date.now()}`,
             type: 'ai',
@@ -451,14 +622,21 @@ export function useGlobalChat() {
         }
       }
 
-      if (file) {
+      {
+        // Graph agent: reuses last data file on follow-up questions, just like
+        // the data profiler block above. Triggers when the follow-up references
+        // the table (column words) OR explicitly asks for a chart.
+        const isGraphFollowUp =
+          !file && !!lastDataFileRef.current && (looksLikeDataFollowUp(message) || wantsGraph)
+        const graphFile = file ?? (isGraphFollowUp ? lastDataFileRef.current ?? undefined : undefined)
         const content = await runGraphAgent(
           message,
-          file,
+          graphFile,
           agentContext,
-          preferredAgent === 'graph_generator',
+          preferredAgent === 'graph_generator' || isGraphFollowUp,
         )
         if (content) {
+          if (file) lastDataFileRef.current = file
           const aiMessage: NotebookChatMessage = {
             id: `ai-${Date.now()}`,
             type: 'ai',
@@ -529,9 +707,16 @@ export function useGlobalChat() {
           context: isVisualFollowUp ? buildVisualContext(lastVisualContextRef.current) : undefined,
           mode: 'chat',
           file: visualFile,
-          force_engine: agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto'
-            ? agentOptions.vision.engine
-            : undefined,
+          // UI panel takes precedence; router parameter is the fallback so
+          // phrases like "usa o sam3" actually reach the correct engine.
+          force_engine: (() => {
+            if (agentOptions?.vision?.engine && agentOptions.vision.engine !== 'auto') {
+              return agentOptions.vision.engine
+            }
+            const fromRouter = routerDecision?.parameters?.force_engine
+            if (fromRouter === 'sam3' || fromRouter === 'rfdetr') return fromRouter
+            return undefined
+          })(),
           surface: agentContext.surface,
           run_id: agentContext.runId,
           session_id: agentContext.sessionId,
@@ -580,7 +765,7 @@ export function useGlobalChat() {
         return
       }
 
-      const agentInstruction = routerDecision?.instruction || instructionForAgent(preferredAgent) || detectTextAgentInstruction(message)
+      const agentInstruction = routerDecision?.instruction || detectTextAgentInstruction(message)
       if (agentInstruction) {
         activeTextAgentContext = {
           instruction: agentInstruction,
@@ -768,6 +953,52 @@ export function useGlobalChat() {
     }
   }, [currentSessionId, updateSessionMutation])
 
+  // Inline edit of a specific deep-research report message — updates that same
+  // message in place (no new user/assistant message), mirroring the
+  // chat-command edit flow.
+  const reviseReport = useCallback(async (messageId: string, instruction: string) => {
+    const sessionId = currentSessionId
+    if (!sessionId) return
+    const index = messages.findIndex(m => m.id === messageId)
+    const target = index >= 0 ? messages[index] : undefined
+    if (!target) return
+    const result = await reviseResearchReportMessage({
+      target,
+      instruction,
+      queryClient,
+      modelId: currentSession?.model_override ?? undefined,
+      context: { surface: 'global_chat', runId: createChatAgentRunId('global_chat'), sessionId },
+    })
+    if (!result) {
+      toast.error('Não consegui atualizar o relatório.')
+      return
+    }
+    localMessagesDirtyRef.current = true
+    setMessages(prev => prev.map(m => m.id === result.targetMessageId ? { ...m, content: result.newContent } : m))
+    // Re-persist the original paired human (no-op upsert by id) + the updated
+    // report (same id) so nothing new is appended. Walk backwards past any AI
+    // messages (e.g. the completion-notification) to find the human request.
+    let pairedHuman: (typeof messages)[0] | undefined
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i].type === 'human') { pairedHuman = messages[i]; break }
+    }
+    if (!pairedHuman) return  // no human to pair with — skip persist to avoid blank message
+    void globalChatApi.persistExchange(sessionId, {
+      user_message: pairedHuman.content,
+      assistant_message: result.newContent,
+      user_message_id: pairedHuman.id,
+      assistant_message_id: result.targetMessageId,
+    }).then(() => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSession(sessionId) })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+    }).catch((persistError) => {
+      console.error('Failed to persist inline report edit:', persistError)
+    })
+    toast.success('Relatório atualizado.')
+  }, [messages, currentSessionId, currentSession, queryClient])
+
+  const isDeepResearchSession = messages.some(m => parseResearchJobId(m.id) !== null)
+
   return {
     sessions,
     currentSession: currentSession || sessions.find(s => s.id === currentSessionId),
@@ -775,6 +1006,7 @@ export function useGlobalChat() {
     messages,
     isSending,
     isVisualModelLocked,
+    isDeepResearchSession,
     loadingSessions,
     pendingModelOverride,
     contextStats,
@@ -784,6 +1016,7 @@ export function useGlobalChat() {
     deleteSession,
     switchSession,
     sendMessage,
+    reviseReport,
     setModelOverride,
     refetchSessions
   }

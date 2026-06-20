@@ -73,11 +73,12 @@ async def _authorize_source_access(source_id: str, request: Request) -> Source:
 
     A user may access a source if any of the following holds:
     - they are the source's owner,
-    - the source has no owner (legacy data created before per-user ownership),
     - they have the ``admin`` role.
 
-    Raises 404 if the source does not exist, 403 if it exists but the user is
-    not allowed to see it.
+    Fail-closed: sources with no owner (legacy data) are NOT public — they are
+    denied to regular users (admins can still see them).
+
+    Raises 404 if the source does not exist or the user is not allowed to see it.
     """
     normalized_source_id = _normalize_source_id(source_id)
     try:
@@ -94,12 +95,9 @@ async def _authorize_source_access(source_id: str, request: Request) -> Source:
         return source
 
     owner = getattr(source, "owner", None)
-    # Legacy sources predating per-user ownership remain readable to everyone.
-    if owner is None:
-        return source
-
     user_id = getattr(request.state, "user_id", "anonymous")
-    if owner != user_id:
+    # Fail-closed: ownerless sources are private (denied), not public.
+    if owner is None or owner != user_id:
         # Hide existence of other users' sources behind the same 404 we use
         # for unknown ids, to avoid leaking information through error codes.
         raise HTTPException(status_code=404, detail="Source not found")
@@ -199,6 +197,7 @@ def parse_source_form_data(
     content: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     transformations: Optional[str] = Form(None),  # JSON string of transformation IDs
+    language: Optional[str] = Form(None),
     embed: str = Form("false"),  # Accept as string, convert to bool
     delete_source: str = Form("false"),  # Accept as string, convert to bool
     async_processing: str = Form("false"),  # Accept as string, convert to bool
@@ -243,6 +242,7 @@ def parse_source_form_data(
             title=title,
             file_path=None,  # Will be set later if file is uploaded
             transformations=transformations_list,
+            language=language,
             embed=embed_bool,
             delete_source=delete_source_bool,
             async_processing=async_processing_bool,
@@ -281,11 +281,10 @@ async def get_sources(
                 status_code=400, detail="sort_order must be 'asc' or 'desc'"
             )
 
-        # Admins see every source; regular users see their own + legacy ones.
+        # Fail-closed: admins see every source; regular users see ONLY their own.
+        # Ownerless/legacy sources are not public.
         is_admin = bool(request is not None and _is_admin_request(request))
-        owner_filter_clause = (
-            "" if is_admin else "WHERE owner = $owner OR owner IS NONE"
-        )
+        owner_filter_clause = "" if is_admin else "WHERE owner = $owner"
 
         # Build ORDER BY clause
         order_clause = f"ORDER BY {sort_by} {sort_order.upper()}"
@@ -523,6 +522,7 @@ async def create_source(
                     notebook_ids=source_data.notebooks,
                     transformations=transformation_ids,
                     embed=source_data.embed,
+                    language=source_data.language,
                 )
 
                 command_id = await CommandService.submit_command_job(
@@ -599,6 +599,7 @@ async def create_source(
                     notebook_ids=source_data.notebooks,
                     transformations=transformation_ids,
                     embed=source_data.embed,
+                    language=source_data.language,
                 )
 
                 # Run in thread pool to avoid blocking the event loop
@@ -1024,6 +1025,7 @@ async def retry_source_processing(source_id: str, request: Request):
                 notebook_ids=notebook_ids,
                 transformations=[],  # Use default transformations on retry
                 embed=True,  # Always embed on retry
+                language=request.headers.get("accept-language"),
             )
 
             command_id = await CommandService.submit_command_job(

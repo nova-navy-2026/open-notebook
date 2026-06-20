@@ -68,10 +68,12 @@ export async function runDataProfilerAgent(
       },
     })
 
+    // Include the table preview as plain markdown (no <details> wrapper) so
+    // the LLM can read the actual row data in subsequent follow-up messages.
     return [
       result.text,
       result.table_preview
-        ? `<details>\n<summary>Pré-visualização dos dados</summary>\n\n${result.table_preview}\n\n</details>`
+        ? `### Pré-visualização dos dados\n\n${result.table_preview}`
         : undefined,
     ].filter(Boolean).join('\n\n')
   } catch (error) {

@@ -3,6 +3,8 @@ import pkgutil
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional
 
+from loguru import logger
+
 from api.chat_agents.base import ChatAgentDefinition
 from api.chat_agents import agents
 
@@ -30,7 +32,15 @@ def get_agent(name: Optional[str]) -> Optional[ChatAgentDefinition]:
 
 def normalise_agent_name(raw: object) -> str:
     agent = str(raw or "normal_chat").strip().lower()
-    return agent if agent in get_agent_registry() else "normal_chat"
+    if agent not in get_agent_registry():
+        logger.warning(
+            "ChatAgent router returned unknown agent name {!r}; falling back to normal_chat. "
+            "Known agents: {}",
+            agent,
+            list(get_agent_registry().keys()),
+        )
+        return "normal_chat"
+    return agent
 
 
 def agent_names_for_prompt() -> str:

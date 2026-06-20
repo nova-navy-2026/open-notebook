@@ -1,7 +1,7 @@
 """
-Authentication router: OAuth2 + Local login with bcrypt.
-Supports Azure AD, Google, and local email/password authentication
-backed by the SurrealDB user table.
+Authentication router: Azure AD (OAuth2) + Local login with bcrypt.
+Supports Azure AD and local email/password authentication backed by the
+SurrealDB user table. No other OAuth providers are supported.
 """
 
 from datetime import datetime
@@ -73,9 +73,8 @@ async def get_auth_status():
     has_password = bool(get_secret_from_env("OPEN_NOTEBOOK_PASSWORD"))
     has_admin = bool(os.getenv("ADMIN_PASSWORD"))
     has_azure = bool(os.getenv("AZURE_CLIENT_ID"))
-    has_google = bool(os.getenv("GOOGLE_CLIENT_ID"))
-    has_github = bool(os.getenv("GITHUB_CLIENT_ID"))
-    oauth_enabled = has_azure or has_google or has_github
+    # Only Azure AD and manual (local) login are supported.
+    oauth_enabled = has_azure
 
     # Auth is enabled if ANY authentication method is configured
     auth_enabled = has_password or has_admin or oauth_enabled
@@ -84,10 +83,8 @@ async def get_auth_status():
         "auth_enabled": auth_enabled,
         "oauth_enabled": oauth_enabled,
         "has_azure": has_azure,
-        "has_google": has_google,
-        "has_github": has_github,
         "local_login_available": has_password or has_admin,
-        "message": "Multiple authentication methods available"
+        "message": "Azure AD and local login available"
     }
 
 
@@ -399,16 +396,6 @@ async def list_oauth_providers():
             "enabled": bool(os.getenv("AZURE_CLIENT_ID")),
             "name": "Microsoft Azure AD",
             "docs": "https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app"
-        },
-        "google": {
-            "enabled": bool(os.getenv("GOOGLE_CLIENT_ID")),
-            "name": "Google OAuth",
-            "docs": "https://developers.google.com/identity/protocols/oauth2"
-        },
-        "github": {
-            "enabled": bool(os.getenv("GITHUB_CLIENT_ID")),
-            "name": "GitHub OAuth",
-            "docs": "https://docs.github.com/en/developers/apps"
         }
     }
     
@@ -527,80 +514,3 @@ async def azure_oauth_callback(
         raise HTTPException(status_code=500, detail="OAuth callback failed")
 
 
-@router.post("/oauth/google/init")
-async def google_oauth_init():
-    """
-    Initialize Google OAuth login flow.
-    Returns authorization URL for Google login.
-    
-    Required environment variables:
-    - GOOGLE_CLIENT_ID
-    - GOOGLE_REDIRECT_URI
-    """
-    
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID")
-    
-    if not google_client_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID environment variable."
-        )
-    
-    google_redirect_uri = os.getenv(
-        "GOOGLE_REDIRECT_URI",
-        "http://localhost:5055/auth/oauth/google/callback"
-    )
-    
-    state = secrets.token_urlsafe(32)
-    
-    auth_url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={google_client_id}&"
-        f"redirect_uri={google_redirect_uri}&"
-        f"response_type=code&"
-        f"scope=openid%20profile%20email&"
-        f"state={state}"
-    )
-    
-    logger.info("✅ Google OAuth initialization requested")
-    
-    return {
-        "provider": "google",
-        "auth_url": auth_url,
-        "state": state,
-        "message": "Redirect user to auth_url to log in with Google"
-    }
-
-
-@router.get("/oauth/google/callback")
-async def google_oauth_callback(
-    code: str = None,
-    state: str = None,
-    error: str = None
-):
-    """
-    Handle Google OAuth callback.
-    
-    TODO: Implement token exchange with Google token endpoint
-    """
-    
-    if error:
-        logger.error(f"❌ Google OAuth error: {error}")
-        raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
-    
-    if not code:
-        raise HTTPException(status_code=400, detail="No authorization code received from Google")
-    
-    try:
-        # TODO: Exchange code for token with Google
-        
-        logger.warning("⚠️ Google OAuth token exchange not yet implemented")
-        
-        return {
-            "status": "pending",
-            "message": "Google OAuth token exchange not yet implemented",
-            "help": "For development, use: POST /auth/login/local with admin account"
-        }
-    except Exception as e:
-        logger.error(f"❌ Google OAuth callback error: {e}")
-        raise HTTPException(status_code=500, detail="OAuth callback failed")

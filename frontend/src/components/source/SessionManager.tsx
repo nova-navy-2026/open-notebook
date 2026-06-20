@@ -13,9 +13,10 @@ import {
   Edit2,
   Check,
   X,
-  Clock
+  Clock,
+  Search
 } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, isToday, isYesterday, differenceInCalendarDays } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import {
@@ -39,6 +40,13 @@ interface SessionManagerProps {
   onUpdateSession: (sessionId: string, title: string) => void
   onDeleteSession: (sessionId: string) => void
   loadingSessions: boolean
+  // "panel" (default) renders the boxed card used inside the Sessions tab.
+  // "sidebar" renders a ChatGPT-style persistent left column with a prominent
+  // "New chat" button and no card chrome.
+  variant?: 'panel' | 'sidebar'
+  // Optional: start a brand-new chat (sidebar "New chat" button). Falls back to
+  // creating a default-titled session when not provided.
+  onNewChat?: () => void
 }
 
 export function SessionManager({
@@ -48,16 +56,53 @@ export function SessionManager({
   onSelectSession,
   onUpdateSession,
   onDeleteSession,
-  loadingSessions
+  loadingSessions,
+  variant = 'panel',
+  onNewChat,
 }: SessionManagerProps) {
+  const isSidebar = variant === 'sidebar'
   const { t, language } = useTranslation()
   const [isCreating, setIsCreating] = useState(false)
   const [newSessionTitle, setNewSessionTitle] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const { data: models } = useModels()
+
+  // Filter by the search box, then bucket sessions by recency (ChatGPT-style).
+  const sessionGroups = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    const filtered = query
+      ? sessions.filter((s) => (s.title || '').toLowerCase().includes(query))
+      : sessions
+
+    const buckets: { key: string; label: string; items: BaseChatSession[] }[] = [
+      { key: 'today', label: t.chat.groupToday ?? 'Hoje', items: [] },
+      { key: 'yesterday', label: t.chat.groupYesterday ?? 'Ontem', items: [] },
+      { key: 'week', label: t.chat.groupPrevious7Days ?? 'Últimos 7 dias', items: [] },
+      { key: 'month', label: t.chat.groupPrevious30Days ?? 'Últimos 30 dias', items: [] },
+      { key: 'older', label: t.chat.groupOlder ?? 'Mais antigas', items: [] },
+    ]
+
+    // Most recently updated first within each bucket.
+    const sorted = [...filtered].sort(
+      (a, b) => new Date(b.updated || b.created).getTime() - new Date(a.updated || a.created).getTime(),
+    )
+
+    for (const session of sorted) {
+      const date = new Date(session.updated || session.created)
+      const days = differenceInCalendarDays(new Date(), date)
+      if (isToday(date)) buckets[0].items.push(session)
+      else if (isYesterday(date)) buckets[1].items.push(session)
+      else if (days <= 7) buckets[2].items.push(session)
+      else if (days <= 30) buckets[3].items.push(session)
+      else buckets[4].items.push(session)
+    }
+
+    return buckets.filter((b) => b.items.length > 0)
+  }, [sessions, searchQuery, t])
 
   // Helper to get model name from ID
   const customModelLabel = t.common.customModel
@@ -103,25 +148,52 @@ export function SessionManager({
 
   return (
     <>
-      <Card className="h-full flex flex-col">
-        <CardHeader className="pb-3 pr-12">
-          <CardTitle className="flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
-              {t.chat.sessions}
-            </span>
+      <Card
+        className={
+          isSidebar
+            ? 'h-full flex flex-col border-0 bg-transparent shadow-none rounded-none'
+            : 'h-full flex flex-col'
+        }
+      >
+        <CardHeader className={isSidebar ? 'gap-2 px-3 pb-2 pt-3' : 'pb-3 pr-12'}>
+          {isSidebar ? (
             <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setIsCreating(true)}
-              className="ml-4"
+              className="w-full justify-start gap-2"
+              onClick={() => (onNewChat ? onNewChat() : onCreateSession(t.chat.newChat ?? 'Nova conversa'))}
             >
-              <Plus className="h-4 w-4 mr-1" />
-              <span className="text-xs">{t.common.create}</span>
+              <Plus className="h-4 w-4" />
+              {t.chat.newChat ?? 'Nova conversa'}
             </Button>
-          </CardTitle>
+          ) : (
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5" />
+                {t.chat.sessions}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsCreating(true)}
+                className="ml-4"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                <span className="text-xs">{t.common.create}</span>
+              </Button>
+            </CardTitle>
+          )}
+          {sessions.length > 0 && (
+            <div className={`relative ${isSidebar ? '' : 'mt-2'}`}>
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t.chat.searchSessions ?? 'Procurar conversas...'}
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+          )}
         </CardHeader>
-        <CardContent className="flex-1 p-0 min-h-0">
+        <CardContent className={isSidebar ? 'flex-1 p-0 min-h-0' : 'flex-1 p-0 min-h-0'}>
           <ScrollArea className="h-full px-4">
             {isCreating && (
               <div className="p-3 border rounded-lg mb-3">
@@ -163,15 +235,24 @@ export function SessionManager({
                 <p className="text-sm">{t.chat.noSessions}</p>
                 <p className="text-xs mt-2">{t.chat.createToStart}</p>
               </div>
+            ) : sessionGroups.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <p className="text-sm">{t.common.noResults ?? 'Sem resultados'}</p>
+              </div>
             ) : (
-              <div className="space-y-2 pb-4">
-                {sessions.map((session) => (
+              <div className="space-y-4 pb-4">
+                {sessionGroups.map((group) => (
+                  <div key={group.key} className="space-y-1">
+                    <div className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group.label}
+                    </div>
+                    {group.items.map((session) => (
                   <div
                     key={session.id}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                    className={`group p-3 rounded-lg border cursor-pointer transition-colors ${
                       currentSessionId === session.id
                         ? 'bg-primary/10 border-primary'
-                        : 'hover:bg-muted'
+                        : 'border-transparent hover:bg-muted'
                     }`}
                     onClick={() => onSelectSession(session.id)}
                   >
@@ -205,7 +286,10 @@ export function SessionManager({
                           <h4 className="font-medium text-sm flex-1 mr-2">
                             {session.title}
                           </h4>
-                          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                          <div
+                            className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <Button
                               size="sm"
                               variant="ghost"
@@ -243,6 +327,8 @@ export function SessionManager({
                         )}
                       </>
                     )}
+                  </div>
+                    ))}
                   </div>
                 ))}
               </div>

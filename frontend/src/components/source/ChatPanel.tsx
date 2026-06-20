@@ -10,7 +10,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2 } from 'lucide-react'
+import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square } from 'lucide-react'
+import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -43,10 +44,11 @@ import { useModalManager } from '@/lib/hooks/use-modal-manager'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
-import { useModelDefaults } from '@/lib/hooks/use-models'
+import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
+import { useVoiceInput } from '@/lib/hooks/use-voice-input'
 
 interface NotebookContextStats {
   sourcesInsights: number
@@ -73,6 +75,9 @@ interface ChatPanelProps {
     deepResearch?: ChatDeepResearchOptions,
     agentOptions?: ChatAgentUiOptions,
   ) => void
+  // Inline edit of a deep-research report message (revises in place). When
+  // provided, report messages show an "Editar relatório" affordance.
+  onReviseReport?: (messageId: string, instruction: string) => Promise<void> | void
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -94,9 +99,88 @@ interface ChatPanelProps {
   visualModelLocked?: boolean
   enableDeepResearch?: boolean
   enableAgentControls?: boolean
+  isDeepResearchSession?: boolean
   // Export all conversations (optional). When provided, an "Export all" item is shown.
   onExportAll?: () => void | Promise<void>
   exportingAll?: boolean
+}
+
+/** Inline "edit the report" control shown under a deep-research report message. */
+function ReportEditAffordance({
+  messageId,
+  onReviseReport,
+}: {
+  messageId: string
+  onReviseReport: (messageId: string, instruction: string) => Promise<void> | void
+}) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const instruction = text.trim()
+    if (!instruction || busy) return
+    setBusy(true)
+    try {
+      await onReviseReport(messageId, instruction)
+      setText('')
+      setOpen(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-fit px-2 text-xs text-muted-foreground"
+        onClick={() => setOpen(true)}
+      >
+        <Pencil className="h-3.5 w-3.5 mr-1" />
+        Editar relatório
+      </Button>
+    )
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <Textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="O que queres alterar no relatório? (ex.: encurta para metade, adiciona uma secção sobre…)"
+        rows={2}
+        className="text-sm"
+        disabled={busy}
+        autoFocus
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            e.preventDefault()
+            void submit()
+          }
+        }}
+      />
+      <div className="flex gap-2">
+        <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void submit()} disabled={busy || !text.trim()}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+          Aplicar
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-3 text-xs"
+          onClick={() => {
+            setOpen(false)
+            setText('')
+          }}
+          disabled={busy}
+        >
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 export function ChatPanel({
@@ -104,6 +188,7 @@ export function ChatPanel({
   isStreaming,
   contextIndicators,
   onSendMessage,
+  onReviseReport,
   modelOverride,
   onModelChange,
   sessions = [],
@@ -121,6 +206,7 @@ export function ChatPanel({
   visualModelLocked = false,
   enableDeepResearch = false,
   enableAgentControls = false,
+  isDeepResearchSession = false,
   onExportAll,
   exportingAll = false,
 }: ChatPanelProps) {
@@ -146,6 +232,7 @@ export function ChatPanel({
   const { data: reportTypes = [] } = useReportTypes()
   const { data: tones = [] } = useResearchTones()
   const { data: modelDefaults } = useModelDefaults()
+  const { data: models = [] } = useModels()
   const { data: availableNotebooks = [] } = useQuery({
     queryKey: ['chat-agent-notebooks'],
     queryFn: () => notebooksApi.list({ archived: false }),
@@ -154,13 +241,24 @@ export function ChatPanel({
   const selectedFileKind = getAttachmentKind(selectedFile)
   const selectedFileIsVisual = isVisualLikeFile(selectedFile)
   const selectedFileIsAudio = isAudioLikeFile(selectedFile)
-  const isVisualModelLocked = enableAttachments && (visualModelLocked || selectedFileIsVisual)
-  const canUseDeepResearch = enableDeepResearch && !selectedFile
+  const isVisualModelLocked = enableAttachments && !isDeepResearchSession && (visualModelLocked || selectedFileIsVisual)
+  const canUseDeepResearch = enableDeepResearch && !isDeepResearchSession && !selectedFile
   const showTranscriptionControls = enableAgentControls && !!selectedFile && (
     selectedFileIsAudio || isVideoLikeFile(selectedFile)
   )
   const showVisionControls = enableAgentControls && selectedFileIsVisual
   const showSaveNoteControls = enableAgentControls && !notebookId && !selectedFile && availableNotebooks.length > 1
+  const researchModelName = researchModelId
+    ? models.find((model) => model.id === researchModelId || model.name === researchModelId)?.name
+    : undefined
+  const { voiceState, handleMicClick } = useVoiceInput({
+    onTranscript: (text) => {
+      if (!isStreaming) {
+        onSendMessage(text, modelOverride)
+      }
+    },
+  })
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const scrollRoot = scrollAreaRef.current
     const viewport = scrollRoot?.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
@@ -209,6 +307,7 @@ export function ChatPanel({
           reportType: researchReportType,
           tone: researchTone,
           modelId: researchModelId || undefined,
+          modelName: researchModelName,
         }
         : undefined
       onSendMessage(
@@ -455,6 +554,12 @@ export function ChatPanel({
                         notebookId={notebookId}
                       />
                     )}
+                    {message.type === 'ai' && onReviseReport && isDeepResearchReportMessage(message) && (
+                      <ReportEditAffordance
+                        messageId={message.id}
+                        onReviseReport={onReviseReport}
+                      />
+                    )}
                   </div>
                   {message.type === 'human' && (
                     <div className="flex-shrink-0">
@@ -519,6 +624,14 @@ export function ChatPanel({
           />
         )}
 
+        {/* DR session banner */}
+        {isDeepResearchSession && (
+          <div className="border-t px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/30">
+            <Search className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>Sessão de Deep Research — edita o relatório ou faz perguntas sobre ele.</span>
+          </div>
+        )}
+
         {/* Input Area */}
         <div className="flex-shrink-0 p-4 space-y-3 border-t">
           {/* Model selector */}
@@ -540,7 +653,7 @@ export function ChatPanel({
             </div>
           )}
 
-          {enableDeepResearch && (
+          {enableDeepResearch && !isDeepResearchSession && (
             <div className="space-y-2 rounded-md border bg-muted/20 p-2">
               <div className="flex items-center justify-between gap-2">
                 <Button
@@ -750,7 +863,7 @@ export function ChatPanel({
           )}
 
           <div className="flex gap-2 items-end min-w-0">
-            {enableAttachments && (
+            {enableAttachments && !isDeepResearchSession && (
               <>
                 <input
                   ref={fileInputRef}
@@ -783,15 +896,37 @@ export function ChatPanel({
               className="flex-1 min-h-[40px] max-h-[100px] resize-none py-2 px-3 min-w-0"
               rows={1}
             />
+<<<<<<< HEAD
             <VoiceInputButton
               onTranscript={handleVoiceTranscript}
               disabled={isStreaming}
               surface={notebookId ? 'notebook_chat' : 'global_chat'}
               notebookId={notebookId}
             />
+=======
+            {enableAttachments && (
+              <Button
+                type="button"
+                variant={voiceState === 'recording' ? 'destructive' : 'outline'}
+                size="icon"
+                className={`h-[40px] w-[40px] flex-shrink-0 ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
+                onClick={handleMicClick}
+                disabled={isStreaming || voiceState === 'transcribing'}
+                title={voiceState === 'idle' ? 'Gravar mensagem de voz' : voiceState === 'recording' ? 'Parar gravação' : 'A transcrever…'}
+              >
+                {voiceState === 'transcribing' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : voiceState === 'recording' ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </Button>
+            )}
+>>>>>>> corrections-to-chat
             <Button
               onClick={handleSend}
-              disabled={(!input.trim() && !selectedFile) || isStreaming}
+              disabled={(!input.trim() && !selectedFile) || isStreaming || voiceState !== 'idle'}
               size="icon"
               className="h-[40px] w-[40px] flex-shrink-0"
             >

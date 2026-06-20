@@ -1,9 +1,9 @@
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
-from api.auth import get_current_user_id
+from api.auth import assert_owns, get_current_user_id
 from api.models import NoteCreate, NoteResponse, NoteUpdate
 from open_notebook.domain.notebook import Note
 from open_notebook.exceptions import InvalidInputError
@@ -114,12 +114,13 @@ async def create_note(
 
 
 @router.get("/notes/{note_id}", response_model=NoteResponse)
-async def get_note(note_id: str):
+async def get_note(note_id: str, request: Request):
     """Get a specific note by ID."""
     try:
         note = await Note.get(note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
+        assert_owns(getattr(note, "owner", None), request)
 
         return NoteResponse(
             id=note.id or "",
@@ -137,12 +138,13 @@ async def get_note(note_id: str):
 
 
 @router.put("/notes/{note_id}", response_model=NoteResponse)
-async def update_note(note_id: str, note_update: NoteUpdate):
+async def update_note(note_id: str, note_update: NoteUpdate, request: Request):
     """Update a note."""
     try:
         note = await Note.get(note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
+        assert_owns(getattr(note, "owner", None), request)
 
         # Update only provided fields
         if note_update.title is not None:
@@ -178,12 +180,13 @@ async def update_note(note_id: str, note_update: NoteUpdate):
 
 
 @router.delete("/notes/{note_id}")
-async def delete_note(note_id: str):
+async def delete_note(note_id: str, request: Request):
     """Delete a note."""
     try:
         note = await Note.get(note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
+        assert_owns(getattr(note, "owner", None), request)
 
         await note.delete()
 

@@ -72,6 +72,7 @@ async function fetchConfig(): Promise<AppConfig> {
     if (isDev) console.log('🔧 [Config] Attempting to fetch runtime config from /config endpoint...')
     const runtimeResponse = await fetch('/config', {
       cache: 'no-store',
+      signal: AbortSignal.timeout(15000),
     })
     if (runtimeResponse.ok) {
       const runtimeData = await runtimeResponse.json()
@@ -112,9 +113,14 @@ async function fetchConfig(): Promise<AppConfig> {
 
   try {
     if (isDev) console.log('🔧 [Config] Fetching backend config from:', `${baseUrl}/api/config`)
-    // Try to fetch runtime config from backend API
+    // Try to fetch runtime config from backend API.
+    // A timeout is essential: if the API URL is misconfigured/unreachable the
+    // fetch can hang indefinitely, leaving ConnectionGuard stuck on a blank page.
+    // With a timeout it fails fast and the ConnectionErrorOverlay (with the
+    // attempted URL + retry) is shown instead.
     const response = await fetch(`${baseUrl}/api/config`, {
       cache: 'no-store',
+      signal: AbortSignal.timeout(15000),
     })
 
     if (response.ok) {

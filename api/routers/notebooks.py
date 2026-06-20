@@ -1,9 +1,9 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
-from api.auth import get_current_user_id
+from api.auth import assert_owns, get_current_user_id, is_admin
 from api.models import (
     NotebookCreate,
     NotebookDeletePreview,
@@ -19,35 +19,44 @@ router = APIRouter()
 
 
 def _ensure_owner(nb_owner: Optional[str], user_id: str) -> None:
-    """Raise 404 if ``user_id`` does not own the notebook.
+    """Raise 404 unless ``user_id`` owns the notebook (fail-closed).
 
-    Notebooks without an owner (``None``) are treated as public/legacy and
-    accessible by any authenticated user, to preserve backwards
-    compatibility with pre-multi-user databases.
+    Notebooks without an owner (``None``) are NOT public — they are denied to
+    regular users. Admin access to ownerless/legacy notebooks goes through
+    endpoints that pass the request to ``assert_owns``.
     """
-    if nb_owner is not None and nb_owner != user_id:
+    if nb_owner is None or nb_owner != user_id:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
 
 @router.get("/notebooks", response_model=List[NotebookResponse])
 async def get_notebooks(
+    request: Request,
     archived: Optional[bool] = Query(None, description="Filter by archived status"),
     order_by: str = Query("updated desc", description="Order by field and direction"),
     user_id: str = Depends(get_current_user_id),
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
-        # Build the query with counts
+        # Fail-closed scoping: regular users only see notebooks they own.
+        # Ownerless/legacy notebooks are NOT public. Admins see everything.
+        if is_admin(request):
+            where_clause = ""
+            params: dict = {}
+        else:
+            where_clause = "WHERE owner = $owner"
+            params = {"owner": user_id}
+
         query = f"""
             SELECT *,
             count(<-reference.in) as source_count,
             count(<-artifact.in) as note_count
             FROM notebook
-            WHERE owner = $owner OR owner IS NONE
+            {where_clause}
             ORDER BY {order_by}
         """
 
-        result = await repo_query(query, {"owner": user_id})
+        result = await repo_query(query, params)
 
         # Filter by archived status if specified
         if archived is not None:
@@ -247,18 +256,23 @@ async def update_notebook(
 
 
 @router.post("/notebooks/{notebook_id}/sources/{source_id}")
-async def add_source_to_notebook(notebook_id: str, source_id: str):
+async def add_source_to_notebook(
+    notebook_id: str, source_id: str, request: Request
+):
     """Add an existing source to a notebook (create the reference)."""
     try:
-        # Check if notebook exists
+        # Check if notebook exists and is owned by the caller
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
+        assert_owns(getattr(notebook, "owner", None), request)
 
-        # Check if source exists
+        # Check if source exists and is owned by the caller — prevents linking
+        # another user's source into your notebook (and vice versa).
         source = await Source.get(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), request)
 
         # Check if reference already exists (idempotency)
         existing_ref = await repo_query(
@@ -292,13 +306,16 @@ async def add_source_to_notebook(notebook_id: str, source_id: str):
 
 
 @router.delete("/notebooks/{notebook_id}/sources/{source_id}")
-async def remove_source_from_notebook(notebook_id: str, source_id: str):
+async def remove_source_from_notebook(
+    notebook_id: str, source_id: str, request: Request
+):
     """Remove a source from a notebook (delete the reference)."""
     try:
-        # Check if notebook exists
+        # Check if notebook exists and is owned by the caller
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
+        assert_owns(getattr(notebook, "owner", None), request)
 
         # Delete the reference record linking source to notebook
         await repo_query(

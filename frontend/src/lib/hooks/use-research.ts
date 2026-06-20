@@ -13,6 +13,12 @@ import {
   isResearchActive,
 } from "@/lib/types/research";
 
+function readJobsFromCache(data: unknown): ResearchJob[] {
+  if (Array.isArray(data)) return data as ResearchJob[];
+  const maybePayload = data as { jobs?: ResearchJob[] } | undefined;
+  return maybePayload?.jobs ?? [];
+}
+
 /**
  * Hook to fetch available report types (cached forever since they're static)
  */
@@ -59,7 +65,7 @@ export function useResearchJobs(options?: { autoRefresh?: boolean }) {
     refetchInterval: (current) => {
       if (!autoRefresh) return false;
 
-      const jobs = current.state.data?.jobs as ResearchJob[] | undefined;
+      const jobs = readJobsFromCache(current.state.data);
       if (!jobs || jobs.length === 0) return false;
 
       // Auto-refresh every 3s if any jobs are active
@@ -139,6 +145,35 @@ export function useDeleteResearchJob() {
     onError: (error: unknown) => {
       toast({
         title: t.research?.failedToDelete ?? "Failed to Delete",
+        description: getApiErrorKey(error, t.common.error),
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+/**
+ * Hook to directly replace a report's text without AI processing.
+ */
+export function useDirectUpdateReport() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { t } = useTranslation();
+
+  return useMutation({
+    mutationFn: ({ jobId, report }: { jobId: string; report: string }) =>
+      researchApi.directUpdateReport(jobId, report),
+    onSuccess: (data) => {
+      queryClient.setQueryData(QUERY_KEYS.researchJob(data.id), data);
+      queryClient.refetchQueries({ queryKey: QUERY_KEYS.researchJobs });
+      toast({
+        title: t.research?.reportSaved ?? "Report saved",
+        description: t.research?.reportSavedDesc ?? "Your changes have been saved.",
+      });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: t.research?.failedToSave ?? "Failed to Save",
         description: getApiErrorKey(error, t.common.error),
         variant: "destructive",
       });

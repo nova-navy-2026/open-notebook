@@ -16,6 +16,12 @@ os.makedirs(UPLOADS_FOLDER, exist_ok=True)
 # Set to 0 to disable the limit
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "50"))
 
+# Maximum number of evenly-spaced video frames to caption for uploaded videos.
+# Higher values improve coverage but cost more vision-model calls.
+VIDEO_CAPTION_MAX_FRAMES = max(
+    1, min(int(os.environ.get("VIDEO_CAPTION_MAX_FRAMES", "8")), 24)
+)
+
 # TIKTOKEN CACHE FOLDER
 # Reads TIKTOKEN_CACHE_DIR from the environment so Docker can redirect the cache
 # to a path outside /data/ (which is typically volume-mounted and would hide the
@@ -36,7 +42,9 @@ OPENSEARCH_SCHEME = os.environ.get("OPENSEARCH_SCHEME", "https").strip()
 OPENSEARCH_URL_PREFIX = os.environ.get("OPENSEARCH_URL_PREFIX", "").strip().strip("/")
 OPENSEARCH_USER = os.environ.get("OPENSEARCH_USER", "").strip()
 OPENSEARCH_PASSWORD = os.environ.get("OPENSEARCH_PASSWORD", "").strip()
-OPENSEARCH_INDEX_PREFIX = os.environ.get("OPENSEARCH_INDEX_PREFIX", "open_notebook").strip()
+# Default to the navy corpus index — it is the only index this deployment has.
+# (Override with OPENSEARCH_INDEX_PREFIX only if a separate user-sources index exists.)
+OPENSEARCH_INDEX_PREFIX = os.environ.get("OPENSEARCH_INDEX_PREFIX", "amalia_navy_test").strip()
 OPENSEARCH_VERIFY_CERTS = os.environ.get(
     "OPENSEARCH_VERIFY_CERTS", "true"
 ).strip().lower() in ("true", "1", "yes")

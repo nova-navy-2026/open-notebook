@@ -66,28 +66,49 @@ export function ResearchGeneratePanel({
   const [tone, setTone] = useState("Objective");
   const [modelId, setModelId] = useState("");
   const [fromTranscript, setFromTranscript] = useState(false);
+  // Transcript-derived document options (set when arriving from Transcription).
+  const [transcriptStyle, setTranscriptStyle] = useState<string | null>(null);
+  const [transcriptTitle, setTranscriptTitle] = useState<string | null>(null);
+  const [transcriptAppLanguage, setTranscriptAppLanguage] = useState<string | null>(null);
 
   const availableReportTypes = reportTypes ?? EMPTY_REPORT_TYPES;
   const availableTones = tones ?? EMPTY_TONES;
+
+  // For display only (description text beneath the select)
   const selectedReportTypeInfo = useMemo(
-    () =>
-      availableReportTypes.find((rt) => rt.value === reportType) ??
-      availableReportTypes[0],
+    () => availableReportTypes.find((rt) => rt.value === reportType),
     [availableReportTypes, reportType],
   );
   const selectedToneInfo = useMemo(
-    () => availableTones.find((tn) => tn.value === tone) ?? availableTones[0],
+    () => availableTones.find((tn) => tn.value === tone),
     [availableTones, tone],
   );
-  const selectedReportTypeValue = selectedReportTypeInfo?.value ?? "";
-  const selectedToneValue = selectedToneInfo?.value ?? "";
+
+  // When the list loads, make sure the current value is actually available.
+  // If the initial default ("research_report") isn't in the list, fall back
+  // to the first option. Without this, the controlled Select would receive a
+  // value that doesn't match any SelectItem, and Radix's useControllableState
+  // would try to reconcile it on every render — causing an infinite loop.
+  useEffect(() => {
+    if (availableReportTypes.length === 0) return;
+    if (!availableReportTypes.some((rt) => rt.value === reportType)) {
+      setReportType(availableReportTypes[0].value);
+    }
+  }, [availableReportTypes, reportType]);
+
+  useEffect(() => {
+    if (availableTones.length === 0) return;
+    if (!availableTones.some((tn) => tn.value === tone)) {
+      setTone(availableTones[0].value);
+    }
+  }, [availableTones, tone]);
 
   const handleReportTypeChange = useCallback((value: string) => {
-    setReportType((current) => (current === value ? current : value));
+    setReportType(value);
   }, []);
 
   const handleToneChange = useCallback((value: string) => {
-    setTone((current) => (current === value ? current : value));
+    setTone(value);
   }, []);
 
   const handleModelChange = useCallback((value: string) => {
@@ -102,7 +123,13 @@ export function ResearchGeneratePanel({
     try {
       const raw = sessionStorage.getItem("researchDraftFromTranscript");
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { query?: string; source?: string };
+      const parsed = JSON.parse(raw) as {
+        query?: string;
+        source?: string;
+        title?: string;
+        reportType?: "ata" | "conversation" | "summary" | "literal";
+        appLanguage?: string;
+      };
       if (parsed?.query && parsed.query.trim().length > 0) {
         // Use the raw transcript as-is. The dedicated meeting-minutes (ATA)
         // backend path summarises it directly with a specialised prompt and
@@ -110,6 +137,9 @@ export function ResearchGeneratePanel({
         // wrap it with research instructions here.
         setQuery(parsed.query.trim());
         setFromTranscript(true);
+        setTranscriptStyle(parsed.reportType ?? "ata");
+        if (parsed.title) setTranscriptTitle(parsed.title);
+        if (parsed.appLanguage) setTranscriptAppLanguage(parsed.appLanguage);
       }
       // Consume the draft so a manual refresh doesn't re-apply it.
       sessionStorage.removeItem("researchDraftFromTranscript");
@@ -130,23 +160,29 @@ export function ResearchGeneratePanel({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim() || !selectedReportTypeValue || !selectedToneValue) return;
+    if (!query.trim() || !reportType || !tone) return;
 
     await generateMutation.mutateAsync({
       query: query.trim(),
-      // A meeting transcript is turned into structured minutes (ATA) via a
-      // dedicated, retrieval-free backend path. Otherwise honour the
-      // selected report type.
-      report_type: fromTranscript ? "meeting_minutes" : selectedReportTypeValue,
+      // A meeting transcript is turned into a document via the dedicated,
+      // retrieval-free meeting-minutes path. The chosen style (ATA / conversa /
+      // resumo / literal) is passed as report_style so the backend can vary the
+      // prompt. Otherwise honour the selected research report type.
+      report_type: fromTranscript ? "meeting_minutes" : reportType,
+      report_style: fromTranscript ? transcriptStyle ?? "ata" : undefined,
+      title: fromTranscript ? transcriptTitle ?? undefined : undefined,
       report_source: "local",
-      tone: selectedToneValue,
+      tone: tone,
       source_urls: [],
       model_id: modelId || undefined,
       // Meeting minutes never touch OpenSearch (the report type forces a
       // retrieval-free path), so keep the AMALIA writer for quality output.
       use_amalia: true,
-      // Write the minutes in the active conversation language.
-      language: fromTranscript ? toLanguageName(language) : undefined,
+      // Write/translate the document in the app's language (falls back to the
+      // active i18n language if the transcript stash didn't carry one).
+      language: fromTranscript
+        ? toLanguageName(transcriptAppLanguage ?? language)
+        : undefined,
       run_in_background: true,
     });
 
@@ -198,7 +234,7 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent className="space-y-3">
             <Select
-              value={selectedReportTypeValue}
+              value={reportType}
               onValueChange={handleReportTypeChange}
               disabled={isSubmitting || availableReportTypes.length === 0}
             >
@@ -231,7 +267,7 @@ export function ResearchGeneratePanel({
           </CardHeader>
           <CardContent>
             <Select
-              value={selectedToneValue}
+              value={tone}
               onValueChange={handleToneChange}
               disabled={isSubmitting || availableTones.length === 0}
             >
@@ -284,8 +320,8 @@ export function ResearchGeneratePanel({
             !query.trim() ||
             isSubmitting ||
             isLoading ||
-            !selectedReportTypeValue ||
-            !selectedToneValue
+            !reportType ||
+            !tone
           }
           className="min-w-[200px]"
         >
