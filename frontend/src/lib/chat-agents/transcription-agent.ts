@@ -1,5 +1,8 @@
 import { transcriptionApi } from '@/lib/api/transcription'
+import { researchApi } from '@/lib/api/research'
 import {
+  currentAppLanguageName,
+  detectTranscriptReportStyle,
   formatTranscriptionResponse,
   isAudioFile,
   isTranscriptionRequest,
@@ -64,6 +67,49 @@ export async function runTranscriptionAgent(
         chars: (result.dialog || result.text || '').length,
       },
     })
+
+    // If the user asked for a specific document (ATA, resumo, conversa,
+    // transcrição literal), turn the transcript into that document in the app's
+    // language — mirroring the Transcription page. Otherwise return the
+    // plain transcript.
+    const reportStyle = detectTranscriptReportStyle(message)
+    const transcript = (result.dialog || result.text || '').trim()
+    if (reportStyle && transcript) {
+      try {
+        const generated = await researchApi.generateResearch({
+          query: transcript,
+          report_type: 'meeting_minutes',
+          report_style: reportStyle,
+          report_source: 'local',
+          tone: 'Objective',
+          source_urls: [],
+          model_id: context?.modelId,
+          use_amalia: true,
+          language: currentAppLanguageName(),
+          run_in_background: false,
+        })
+        const report = 'report' in generated ? generated.report : ''
+        if (report && report.trim()) {
+          return report
+        }
+      } catch (genError) {
+        // Fall back to the plain transcript if document generation fails.
+        logChatAgentEvent({
+          surface: context?.surface ?? 'global_chat',
+          agent: 'transcription',
+          event: 'tool_call',
+          status: 'failure',
+          context,
+          file: fileMetadata(file),
+          details: {
+            stage: 'report_generation',
+            report_style: reportStyle,
+            error: genError instanceof Error ? genError.message : String(genError),
+          },
+        })
+      }
+    }
+
     return formatTranscriptionResponse(result)
   } catch (error) {
     const status = (error as { response?: { status?: number } })?.response?.status

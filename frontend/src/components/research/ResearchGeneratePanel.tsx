@@ -66,6 +66,10 @@ export function ResearchGeneratePanel({
   const [tone, setTone] = useState("Objective");
   const [modelId, setModelId] = useState("");
   const [fromTranscript, setFromTranscript] = useState(false);
+  // Transcript-derived document options (set when arriving from Transcription).
+  const [transcriptStyle, setTranscriptStyle] = useState<string | null>(null);
+  const [transcriptTitle, setTranscriptTitle] = useState<string | null>(null);
+  const [transcriptAppLanguage, setTranscriptAppLanguage] = useState<string | null>(null);
 
   const availableReportTypes = reportTypes ?? EMPTY_REPORT_TYPES;
   const availableTones = tones ?? EMPTY_TONES;
@@ -119,7 +123,13 @@ export function ResearchGeneratePanel({
     try {
       const raw = sessionStorage.getItem("researchDraftFromTranscript");
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { query?: string; source?: string };
+      const parsed = JSON.parse(raw) as {
+        query?: string;
+        source?: string;
+        title?: string;
+        reportType?: "ata" | "conversation" | "summary" | "literal";
+        appLanguage?: string;
+      };
       if (parsed?.query && parsed.query.trim().length > 0) {
         // Use the raw transcript as-is. The dedicated meeting-minutes (ATA)
         // backend path summarises it directly with a specialised prompt and
@@ -127,6 +137,9 @@ export function ResearchGeneratePanel({
         // wrap it with research instructions here.
         setQuery(parsed.query.trim());
         setFromTranscript(true);
+        setTranscriptStyle(parsed.reportType ?? "ata");
+        if (parsed.title) setTranscriptTitle(parsed.title);
+        if (parsed.appLanguage) setTranscriptAppLanguage(parsed.appLanguage);
       }
       // Consume the draft so a manual refresh doesn't re-apply it.
       sessionStorage.removeItem("researchDraftFromTranscript");
@@ -151,10 +164,13 @@ export function ResearchGeneratePanel({
 
     await generateMutation.mutateAsync({
       query: query.trim(),
-      // A meeting transcript is turned into structured minutes (ATA) via a
-      // dedicated, retrieval-free backend path. Otherwise honour the
-      // selected report type.
+      // A meeting transcript is turned into a document via the dedicated,
+      // retrieval-free meeting-minutes path. The chosen style (ATA / conversa /
+      // resumo / literal) is passed as report_style so the backend can vary the
+      // prompt. Otherwise honour the selected research report type.
       report_type: fromTranscript ? "meeting_minutes" : reportType,
+      report_style: fromTranscript ? transcriptStyle ?? "ata" : undefined,
+      title: fromTranscript ? transcriptTitle ?? undefined : undefined,
       report_source: "local",
       tone: tone,
       source_urls: [],
@@ -162,8 +178,11 @@ export function ResearchGeneratePanel({
       // Meeting minutes never touch OpenSearch (the report type forces a
       // retrieval-free path), so keep the AMALIA writer for quality output.
       use_amalia: true,
-      // Write the minutes in the active conversation language.
-      language: fromTranscript ? toLanguageName(language) : undefined,
+      // Write/translate the document in the app's language (falls back to the
+      // active i18n language if the transcript stash didn't carry one).
+      language: fromTranscript
+        ? toLanguageName(transcriptAppLanguage ?? language)
+        : undefined,
       run_in_background: true,
     });
 

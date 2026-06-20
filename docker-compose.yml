@@ -27,8 +27,10 @@ services:
       dockerfile: Dockerfile
     pull_policy: build
     ports:
-      - "3675:3675"  # Web UI
-      - "5055:5055"  # REST API
+      # Only the frontend (Web UI) is published. The REST API on 5055 stays
+      # internal to the container — the frontend proxies /api/* to it via the
+      # Next.js rewrite (localhost:5055). Do NOT expose 5055 publicly.
+      - "3675:3675"  # Web UI (reverse-proxy / Cloudflare points here)
     env_file:
       - .env
     environment:

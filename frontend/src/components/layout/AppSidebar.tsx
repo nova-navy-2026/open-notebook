@@ -49,7 +49,6 @@ import {
   MessageCircleQuestion,
   Image as ImageIcon,
   Video,
-  MapPin,
   Captions,
 } from "lucide-react";
 
@@ -95,16 +94,8 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
         },
       ],
     },
-    {
-      title: t.navigation.navigationSection ?? "Navigation",
-      items: [
-        {
-          name: t.navigation.routePlanner ?? "Route Planner",
-          href: "/navigation",
-          icon: MapPin,
-        },
-      ],
-    },
+    // Route Planner is intentionally NOT shown in the sidebar — it is available
+    // only inside chat (the route agent handles "from X to Y" requests).
     {
       title: t.navigation.audio ?? "Audio",
       items: [

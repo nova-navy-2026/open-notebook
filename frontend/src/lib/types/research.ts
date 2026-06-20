@@ -34,6 +34,10 @@ export interface ResearchGenerateRequest {
   // Optional human-readable response language (e.g. "English"). Used by
   // retrieval-free flows such as meeting minutes (ATA).
   language?: string;
+  // Transcript document style: "ata" | "conversation" | "summary" | "literal".
+  report_style?: string;
+  // Optional user-supplied document title.
+  title?: string;
 }
 
 export interface ResearchJobSubmitResponse {

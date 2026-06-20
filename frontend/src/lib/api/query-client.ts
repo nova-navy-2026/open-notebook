@@ -3,10 +3,17 @@ import { QueryClient } from '@tanstack/react-query'
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000, // 10 minutes
+      // Always read fresh from the database. Data is marked stale immediately,
+      // so every page mount / tab focus / reconnect refetches from the server
+      // (which is stateless and always queries SurrealDB). The cache (gcTime) is
+      // kept only to render instantly while the fresh data loads
+      // (stale-while-revalidate) — it is never the source of truth.
+      staleTime: 0,
+      gcTime: 10 * 60 * 1000, // 10 minutes (only for instant re-render)
       retry: 2,
-      refetchOnWindowFocus: false,
+      refetchOnMount: true,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
     },
     mutations: {
       retry: 1,

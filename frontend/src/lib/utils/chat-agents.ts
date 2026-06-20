@@ -44,6 +44,49 @@ export function isTranscriptionRequest(message: string, file?: File | null): boo
   )
 }
 
+export type TranscriptReportStyle = 'ata' | 'conversation' | 'summary' | 'literal'
+
+/**
+ * Detect a requested transcript document style in a chat message
+ * ("faz uma ata", "resume isto", "transcrição literal", "em diálogo").
+ * Returns null when the user just wants a plain transcription.
+ */
+export function detectTranscriptReportStyle(message: string): TranscriptReportStyle | null {
+  const text = normaliseForAgentMatching(message)
+  if (/\b(ata|ata de reuniao|meeting minutes|minutes|acta)\b/.test(text)) return 'ata'
+  if (/\b(resumo|resume|resumir|summary|summarize|summarise)\b/.test(text)) return 'summary'
+  if (/\b(dialogo|conversa|conversation|dialogue)\b/.test(text)) return 'conversation'
+  if (/\b(literal|verbatim|integral|na integra|ipsis verbis)\b/.test(text)) return 'literal'
+  return null
+}
+
+/** Map an i18n locale code to a human-readable language name for the backend. */
+export function toLanguageName(locale: string): string {
+  switch (locale) {
+    case 'pt-PT':
+      return 'português europeu (pt-PT)'
+    case 'en-US':
+      return 'English'
+    case 'it-IT':
+      return 'italiano (it-IT)'
+    case 'zh-TW':
+      return '繁體中文 (zh-TW)'
+    case 'zh-CN':
+      return '简体中文 (zh-CN)'
+    case 'ja-JP':
+      return '日本語 (ja-JP)'
+    default:
+      return locale
+  }
+}
+
+/** Best-effort current app language name, read from the i18next localStorage key. */
+export function currentAppLanguageName(): string {
+  if (typeof window === 'undefined') return toLanguageName('pt-PT')
+  const locale = window.localStorage.getItem('i18nextLng') || 'pt-PT'
+  return toLanguageName(locale)
+}
+
 export function wantsDiarization(message: string): boolean {
   const text = normaliseForAgentMatching(message)
   return /\b(diarizar|diarizacao|diarization|speaker|speakers|orador|oradores|falante|falantes|quem fala|quem falou|identificar falantes)\b/.test(text)

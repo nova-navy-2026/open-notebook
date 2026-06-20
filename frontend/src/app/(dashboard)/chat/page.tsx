@@ -5,8 +5,15 @@ import { useTranslation } from "@/lib/hooks/use-translation";
 import { useGlobalChat } from "@/lib/hooks/useGlobalChat";
 import { useModels } from "@/lib/hooks/use-models";
 import { ChatPanel } from "@/components/source/ChatPanel";
+import { SessionManager } from "@/components/source/SessionManager";
 import { Badge } from "@/components/ui/badge";
-import { FileText, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { globalChatApi } from "@/lib/api/global-chat";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
@@ -23,6 +30,7 @@ export default function GlobalChatPage() {
   const { data: models = [] } = useModels();
   const [docsExpanded, setDocsExpanded] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleExportAll = async () => {
     if (exportingAll) return;
@@ -126,35 +134,72 @@ export default function GlobalChatPage() {
         </div>
       )}
 
-      {/* Full-height chat panel */}
-      <div className="flex-1 min-h-0">
-        <ChatPanel
-          messages={chat.messages}
-          isStreaming={chat.isSending}
-          contextIndicators={null}
-          onSendMessage={chat.sendMessage}
-          onReviseReport={chat.reviseReport}
-          modelOverride={activeModelOverride}
-          onModelChange={(model) => chat.setModelOverride(model ?? null)}
-          sessions={chat.sessions}
-          currentSessionId={chat.currentSessionId}
-          onCreateSession={(title) => chat.createSession(title)}
-          onSelectSession={chat.switchSession}
-          onDeleteSession={chat.deleteSession}
-          onUpdateSession={(sessionId, title) =>
-            chat.updateSession(sessionId, { title })
-          }
-          loadingSessions={chat.loadingSessions}
-          title={t.common.chat ?? "Chat"}
-          contextType="notebook"
-          enableAttachments
-          visualModelLocked={chat.isVisualModelLocked}
-          enableDeepResearch
-          enableAgentControls
-          isDeepResearchSession={chat.isDeepResearchSession}
-          onExportAll={handleExportAll}
-          exportingAll={exportingAll}
-        />
+      {/* Two-column layout: persistent session sidebar (ChatGPT-style) + chat */}
+      <div className="flex-1 min-h-0 flex gap-3">
+        {sidebarOpen ? (
+          <div className="w-64 flex-shrink-0 flex flex-col rounded-lg border bg-card/40 min-h-0">
+            <div className="flex items-center justify-end px-2 pt-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setSidebarOpen(false)}
+                title={t.common.collapse ?? "Recolher"}
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <SessionManager
+                variant="sidebar"
+                sessions={chat.sessions}
+                currentSessionId={chat.currentSessionId}
+                onNewChat={() => chat.createSession()}
+                onCreateSession={(title) => chat.createSession(title)}
+                onSelectSession={chat.switchSession}
+                onUpdateSession={(sessionId, title) =>
+                  chat.updateSession(sessionId, { title })
+                }
+                onDeleteSession={chat.deleteSession}
+                loadingSessions={chat.loadingSessions}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex-shrink-0 pt-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setSidebarOpen(true)}
+              title={t.common.expand ?? "Expandir"}
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+
+        {/* Chat panel — no internal session tabs (sidebar owns sessions) */}
+        <div className="flex-1 min-h-0">
+          <ChatPanel
+            messages={chat.messages}
+            isStreaming={chat.isSending}
+            contextIndicators={null}
+            onSendMessage={chat.sendMessage}
+            onReviseReport={chat.reviseReport}
+            modelOverride={activeModelOverride}
+            onModelChange={(model) => chat.setModelOverride(model ?? null)}
+            title={t.common.chat ?? "Chat"}
+            contextType="notebook"
+            enableAttachments
+            visualModelLocked={chat.isVisualModelLocked}
+            enableDeepResearch
+            enableAgentControls
+            isDeepResearchSession={chat.isDeepResearchSession}
+            onExportAll={handleExportAll}
+            exportingAll={exportingAll}
+          />
+        </div>
       </div>
     </div>
   );

@@ -55,8 +55,7 @@ def _build_type_filter(
 ) -> List[Dict[str, Any]]:
     """Build a doc_type terms filter clause."""
     if "doc_type" not in index_fields:
-        # Current navy corpus index does not have doc_type. Treat its rows as
-        # source documents; note-only searches should not return navy files.
+        # Index has no doc_type at all → every row is a navy/source document.
         if source:
             return []
         return [{"bool": {"must_not": {"match_all": {}}}}]
@@ -68,7 +67,17 @@ def _build_type_filter(
         types.append("note")
     if not types:
         return []
-    return [{"terms": {"doc_type": types}}]
+
+    # The navy corpus rows have NO ``doc_type`` field (only the few user-content
+    # docs do). A plain ``terms`` filter would therefore exclude ALL navy
+    # documents. Since navy rows are documents, include "doc_type missing" in
+    # source searches so the 54k+ navy files are searchable. Note-only searches
+    # keep matching just ``doc_type: note`` (navy files are not notes).
+    should: List[Dict[str, Any]] = [{"terms": {"doc_type": types}}]
+    if source:
+        should.append({"bool": {"must_not": {"exists": {"field": "doc_type"}}}})
+
+    return [{"bool": {"should": should, "minimum_should_match": 1}}]
 
 
 def _build_acl_filter(user_id: Optional[str]) -> Optional[Dict[str, Any]]:

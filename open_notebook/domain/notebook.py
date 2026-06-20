@@ -726,8 +726,13 @@ async def text_search(
                     keyword, results, source, note, user_id=user_id
                 )
             except Exception as e:
-                logger.warning(
-                    f"OpenSearch text search failed, falling back to SurrealDB: {e}"
+                from open_notebook.config import OPENSEARCH_INDEX
+
+                logger.error(
+                    "OpenSearch text search FAILED on index '{}' (falling back to "
+                    "SurrealDB — navy corpus results will be missing): {}",
+                    OPENSEARCH_INDEX,
+                    e,
                 )
 
         # SurrealDB path (default or fallback)
@@ -772,8 +777,13 @@ async def vector_search(
                     embed, results, source, note, minimum_score, user_id=user_id
                 )
             except Exception as e:
-                logger.warning(
-                    f"OpenSearch vector search failed, falling back to SurrealDB: {e}"
+                from open_notebook.config import OPENSEARCH_INDEX
+
+                logger.error(
+                    "OpenSearch vector search FAILED on index '{}' (falling back to "
+                    "SurrealDB — navy corpus results will be missing): {}",
+                    OPENSEARCH_INDEX,
+                    e,
                 )
 
         # SurrealDB path (default or fallback)
@@ -826,8 +836,13 @@ async def hybrid_search(
                     user_id=user_id,
                 )
             except Exception as e:
-                logger.warning(
-                    f"OpenSearch hybrid search failed, falling back to vector: {e}"
+                from open_notebook.config import OPENSEARCH_INDEX
+
+                logger.error(
+                    "OpenSearch hybrid search FAILED on index '{}' (falling back to "
+                    "vector/SurrealDB — navy corpus results will be missing): {}",
+                    OPENSEARCH_INDEX,
+                    e,
                 )
 
         # Fallback: hybrid is not available on SurrealDB, use vector search

@@ -100,6 +100,11 @@ class ResearchRequest(BaseModel):
     # meeting-minutes (ATA) path so the output matches the conversation
     # language. When None, falls back to RESPONSE_LANGUAGE_POLICY.
     language: Optional[str] = None
+    # Transcript document style for the meeting-minutes path:
+    # "ata" | "conversation" | "summary" | "literal". When None, defaults to ATA.
+    report_style: Optional[str] = None
+    # Optional user-supplied document title.
+    title: Optional[str] = None
 
 
 class RetrievedDocument(BaseModel):
@@ -1091,20 +1096,28 @@ async def _run_meeting_minutes(
         if progress_callback:
             await progress_callback(20, "A redigir a ATA da reunião...")
 
+        # report_style lets NOVA-Researcher vary the prompt (ATA / conversa /
+        # resumo / literal). Older NOVA versions ignore it and produce an ATA.
+        style = (request.report_style or "ata").strip().lower()
         resp = await _http_client.post(
             f"{NOVA_RESEARCHER_URL}/meeting-minutes",
-            json={"transcript": request.query, "language": language},
+            json={
+                "transcript": request.query,
+                "language": language,
+                "style": style,
+                "title": request.title or None,
+            },
             params={"provider": provider} if provider else {},
         )
         resp.raise_for_status()
         data = resp.json()
 
         if progress_callback:
-            await progress_callback(90, "A finalizar a ATA...")
+            await progress_callback(90, "A finalizar o documento...")
 
         report = _normalize_report_headings(
             data.get("report", ""),
-            fallback_title="Ata da Reunião",
+            fallback_title=request.title or "Ata da Reunião",
         )
 
         return ResearchResult(

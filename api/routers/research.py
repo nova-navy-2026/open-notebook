@@ -104,6 +104,10 @@ class GenerateResearchRequest(BaseModel):
     # Optional human-readable response language (e.g. "English"). Used by
     # retrieval-free flows such as meeting minutes (ATA).
     language: Optional[str] = None
+    # Transcript document style: "ata" | "conversation" | "summary" | "literal".
+    report_style: Optional[str] = None
+    # Optional user-supplied document title.
+    title: Optional[str] = None
 
 class ResearchJobResponse(BaseModel):
     """Response for a submitted research job."""
@@ -190,6 +194,8 @@ async def generate_research(
             model_id=request.model_id,
             use_amalia=request.use_amalia,
             language=request.language,
+            report_style=request.report_style,
+            title=request.title,
             # Navy identity filters the OpenSearch corpus. The platform auth
             # user loads private SurrealDB uploads and scopes job visibility.
             user_id=user_id,

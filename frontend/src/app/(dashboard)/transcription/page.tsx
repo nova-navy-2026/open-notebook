@@ -21,6 +21,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useTranscriptionStore } from "@/lib/stores/transcription-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
@@ -53,7 +60,7 @@ function formatTime(sec: number): string {
 }
 
 export default function TranscriptionPage() {
-  const { t } = useTranslation();
+  const { t, language: appLanguage } = useTranslation();
   const tp = t.transcriptionPage;
 
   const audio = useTranscriptionStore((s) => s.audio);
@@ -76,6 +83,11 @@ export default function TranscriptionPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  // User-chosen title + report style for the document generated from the transcript.
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportType, setReportType] = useState<
+    "ata" | "conversation" | "summary" | "literal"
+  >("ata");
   const router = useRouter();
 
   // Send the current transcript to the Research page so the user can
@@ -98,13 +110,18 @@ export default function TranscriptionPage() {
           query: draft,
           source: "transcription",
           createdAt: Date.now(),
+          // User choices: free title + report style + the app language so the
+          // generated document is written/translated in the user's language.
+          title: reportTitle.trim() || undefined,
+          reportType,
+          appLanguage,
         }),
       );
     } catch {
       // sessionStorage may be unavailable (private mode); silently skip.
     }
     router.push("/research?fromTranscript=1");
-  }, [result, router]);
+  }, [result, router, reportTitle, reportType, appLanguage]);
 
   useEffect(() => {
     fetchCapabilities();
@@ -365,20 +382,55 @@ export default function TranscriptionPage() {
             {result.language && (
               <Badge variant="outline">{result.language}</Badge>
             )}
-            <div className="ml-auto">
+          </div>
+
+          {/* Generate a document from the transcript: free title + report style */}
+          <Card>
+            <CardContent className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="report-title" className="text-xs text-muted-foreground">
+                  {tp.reportTitleLabel ?? "Título do documento"}
+                </Label>
+                <Input
+                  id="report-title"
+                  value={reportTitle}
+                  onChange={(e) => setReportTitle(e.target.value)}
+                  placeholder={tp.reportTitlePlaceholder ?? "Ex.: Reunião SI-DAGI 19/06"}
+                />
+              </div>
+              <div className="space-y-1 sm:w-56">
+                <Label className="text-xs text-muted-foreground">
+                  {tp.reportTypeLabel ?? "Tipo de documento"}
+                </Label>
+                <Select
+                  value={reportType}
+                  onValueChange={(v) =>
+                    setReportType(v as "ata" | "conversation" | "summary" | "literal")
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ata">{tp.reportTypeAta ?? "ATA de reunião"}</SelectItem>
+                    <SelectItem value="conversation">{tp.reportTypeConversation ?? "Conversa / Diálogo"}</SelectItem>
+                    <SelectItem value="summary">{tp.reportTypeSummary ?? "Resumo"}</SelectItem>
+                    <SelectItem value="literal">{tp.reportTypeLiteral ?? "Transcrição literal"}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
                 variant="default"
-                size="sm"
                 onClick={sendToResearch}
                 disabled={!result.text && !result.dialog}
-                title="Generate a Deep Research report using this transcript as the query"
+                title={tp.generateDocumentHint ?? "Gerar documento a partir da transcrição"}
               >
                 <Sparkles className="h-4 w-4 mr-2" />
-                Research from transcript
+                {tp.generateDocument ?? "Gerar documento"}
               </Button>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* Full text */}
           <Card>

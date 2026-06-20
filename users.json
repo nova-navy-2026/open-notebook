@@ -4,6 +4,11 @@
     "departments": ["SI-DAGI"],
     "clearance_level": 2
   },
+  "m24810": {
+    "email": "ruben.rodrigues.carvalho@marinha.pt",
+    "departments": ["SI-DAGI"],
+    "clearance_level": 2
+  },
   "m25109": {
     "email": "ferreira.guerra@marinha.pt",
     "departments": ["SI-DITIC"],
