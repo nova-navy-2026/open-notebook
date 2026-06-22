@@ -107,11 +107,27 @@ async def list_command_jobs(
 
 @router.delete("/commands/jobs/{job_id}")
 async def cancel_command_job(job_id: str):
-    """Cancel a running command job"""
+    """
+    Cancel a queued or running command job.
+
+    Returns 200 with `cancelled: true` if the job was moved to 'canceled'.
+    Returns 409 if the job is already in a terminal state (completed/failed/canceled).
+    Note: a job that is already *running* will be marked canceled but the
+    in-progress worker task is not interrupted — it may still write a final status.
+    """
     try:
         success = await CommandService.cancel_command_job(job_id)
-        return {"job_id": job_id, "cancelled": success}
+        if not success:
+            raise HTTPException(
+                status_code=409,
+                detail="Job is already in a terminal state and cannot be canceled",
+            )
+        return {"job_id": job_id, "cancelled": True}
 
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error cancelling command job: {str(e)}")
         raise HTTPException(

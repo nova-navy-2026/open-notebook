@@ -74,19 +74,76 @@ class CommandService:
         status_filter: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """List command jobs with optional filtering"""
-        # This will be implemented with proper SurrealDB queries
-        # For now, return empty list as this is foundation phase
-        return []
+        """List command jobs with optional filtering, newest first."""
+        from open_notebook.database.repository import repo_query
+
+        conditions: List[str] = []
+        params: Dict[str, Any] = {"limit": limit}
+
+        if module_filter:
+            conditions.append("app = $app")
+            params["app"] = module_filter
+        if command_filter:
+            conditions.append("name = $name")
+            params["name"] = command_filter
+        if status_filter:
+            conditions.append("status = $status")
+            params["status"] = status_filter
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = (
+            f"SELECT id, app, name, status, error_message, created, updated "
+            f"FROM command {where} ORDER BY created DESC LIMIT $limit"
+        )
+
+        rows = await repo_query(query, params)
+        return [
+            {
+                "job_id": str(r["id"]),
+                "app": r.get("app"),
+                "command": r.get("name"),
+                "status": r.get("status"),
+                "error_message": r.get("error_message"),
+                "created": str(r["created"]) if r.get("created") else None,
+                "updated": str(r["updated"]) if r.get("updated") else None,
+            }
+            for r in rows
+        ]
 
     @staticmethod
     async def cancel_command_job(job_id: str) -> bool:
-        """Cancel a running command job"""
+        """
+        Cancel a queued or running command job.
+
+        Returns True if the job was moved to 'canceled'.
+        Returns False if the job is already in a terminal state
+        (completed / failed / canceled).
+
+        Note: marking a *running* job as canceled prevents retries but does not
+        interrupt the in-progress worker task — the worker may still write a
+        final status when it finishes.
+        """
+        from open_notebook.database.repository import ensure_record_id, repo_query, repo_update
+
         try:
-            # Implementation depends on surreal-commands cancellation support
-            # For now, just log the attempt
-            logger.info(f"Attempting to cancel job: {job_id}")
+            record_id = ensure_record_id(job_id)
+            records = await repo_query(
+                "SELECT status FROM $id", {"id": record_id}
+            )
+            if not records:
+                raise ValueError(f"Command {job_id} not found")
+
+            current_status = records[0].get("status")
+            if current_status in ("completed", "failed", "canceled"):
+                logger.info(
+                    f"Job {job_id} already in terminal state '{current_status}'; nothing to cancel"
+                )
+                return False
+
+            await repo_update(record_id, {"status": "canceled"})
+            logger.info(f"Canceled job {job_id} (was '{current_status}')")
             return True
+
         except Exception as e:
             logger.error(f"Failed to cancel command job: {e}")
             raise

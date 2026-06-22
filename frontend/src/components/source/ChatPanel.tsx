@@ -896,34 +896,12 @@ export function ChatPanel({
               className="flex-1 min-h-[40px] max-h-[100px] resize-none py-2 px-3 min-w-0"
               rows={1}
             />
-<<<<<<< HEAD
             <VoiceInputButton
               onTranscript={handleVoiceTranscript}
               disabled={isStreaming}
               surface={notebookId ? 'notebook_chat' : 'global_chat'}
               notebookId={notebookId}
             />
-=======
-            {enableAttachments && (
-              <Button
-                type="button"
-                variant={voiceState === 'recording' ? 'destructive' : 'outline'}
-                size="icon"
-                className={`h-[40px] w-[40px] flex-shrink-0 ${voiceState === 'recording' ? 'animate-pulse' : ''}`}
-                onClick={handleMicClick}
-                disabled={isStreaming || voiceState === 'transcribing'}
-                title={voiceState === 'idle' ? 'Gravar mensagem de voz' : voiceState === 'recording' ? 'Parar gravação' : 'A transcrever…'}
-              >
-                {voiceState === 'transcribing' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : voiceState === 'recording' ? (
-                  <Square className="h-4 w-4" />
-                ) : (
-                  <Mic className="h-4 w-4" />
-                )}
-              </Button>
-            )}
->>>>>>> corrections-to-chat
             <Button
               onClick={handleSend}
               disabled={(!input.trim() && !selectedFile) || isStreaming || voiceState !== 'idle'}
