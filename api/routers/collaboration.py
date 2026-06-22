@@ -106,7 +106,9 @@ async def _ensure_owner_member(notebook: Notebook) -> None:
 
 
 def _invite_response(
-    invite, notebook_name: Optional[str] = None
+    invite,
+    notebook_name: Optional[str] = None,
+    invited_by_email: Optional[str] = None,
 ) -> NotebookInviteResponse:
     return NotebookInviteResponse(
         id=str(invite.id),
@@ -114,9 +116,10 @@ def _invite_response(
         notebook_name=notebook_name,
         invite_type=invite.invite_type,
         email=invite.email,
-        token=invite.token,
+        invite_token=invite.invite_token,
         status=invite.status,
         invited_by=invite.invited_by,
+        invited_by_email=invited_by_email,
         created=str(invite.created),
     )
 
@@ -214,7 +217,7 @@ async def create_notebook_invite(
         notebook_id,
         invited_by=request.state.user_id,
         invite_type="link",
-        token=token,
+        invite_token=token,
     )
     return _invite_response(invite, notebook.name)
 
@@ -257,6 +260,7 @@ async def my_invites(request: Request):
         return []
     invites = await get_pending_invites_for_email(email.strip().lower())
     out: List[NotebookInviteResponse] = []
+    inviter_email_cache: dict = {}
     for inv in invites:
         name = None
         try:
@@ -264,9 +268,16 @@ async def my_invites(request: Request):
             name = nb.name if nb else None
         except Exception:
             pass
+        # Resolve the inviter's user_id to a human-readable email so the
+        # notifications inbox can show who sent the invite (cached per request).
+        if inv.invited_by not in inviter_email_cache:
+            inviter_email_cache[inv.invited_by] = await _resolve_user_email(
+                inv.invited_by
+            )
+        inviter_email = inviter_email_cache[inv.invited_by]
         # Never leak the link token through the notifications feed.
-        inv.token = None
-        out.append(_invite_response(inv, name))
+        inv.invite_token = None
+        out.append(_invite_response(inv, name, invited_by_email=inviter_email))
     return out
 
 

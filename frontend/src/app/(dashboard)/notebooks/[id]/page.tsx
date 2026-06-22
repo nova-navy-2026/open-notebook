@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { NotebookHeader } from "../components/NotebookHeader";
 import { SourcesColumn } from "../components/SourcesColumn";
 import { NotesColumn } from "../components/NotesColumn";
 import { ChatColumn } from "../components/ChatColumn";
-import { useNotebook } from "@/lib/hooks/use-notebooks";
+import { useNotebook, useUpdateNavyDocs } from "@/lib/hooks/use-notebooks";
 import { useNotebookSources } from "@/lib/hooks/use-sources";
 import { useNotes } from "@/lib/hooks/use-notes";
 import { useNavyDocuments } from "@/lib/hooks/use-navy-docs";
@@ -117,64 +117,147 @@ export default function NotebookPage() {
     }
   }, [notes]);
 
-  // Navy corpus document selection state
+  // Navy corpus document selection state.
+  //
+  // Persistence depends on the notebook type:
+  // - Collaborative notebooks store the selection server-side (on the notebook
+  //   record) so every member shares one selection and the agents stay
+  //   consistent. Polling (useNotebook) refreshes another member's changes.
+  // - Private notebooks keep the selection in browser localStorage (no extra
+  //   network, survives reloads on the same device).
   const { data: navyData } = useNavyDocuments();
+  const updateNavyDocs = useUpdateNavyDocs();
   const [selectedNavyDocIds, setSelectedNavyDocIds] = useState<Set<string>>(
     new Set(),
   );
   const [navyDocsInitialized, setNavyDocsInitialized] = useState(false);
+  // Serialized (sorted) form of the selection we last reconciled with the
+  // persistence layer. Lets us distinguish our own writes from genuine remote
+  // changes so server polling doesn't fight local edits (and vice-versa).
+  const lastSyncedNavyRef = useRef<string>("");
 
-  // Persist navy doc selections per-notebook in localStorage so the
-  // user's toggled choices survive page reloads / re-navigation.
   const navySelectionStorageKey = notebookId
     ? `notebook:${notebookId}:selectedNavyDocIds`
     : "";
 
-  // Initialize from localStorage (if anything was saved before). We only
-  // restore IDs that still exist in the current navy corpus to avoid
-  // stale references.
+  const serializeIds = (ids: Iterable<string>) =>
+    JSON.stringify(Array.from(ids).sort());
+
+  // Initialize the selection once the corpus and notebook have loaded.
   useEffect(() => {
-    if (
-      navyData?.documents &&
-      navyData.documents.length > 0 &&
-      !navyDocsInitialized &&
-      navySelectionStorageKey
-    ) {
-      let restored: Set<string> = new Set();
+    if (navyDocsInitialized) return;
+    if (!navyData?.documents || navyData.documents.length === 0) return;
+    if (!notebook) return;
+
+    const valid = new Set(navyData.documents.map((d) => d.doc_id));
+    const readLocal = (): Set<string> => {
+      if (!navySelectionStorageKey) return new Set();
       try {
         const raw = localStorage.getItem(navySelectionStorageKey);
         if (raw) {
           const parsed = JSON.parse(raw) as string[];
           if (Array.isArray(parsed)) {
-            const valid = new Set(navyData.documents.map((d) => d.doc_id));
-            restored = new Set(parsed.filter((id) => valid.has(id)));
-            // Honour the 15-doc cap even on restore.
-            if (restored.size > 15) {
-              restored = new Set(Array.from(restored).slice(0, 15));
-            }
+            return new Set(parsed.filter((id) => valid.has(id)));
           }
         }
       } catch {
-        // Ignore malformed payload; start empty.
+        // Ignore malformed payload.
       }
-      setSelectedNavyDocIds(restored);
-      setNavyDocsInitialized(true);
-    }
-  }, [navyData, navyDocsInitialized, navySelectionStorageKey]);
+      return new Set();
+    };
 
-  // Save selection changes back to localStorage once we've initialized
-  // so we don't overwrite stored values with the empty default.
-  useEffect(() => {
-    if (!navyDocsInitialized || !navySelectionStorageKey) return;
-    try {
-      localStorage.setItem(
-        navySelectionStorageKey,
-        JSON.stringify(Array.from(selectedNavyDocIds)),
+    let restored: Set<string> = new Set();
+    // The baseline is what we consider already persisted. When it differs from
+    // `restored`, the persist effect pushes the difference (used to seed the
+    // server from a pre-share localStorage selection).
+    let baseline: Set<string> = new Set();
+
+    if (isCollaborative) {
+      const serverIds = (notebook.navy_doc_ids ?? []).filter((id) =>
+        valid.has(id),
       );
-    } catch {
-      // localStorage may be unavailable (private mode); ignore.
+      if (serverIds.length > 0) {
+        // Server is the source of truth.
+        restored = new Set(serverIds);
+        baseline = new Set(serverIds);
+      } else {
+        // Server has no selection yet: if this browser still holds a selection
+        // from before the notebook was shared, adopt and seed it to the server
+        // so all members inherit the owner's choices.
+        restored = readLocal();
+        baseline = new Set(); // empty server → persist effect will seed it
+      }
+    } else {
+      restored = readLocal();
+      baseline = new Set(restored); // already in localStorage; nothing to write
     }
-  }, [selectedNavyDocIds, navyDocsInitialized, navySelectionStorageKey]);
+
+    // Honour the 15-doc cap even on restore.
+    if (restored.size > 15) {
+      restored = new Set(Array.from(restored).slice(0, 15));
+    }
+    setSelectedNavyDocIds(restored);
+    lastSyncedNavyRef.current = serializeIds(baseline);
+    setNavyDocsInitialized(true);
+  }, [
+    navyData,
+    notebook,
+    isCollaborative,
+    navyDocsInitialized,
+    navySelectionStorageKey,
+  ]);
+
+  // Persist selection changes once initialized.
+  useEffect(() => {
+    if (!navyDocsInitialized) return;
+    const serialized = serializeIds(selectedNavyDocIds);
+    // Nothing actually changed relative to what we last reconciled.
+    if (serialized === lastSyncedNavyRef.current) return;
+
+    if (isCollaborative) {
+      if (!notebookId) return;
+      lastSyncedNavyRef.current = serialized;
+      updateNavyDocs.mutate({
+        id: notebookId,
+        docIds: Array.from(selectedNavyDocIds),
+      });
+    } else if (navySelectionStorageKey) {
+      lastSyncedNavyRef.current = serialized;
+      try {
+        localStorage.setItem(
+          navySelectionStorageKey,
+          JSON.stringify(Array.from(selectedNavyDocIds)),
+        );
+      } catch {
+        // localStorage may be unavailable (private mode); ignore.
+      }
+    }
+    // updateNavyDocs is intentionally omitted: the mutation object identity
+    // changes every render and would re-run this effect spuriously.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedNavyDocIds,
+    navyDocsInitialized,
+    isCollaborative,
+    notebookId,
+    navySelectionStorageKey,
+  ]);
+
+  // Collaborative notebooks: adopt a remote selection change (from polling)
+  // when it differs from what we last reconciled. Skipped for our own writes
+  // because those update lastSyncedNavyRef first.
+  useEffect(() => {
+    if (!navyDocsInitialized || !isCollaborative) return;
+    if (!notebook || !navyData?.documents) return;
+    const valid = new Set(navyData.documents.map((d) => d.doc_id));
+    const serverIds = (notebook.navy_doc_ids ?? []).filter((id) =>
+      valid.has(id),
+    );
+    const serverSerialized = serializeIds(serverIds);
+    if (serverSerialized === lastSyncedNavyRef.current) return;
+    lastSyncedNavyRef.current = serverSerialized;
+    setSelectedNavyDocIds(new Set(serverIds));
+  }, [notebook, navyData, navyDocsInitialized, isCollaborative]);
 
   const handleNavyDocSelectionChange = useCallback(
     (docId: string, selected: boolean) => {

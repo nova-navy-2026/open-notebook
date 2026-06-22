@@ -18,6 +18,7 @@ class Notebook(ObjectModel):
     nullable_fields: ClassVar[set[str]] = {
         "effective_clearance",
         "effective_departments",
+        "navy_doc_ids",
     }
     name: str
     description: str
@@ -30,6 +31,10 @@ class Notebook(ObjectModel):
     collaborative: Optional[bool] = False
     effective_clearance: Optional[int] = None
     effective_departments: Optional[List[str]] = None
+    # Selected navy (OpenSearch) corpus documents used to ground chat/agents.
+    # Persisted here (rather than browser localStorage) so all members of a
+    # collaborative notebook share one selection and the agents stay consistent.
+    navy_doc_ids: Optional[List[str]] = None
 
     @field_validator("name")
     @classmethod

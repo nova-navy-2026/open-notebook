@@ -74,10 +74,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         jwt_token = JWTManager.extract_from_header(auth_header)
         
         if jwt_token:
+            jwt_verified = False
             try:
                 # Verify JWT token
                 payload = JWTManager.verify_token(jwt_token)
-                
+
                 # Set user context in request state
                 request.state.user = {
                     "id": payload["user_id"],
@@ -99,14 +100,19 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 request.state.navy_clearance = payload.get(
                     "clearance_level", payload.get("clearence")
                 )
-                
+
                 logger.debug(f"✅ JWT auth successful: {payload['email']}")
-                
-                return await call_next(request)
-            
+                jwt_verified = True
+
             except Exception as e:
                 # JWT verification failed - try password auth as fallback
                 logger.debug(f"JWT verification failed, trying password auth: {e}")
+
+            if jwt_verified:
+                # call_next is intentionally outside the try/except so that
+                # exceptions from route handlers are NOT mistaken for JWT
+                # verification failures and do not trigger a 401.
+                return await call_next(request)
         
         # No valid JWT token - try password authentication
         if not self.password:

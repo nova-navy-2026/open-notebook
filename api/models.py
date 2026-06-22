@@ -17,6 +17,13 @@ class NotebookUpdate(BaseModel):
     )
 
 
+class UpdateNavyDocsRequest(BaseModel):
+    doc_ids: List[str] = Field(
+        default_factory=list,
+        description="Selected navy corpus document ids to ground chat/agents",
+    )
+
+
 class NotebookResponse(BaseModel):
     id: str
     name: str
@@ -31,6 +38,9 @@ class NotebookResponse(BaseModel):
     collaborative: bool = False
     member_count: int = 1
     is_owner: bool = True
+    # Shared selection of navy corpus documents (server-persisted so members
+    # of a collaborative notebook share the same grounding for chat/agents).
+    navy_doc_ids: List[str] = Field(default_factory=list)
 
 
 # Collaboration models
@@ -47,9 +57,12 @@ class NotebookInviteResponse(BaseModel):
     notebook_name: Optional[str] = None
     invite_type: str
     email: Optional[str] = None
-    token: Optional[str] = None
+    invite_token: Optional[str] = None
     status: str
     invited_by: str
+    # Human-readable email of the inviter (resolved from invited_by user_id),
+    # shown in the notifications inbox so invitees can see who invited them.
+    invited_by_email: Optional[str] = None
     created: str
 
 

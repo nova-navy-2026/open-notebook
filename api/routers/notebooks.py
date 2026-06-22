@@ -11,6 +11,7 @@ from api.models import (
     NotebookDeleteResponse,
     NotebookResponse,
     NotebookUpdate,
+    UpdateNavyDocsRequest,
 )
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.collaboration import (
@@ -43,6 +44,7 @@ def _to_notebook_response(nb: dict, user_id: str) -> NotebookResponse:
         collaborative=collaborative,
         member_count=raw_members if raw_members else 1,
         is_owner=(owner is not None and owner == user_id),
+        navy_doc_ids=nb.get("navy_doc_ids") or [],
     )
 
 
@@ -238,16 +240,7 @@ async def update_notebook(
 
         if result:
             nb = result[0]
-            return NotebookResponse(
-                id=str(nb.get("id", "")),
-                name=nb.get("name", ""),
-                description=nb.get("description", ""),
-                archived=nb.get("archived", False),
-                created=str(nb.get("created", "")),
-                updated=str(nb.get("updated", "")),
-                source_count=nb.get("source_count", 0),
-                note_count=nb.get("note_count", 0),
-            )
+            return _to_notebook_response(nb, user_id)
 
         # Fallback if query fails
         return NotebookResponse(
@@ -259,6 +252,10 @@ async def update_notebook(
             updated=str(notebook.updated),
             source_count=0,
             note_count=0,
+            owner=getattr(notebook, "owner", None),
+            collaborative=bool(getattr(notebook, "collaborative", False)),
+            is_owner=(getattr(notebook, "owner", None) == user_id),
+            navy_doc_ids=getattr(notebook, "navy_doc_ids", None) or [],
         )
     except HTTPException:
         raise
@@ -268,6 +265,73 @@ async def update_notebook(
         logger.error(f"Error updating notebook {notebook_id}: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Error updating notebook: {str(e)}"
+        )
+
+
+@router.put("/notebooks/{notebook_id}/navy-docs", response_model=NotebookResponse)
+async def update_notebook_navy_docs(
+    notebook_id: str,
+    body: UpdateNavyDocsRequest,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Update the shared navy-corpus document selection for a notebook.
+
+    The selection is shared content (like sources/notes), so any member — not
+    just the owner — may change it for a collaborative notebook. Access is
+    gated by ``assert_can_read_notebook`` (owner/admin/member).
+    """
+    try:
+        notebook = await Notebook.get(notebook_id)
+        if not notebook:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        await assert_can_read_notebook(
+            getattr(notebook, "owner", None), notebook_id, request
+        )
+
+        # De-duplicate while preserving order; enforce the 15-doc UI cap.
+        seen: set = set()
+        deduped: List[str] = []
+        for doc_id in body.doc_ids:
+            if doc_id and doc_id not in seen:
+                seen.add(doc_id)
+                deduped.append(doc_id)
+        notebook.navy_doc_ids = deduped[:15]
+        await notebook.save()
+
+        query = """
+            SELECT *,
+            count(<-reference.in) as source_count,
+            count(<-artifact.in) as note_count,
+            count((SELECT id FROM notebook_member WHERE notebook = $parent.id)) as member_count
+            FROM $notebook_id
+        """
+        result = await repo_query(
+            query, {"notebook_id": ensure_record_id(notebook_id)}
+        )
+        if result:
+            return _to_notebook_response(result[0], user_id)
+        # Fallback: build straight from the saved model.
+        return NotebookResponse(
+            id=notebook.id or "",
+            name=notebook.name,
+            description=notebook.description,
+            archived=notebook.archived or False,
+            created=str(notebook.created),
+            updated=str(notebook.updated),
+            source_count=0,
+            note_count=0,
+            owner=getattr(notebook, "owner", None),
+            collaborative=bool(getattr(notebook, "collaborative", False)),
+            is_owner=(getattr(notebook, "owner", None) == user_id),
+            navy_doc_ids=notebook.navy_doc_ids or [],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating navy docs for {notebook_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error updating navy docs: {str(e)}"
         )
 
 

@@ -60,7 +60,7 @@ class NotebookInvite(ObjectModel):
     table_name: ClassVar[str] = "notebook_invite"
     nullable_fields: ClassVar[set[str]] = {
         "email",
-        "token",
+        "invite_token",
         "accepted_by",
         "expires",
     }
@@ -68,7 +68,7 @@ class NotebookInvite(ObjectModel):
     notebook: str
     invite_type: str = "email"
     email: Optional[str] = None
-    token: Optional[str] = None
+    invite_token: Optional[str] = None
     status: str = "pending"
     invited_by: str
     accepted_by: Optional[str] = None
@@ -183,7 +183,7 @@ async def create_invite(
     invited_by: str,
     invite_type: str = "email",
     email: Optional[str] = None,
-    token: Optional[str] = None,
+    invite_token: Optional[str] = None,
     expires: Optional[datetime] = None,
 ) -> NotebookInvite:
     rows = await repo_query(
@@ -192,7 +192,7 @@ async def create_invite(
             notebook = $notebook,
             invite_type = $invite_type,
             email = $email,
-            token = $token,
+            invite_token = $invite_token,
             status = "pending",
             invited_by = $invited_by,
             expires = $expires
@@ -201,7 +201,7 @@ async def create_invite(
             "notebook": ensure_record_id(notebook_id),
             "invite_type": invite_type,
             "email": email,
-            "token": token,
+            "invite_token": invite_token,
             "invited_by": invited_by,
             "expires": expires,
         },
@@ -218,8 +218,8 @@ async def get_invite(invite_id: str) -> Optional[NotebookInvite]:
 
 async def get_invite_by_token(token: str) -> Optional[NotebookInvite]:
     rows = await repo_query(
-        "SELECT * FROM notebook_invite WHERE token = $token LIMIT 1",
-        {"token": token},
+        "SELECT * FROM notebook_invite WHERE invite_token = $invite_token LIMIT 1",
+        {"invite_token": token},
     )
     return NotebookInvite(**rows[0]) if rows else None
 

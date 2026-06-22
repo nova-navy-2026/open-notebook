@@ -51,4 +51,17 @@ export const notebooksApi = {
     const response = await apiClient.delete(`/notebooks/${notebookId}/sources/${sourceId}`)
     return response.data
   },
+
+  /**
+   * Update the shared navy-corpus document selection for a notebook. The
+   * selection is shared content (like sources/notes), so any member of a
+   * collaborative notebook may change it. Returns the updated notebook.
+   */
+  updateNavyDocs: async (notebookId: string, docIds: string[]) => {
+    const response = await apiClient.put<NotebookResponse>(
+      `/notebooks/${notebookId}/navy-docs`,
+      { doc_ids: docIds }
+    )
+    return response.data
+  },
 }

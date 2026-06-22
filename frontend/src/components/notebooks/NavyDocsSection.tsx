@@ -32,6 +32,8 @@ import {
   Tag,
   RefreshCw,
   AlertCircle,
+  ListChecks,
+  X,
 } from "lucide-react";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { cn } from "@/lib/utils";
@@ -52,7 +54,11 @@ interface NavyDocsSectionProps {
   selectedDocIds?: Set<string>;
   /** Called when user toggles a document */
   onSelectionChange?: (docId: string, selected: boolean) => void;
-  /** Called to select/deselect all */
+  /**
+   * @deprecated No longer used. Bulk select was removed because the corpus
+   * selection is capped at {@link MAX_SELECTED}. Kept optional so existing
+   * callers compile.
+   */
   onSelectAll?: (selected: boolean) => void;
   /** When true, hide checkboxes and show a read-only catalog */
   readOnly?: boolean;
@@ -61,7 +67,6 @@ interface NavyDocsSectionProps {
 export function NavyDocsSection({
   selectedDocIds,
   onSelectionChange,
-  onSelectAll,
   readOnly = false,
 }: NavyDocsSectionProps) {
   const { t } = useTranslation();
@@ -157,12 +162,20 @@ export function NavyDocsSection({
 
   const selectedCount = selectedDocIds?.size ?? 0;
   const atLimit = selectedCount >= MAX_SELECTED;
-  const allFilteredSelected =
-    !readOnly &&
-    filteredDocs.length > 0 &&
-    filteredDocs.every((d) => selectedDocIds?.has(d.doc_id));
-  const someSelected =
-    !readOnly && filteredDocs.some((d) => selectedDocIds?.has(d.doc_id));
+
+  // Human-friendly label for a document id (drops the .pdf and underscores).
+  const docLabel = useCallback(
+    (doc: NavyDocument) =>
+      doc.doc_id.replace(/_/g, " ").replace(/\.pdf$/i, ""),
+    [],
+  );
+
+  // The documents currently selected, surfaced in their own section so the
+  // user always sees what's in their selection regardless of search/grouping.
+  const selectedDocs = useMemo(
+    () => documents.filter((d) => selectedDocIds?.has(d.doc_id)),
+    [documents, selectedDocIds],
+  );
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
@@ -176,7 +189,7 @@ export function NavyDocsSection({
   // Renders one document row (icon + optional checkbox + label + metadata).
   const renderDocRow = (doc: NavyDocument) => {
     const isSelected = selectedDocIds?.has(doc.doc_id) ?? false;
-    const label = doc.doc_id.replace(/_/g, " ").replace(/\.pdf$/i, "");
+    const label = docLabel(doc);
     const disabledByLimit = !isSelected && atLimit;
 
     return (
@@ -297,27 +310,48 @@ export function NavyDocsSection({
 
         <CollapsibleContent>
           <div className="px-3 pb-3 space-y-2">
-            {/* Select all / search */}
+            {/* Currently selected documents — always visible so the user can
+                see and trim their selection regardless of search / grouping. */}
+            {!readOnly && selectedDocs.length > 0 && (
+              <div className="rounded-md border border-primary/30 bg-primary/5 p-2 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                  <ListChecks className="h-3.5 w-3.5" />
+                  <span>{t.navyDocs?.selectedTitle ?? "Selected documents"}</span>
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                    {selectedCount}/{MAX_SELECTED}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedDocs.map((doc) => (
+                    <span
+                      key={doc.doc_id}
+                      className="inline-flex items-center gap-1 max-w-full rounded-full border bg-background pl-2 pr-1 py-0.5 text-xs"
+                    >
+                      <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span
+                        className="truncate max-w-[150px]"
+                        title={doc.doc_id}
+                      >
+                        {docLabel(doc)}
+                      </span>
+                      {onSelectionChange && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectionChange(doc.doc_id, false)}
+                          className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          aria-label={t.common?.remove ?? "Remove"}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Controls: limit notice / group-by / search */}
             <div className="flex items-center gap-2">
-              {!readOnly && onSelectAll && (
-                <>
-                  <Checkbox
-                    id="navy-select-all"
-                    checked={allFilteredSelected}
-                    {...(!allFilteredSelected && someSelected
-                      ? { "data-state": "indeterminate" }
-                      : {})}
-                    onCheckedChange={(checked) => onSelectAll(!!checked)}
-                    disabled={!allFilteredSelected && atLimit}
-                  />
-                  <label
-                    htmlFor="navy-select-all"
-                    className="text-xs text-muted-foreground cursor-pointer"
-                  >
-                    {t.navyDocs?.selectAll ?? "Select all"}
-                  </label>
-                </>
-              )}
               {!readOnly && atLimit && (
                 <span className="text-xs text-amber-600 dark:text-amber-500">
                   Max {MAX_SELECTED} reached

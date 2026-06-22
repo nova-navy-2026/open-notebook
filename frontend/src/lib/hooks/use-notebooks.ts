@@ -21,6 +21,12 @@ export function useNotebook(id: string) {
     queryKey: QUERY_KEYS.notebook(id),
     queryFn: () => notebooksApi.get(id),
     enabled: !!id,
+    // Collaborative notebooks poll so shared state (e.g. the navy-corpus
+    // selection changed by another member) refreshes automatically. Private
+    // notebooks don't poll.
+    refetchInterval: (query) =>
+      query.state.data?.collaborative ? 10_000 : false,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -79,6 +85,33 @@ export function useNotebookDeletePreview(id: string, enabled: boolean = false) {
     queryKey: [...QUERY_KEYS.notebook(id), 'delete-preview'],
     queryFn: () => notebooksApi.deletePreview(id),
     enabled: !!id && enabled,
+  })
+}
+
+/**
+ * Persist the shared navy-corpus document selection for a notebook. Used by
+ * collaborative notebooks so the selection lives server-side (shared by all
+ * members) rather than in browser localStorage. Updates the notebook cache on
+ * success; stays quiet (no success toast) since it fires on each toggle.
+ */
+export function useUpdateNavyDocs() {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const { t } = useTranslation()
+
+  return useMutation({
+    mutationFn: ({ id, docIds }: { id: string; docIds: string[] }) =>
+      notebooksApi.updateNavyDocs(id, docIds),
+    onSuccess: (updated, { id }) => {
+      queryClient.setQueryData(QUERY_KEYS.notebook(id), updated)
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: t.common.error,
+        description: t(getApiErrorKey(error, t.common.error)),
+        variant: 'destructive',
+      })
+    },
   })
 }
 

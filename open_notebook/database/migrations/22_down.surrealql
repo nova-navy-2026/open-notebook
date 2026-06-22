@@ -1,0 +1,2 @@
+-- Migration 22 rollback: drop the shared navy-corpus document selection field.
+REMOVE FIELD IF EXISTS navy_doc_ids ON TABLE notebook;

@@ -58,8 +58,8 @@ export function ShareNotebookDialog({
 
   const handleCreateLink = async () => {
     const invite = await createInvite.mutateAsync({ invite_type: 'link' })
-    if (invite.token) {
-      setLinkUrl(`${window.location.origin}/notebooks/join?token=${invite.token}`)
+    if (invite.invite_token) {
+      setLinkUrl(`${window.location.origin}/notebooks/join?token=${invite.invite_token}`)
     }
   }
 

@@ -54,7 +54,9 @@ export function InvitesInbox() {
                   <span className="font-medium">{inv.notebook_name ?? inv.notebook_id}</span>
                   <br />
                   <span className="text-muted-foreground">
-                    {t.collaboration.invitedYou}
+                    {inv.invited_by_email
+                      ? `${inv.invited_by_email} ${t.collaboration.invitedYou}`
+                      : t.collaboration.invitedYou}
                   </span>
                 </p>
                 <div className="flex gap-2">

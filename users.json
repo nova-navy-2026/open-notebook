@@ -18,5 +18,15 @@
     "email": "admin@open-notebook.local",
     "departments": ["SP-DP"],
     "clearance_level": 4
+  },
+  "m10002": {
+    "email": "joao.zarcos@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 2
+  },
+  "m10003": {
+    "email": "miguel.domingos@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 3
   }
 }

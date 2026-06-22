@@ -1,0 +1,11 @@
+-- Migration 21: Rename notebook_invite.token → invite_token
+-- SurrealDB treats "token" as a protected system variable; defining or setting
+-- a field with that name in any table causes an InvalidParameter error at
+-- runtime. Migration 20 originally defined the field as "token"; this migration
+-- renames it to "invite_token" for databases that already ran migration 20.
+
+REMOVE INDEX IF EXISTS idx_notebook_invite_token ON notebook_invite;
+REMOVE FIELD IF EXISTS token ON TABLE notebook_invite;
+
+DEFINE FIELD IF NOT EXISTS invite_token ON TABLE notebook_invite TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_notebook_invite_token ON notebook_invite FIELDS invite_token;

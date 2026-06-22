@@ -12,6 +12,9 @@ export interface NotebookResponse {
   collaborative?: boolean
   member_count?: number
   is_owner?: boolean
+  // Shared selection of navy corpus documents (server-persisted so all members
+  // of a collaborative notebook share the same grounding for chat/agents).
+  navy_doc_ids?: string[]
 }
 
 // Collaboration
@@ -28,9 +31,10 @@ export interface NotebookInviteResponse {
   notebook_name?: string | null
   invite_type: 'email' | 'link'
   email?: string | null
-  token?: string | null
+  invite_token?: string | null
   status: string
   invited_by: string
+  invited_by_email?: string | null
   created: string
 }
 
