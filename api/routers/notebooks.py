@@ -392,17 +392,16 @@ async def add_source_to_notebook(
 async def remove_source_from_notebook(
     notebook_id: str, source_id: str, request: Request
 ):
-    """Remove a source from a notebook (delete the reference)."""
+    """Remove a source from a notebook (delete the reference).
+
+    Owner-only: only the notebook owner (or an admin) may remove sources from a
+    shared notebook — members can contribute sources but cannot unlink them.
+    """
     try:
-        # Notebook must be readable by the caller (owner/admin/member). Members
-        # may curate the shared source list (this only unlinks, never deletes
-        # the underlying source record).
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        await assert_can_read_notebook(
-            getattr(notebook, "owner", None), notebook_id, request
-        )
+        assert_owns(getattr(notebook, "owner", None), request)
 
         # Delete the reference record linking source to notebook
         await repo_query(

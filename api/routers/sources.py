@@ -69,24 +69,25 @@ def _is_admin_request(request: Request) -> bool:
 
 
 async def _authorize_source_access(
-    source_id: str, request: Request, allow_members: bool = True
+    source_id: str, request: Request, mode: str = "read"
 ) -> Source:
     """Fetch a source and ensure the current user is allowed to access it.
 
-    A user may access a source if any of the following holds:
-    - they are the source's owner,
-    - they have the ``admin`` role,
-    - (read only, ``allow_members=True``) the source is shared into a
-      collaborative notebook the user is a member of.
+    ``mode`` selects the permission rule (collaborative notebooks):
 
-    Mutation endpoints pass ``allow_members=False`` so only the owner/admin can
-    edit, delete or retry a source — collaborators get read/download access but
-    not destructive control over another user's document.
+    - ``"read"`` (default): the source owner, an admin, or any member of a
+      notebook containing the source. Used for GET/download/status/insights.
+    - ``"edit"``: the source creator, an owner of a notebook containing it, or
+      admin. Used for update/retry/transform. Members who did not create the
+      source cannot edit it; the notebook owner can curate contributed sources.
+    - ``"delete"``: an owner of a notebook containing the source, or the creator
+      while it isn't shared into someone else's notebook, or admin.
 
     Fail-closed: sources with no owner (legacy data) are NOT public — they are
     denied to regular users (admins can still see them).
 
-    Raises 404 if the source does not exist or the user is not allowed to see it.
+    Raises 404 if the source does not exist or the user is not allowed to access
+    it under ``mode``.
     """
     normalized_source_id = _normalize_source_id(source_id)
     try:
@@ -104,19 +105,29 @@ async def _authorize_source_access(
 
     owner = getattr(source, "owner", None)
     user_id = getattr(request.state, "user_id", "anonymous")
-    if owner is not None and owner == user_id:
-        return source
 
-    # Collaborative read access: allow members of a notebook containing this
-    # source (raises 404 if not a member).
-    if allow_members:
+    if mode == "read":
+        if owner is not None and owner == user_id:
+            return source
+        # Allow members of a notebook containing this source (raises 404 if not).
         from api.collaboration_access import assert_can_read_source
 
         await assert_can_read_source(owner, normalized_source_id, request)
         return source
 
-    # Fail-closed: ownerless sources are private; non-owners get the same 404
-    # used for unknown ids, to avoid leaking existence through error codes.
+    if mode == "edit":
+        from api.collaboration_access import assert_can_edit_source
+
+        await assert_can_edit_source(owner, normalized_source_id, request)
+        return source
+
+    if mode == "delete":
+        from api.collaboration_access import assert_can_delete_source
+
+        await assert_can_delete_source(owner, normalized_source_id, request)
+        return source
+
+    # Unknown mode → fail-closed.
     raise HTTPException(status_code=404, detail="Source not found")
 
 
@@ -945,7 +956,7 @@ async def update_source(source_id: str, source_update: SourceUpdate, request: Re
     """Update a source."""
     try:
         source = await _authorize_source_access(
-            source_id, request, allow_members=False
+            source_id, request, mode="edit"
         )
 
         # Update only provided fields
@@ -989,7 +1000,7 @@ async def retry_source_processing(source_id: str, request: Request):
     try:
         # First, verify source exists and the user can access it
         source = await _authorize_source_access(
-            source_id, request, allow_members=False
+            source_id, request, mode="edit"
         )
 
         # Check if source already has a running command
@@ -1115,7 +1126,7 @@ async def delete_source(source_id: str, request: Request):
     """Delete a source."""
     try:
         source = await _authorize_source_access(
-            source_id, request, allow_members=False
+            source_id, request, mode="delete"
         )
 
         await source.delete()
@@ -1175,7 +1186,7 @@ async def create_source_insight(
     try:
         # Validate source exists and the user can access it
         source = await _authorize_source_access(
-            source_id, request, allow_members=False
+            source_id, request, mode="edit"
         )
 
         # Validate transformation exists

@@ -1,8 +1,0 @@
--- Migration 22: Shared navy-corpus document selection
--- The set of selected navy (OpenSearch) corpus documents used to ground the
--- notebook's chat/agents was previously kept only in the browser's
--- localStorage, so it was per-device and NOT shared. For collaborative
--- notebooks every member must see (and the agents must use) the same
--- selection. Persist it on the notebook record so it is a single source of
--- truth that polling can refresh across members.
-DEFINE FIELD IF NOT EXISTS navy_doc_ids ON TABLE notebook TYPE option<array<string>>;

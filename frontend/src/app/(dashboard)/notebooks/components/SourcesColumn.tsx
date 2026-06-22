@@ -49,6 +49,10 @@ interface SourcesColumnProps {
   selectedNavyDocIds?: Set<string>;
   onNavyDocSelectionChange?: (docId: string, selected: boolean) => void;
   onNavyDocSelectAll?: (selected: boolean) => void;
+  /** Whether the current user owns this notebook. Only the owner may
+   * remove/delete sources from a (collaborative) notebook; members can add but
+   * not remove. Defaults to true so private notebooks are unaffected. */
+  isNotebookOwner?: boolean;
   /** When true, render as a plain panel (no collapsible strip), e.g. inside
    * the "edit sources" dialog. */
   embedded?: boolean;
@@ -67,6 +71,7 @@ export function SourcesColumn({
   selectedNavyDocIds,
   onNavyDocSelectionChange,
   onNavyDocSelectAll,
+  isNotebookOwner = true,
   embedded = false,
 }: SourcesColumnProps) {
   const { t } = useTranslation();
@@ -241,11 +246,14 @@ export function SourcesColumn({
                     key={source.id}
                     source={source}
                     onClick={handleSourceClick}
-                    onDelete={handleDeleteClick}
+                    onDelete={isNotebookOwner ? handleDeleteClick : undefined}
                     onRetry={handleRetry}
-                    onRemoveFromNotebook={handleRemoveFromNotebook}
+                    onRemoveFromNotebook={
+                      isNotebookOwner ? handleRemoveFromNotebook : undefined
+                    }
                     onRefresh={onRefresh}
-                    showRemoveFromNotebook={true}
+                    showRemoveFromNotebook={isNotebookOwner}
+                    canManage={isNotebookOwner}
                     contextMode={contextSelections?.[source.id]}
                     onContextModeChange={
                       onContextModeChange

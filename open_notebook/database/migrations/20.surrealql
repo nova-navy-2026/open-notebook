@@ -12,6 +12,10 @@ DEFINE FIELD IF NOT EXISTS collaborative ON TABLE notebook TYPE bool DEFAULT fal
 -- Denormalized effective access, recomputed on every membership change.
 DEFINE FIELD IF NOT EXISTS effective_clearance ON TABLE notebook TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS effective_departments ON TABLE notebook TYPE option<array<string>>;
+-- Shared selection of navy (OpenSearch) corpus documents used to ground the
+-- notebook's chat/agents. Persisted here (not browser localStorage) so all
+-- members of a collaborative notebook share one selection.
+DEFINE FIELD IF NOT EXISTS navy_doc_ids ON TABLE notebook TYPE option<array<string>>;
 
 -- =============================================
 -- NOTEBOOK_MEMBER TABLE

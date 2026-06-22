@@ -41,6 +41,11 @@ interface SourceCardProps {
   onRefresh?: () => void;
   className?: string;
   showRemoveFromNotebook?: boolean;
+  /** Whether the current user may delete this source. Defaults to true so
+   * non-collaborative contexts (e.g. the global sources page) are unaffected;
+   * set false to hide the destructive Delete action for shared-notebook
+   * members who don't own the notebook. */
+  canManage?: boolean;
   contextMode?: ContextMode;
   onContextModeChange?: (mode: ContextMode) => void;
 }
@@ -120,6 +125,7 @@ export function SourceCard({
   onRefresh,
   className,
   showRemoveFromNotebook = false,
+  canManage = true,
   contextMode,
   onContextModeChange,
 }: SourceCardProps) {
@@ -339,64 +345,71 @@ export function SourceCard({
               />
             )}
 
-            {/* Actions dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                {showRemoveFromNotebook && (
-                  <>
+            {/* Actions dropdown — only rendered when at least one action is
+                available to the current user. Members of a shared notebook who
+                don't own it (canManage=false) only see retry on failed sources;
+                if there's nothing actionable the menu is hidden entirely. */}
+            {(showRemoveFromNotebook || isFailed || canManage) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  {showRemoveFromNotebook && (
+                    <>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveFromNotebook();
+                        }}
+                        disabled={!onRemoveFromNotebook}
+                      >
+                        <Unlink className="h-4 w-4 mr-2" />
+                        {t.sources.removeFromNotebook}
+                      </DropdownMenuItem>
+                      {(isFailed || canManage) && <DropdownMenuSeparator />}
+                    </>
+                  )}
+
+                  {isFailed && (
+                    <>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRetry();
+                        }}
+                        disabled={!onRetry}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        {t.sources.retryProcessing}
+                      </DropdownMenuItem>
+                      {canManage && <DropdownMenuSeparator />}
+                    </>
+                  )}
+
+                  {canManage && (
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleRemoveFromNotebook();
+                        handleDelete();
                       }}
-                      disabled={!onRemoveFromNotebook}
+                      disabled={!onDelete}
+                      className="text-red-600 focus:text-red-600"
                     >
-                      <Unlink className="h-4 w-4 mr-2" />
-                      {t.sources.removeFromNotebook}
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      {t.sources.deleteSource}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-
-                {isFailed && (
-                  <>
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRetry();
-                      }}
-                      disabled={!onRetry}
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      {t.sources.retryProcessing}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete();
-                  }}
-                  disabled={!onDelete}
-                  className="text-red-600 focus:text-red-600"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  {t.sources.deleteSource}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
         {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}

@@ -1,6 +1,0 @@
--- Migration 21 rollback: revert invite_token → token
-REMOVE INDEX IF EXISTS idx_notebook_invite_token ON notebook_invite;
-REMOVE FIELD IF EXISTS invite_token ON TABLE notebook_invite;
-
-DEFINE FIELD IF NOT EXISTS token ON TABLE notebook_invite TYPE option<string>;
-DEFINE INDEX IF NOT EXISTS idx_notebook_invite_token ON notebook_invite FIELDS token;

@@ -76,6 +76,70 @@ async def assert_can_read_source(
     raise HTTPException(status_code=404, detail="Source not found")
 
 
+async def _notebook_owners_referencing(resource_id: str, relation: str) -> set:
+    """Owners of every notebook that references ``resource_id`` via ``relation``.
+
+    ``relation`` is ``reference`` for sources, ``artifact`` for notes (both link
+    FROM the resource TO the notebook). Ownerless notebooks contribute nothing.
+    """
+    rows = await repo_query(
+        f"SELECT VALUE out FROM {relation} WHERE in = $res",
+        {"res": ensure_record_id(resource_id)},
+    )
+    if not rows:
+        return set()
+    owners = await repo_query(
+        "SELECT VALUE owner FROM notebook WHERE id IN $nbs",
+        {"nbs": [ensure_record_id(str(n)) for n in rows]},
+    )
+    return {str(o) for o in owners if o}
+
+
+async def assert_can_edit_source(
+    source_owner: Optional[str], source_id: str, request: Request
+) -> None:
+    """Allow the source creator, an owner of a notebook containing it, or admin.
+
+    Members of a shared notebook who did NOT create the source cannot edit it,
+    but the notebook owner can curate any source contributed to their notebook.
+    """
+    if is_admin(request):
+        return
+    user_id = _user_id(request)
+    if source_owner is not None and source_owner == user_id:
+        return
+    if user_id in await _notebook_owners_referencing(source_id, "reference"):
+        return
+    raise HTTPException(status_code=404, detail="Source not found")
+
+
+async def assert_can_delete_source(
+    source_owner: Optional[str], source_id: str, request: Request
+) -> None:
+    """Govern source deletion by notebook ownership.
+
+    - An owner of any notebook that contains the source may delete it (the
+      notebook owner curates shared content).
+    - The source creator may delete their own source ONLY while it is not shared
+      into a notebook owned by someone else (i.e. it is still effectively
+      private to them).
+    - Everyone else (including members of a shared notebook) is denied.
+    """
+    if is_admin(request):
+        return
+    user_id = _user_id(request)
+    owners = await _notebook_owners_referencing(source_id, "reference")
+    if user_id in owners:
+        return
+    if (
+        source_owner is not None
+        and source_owner == user_id
+        and not (owners - {user_id})
+    ):
+        return
+    raise HTTPException(status_code=404, detail="Source not found")
+
+
 async def assert_can_read_note(
     note_owner: Optional[str], note_id: str, request: Request
 ) -> None:

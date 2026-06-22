@@ -43,6 +43,9 @@ export default function NotebookPage() {
   // Collaborative notebooks poll their shared sources/notes so members stay in
   // sync without manual refreshes.
   const isCollaborative = !!notebook?.collaborative;
+  // Only the notebook owner may remove/delete sources from a shared notebook.
+  // Private notebooks are always owned by the viewer, so this defaults to true.
+  const isNotebookOwner = notebook?.is_owner ?? true;
   const {
     sources,
     isLoading: sourcesLoading,
@@ -381,6 +384,7 @@ export default function NotebookPage() {
                   selectedNavyDocIds={selectedNavyDocIds}
                   onNavyDocSelectionChange={handleNavyDocSelectionChange}
                   onNavyDocSelectAll={handleNavySelectAll}
+                  isNotebookOwner={isNotebookOwner}
                 />
               )}
               {mobileActiveTab === "notes" && (
@@ -467,6 +471,7 @@ export default function NotebookPage() {
               selectedNavyDocIds={selectedNavyDocIds}
               onNavyDocSelectionChange={handleNavyDocSelectionChange}
               onNavyDocSelectAll={handleNavySelectAll}
+              isNotebookOwner={isNotebookOwner}
             />
           </div>
         </DialogContent>
