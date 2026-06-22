@@ -40,6 +40,9 @@ export default function NotebookPage() {
 
   const { data: notebook, isLoading: notebookLoading } =
     useNotebook(notebookId);
+  // Collaborative notebooks poll their shared sources/notes so members stay in
+  // sync without manual refreshes.
+  const isCollaborative = !!notebook?.collaborative;
   const {
     sources,
     isLoading: sourcesLoading,
@@ -47,8 +50,11 @@ export default function NotebookPage() {
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
-  } = useNotebookSources(notebookId);
-  const { data: notes, isLoading: notesLoading } = useNotes(notebookId);
+  } = useNotebookSources(notebookId, isCollaborative);
+  const { data: notes, isLoading: notesLoading } = useNotes(
+    notebookId,
+    isCollaborative,
+  );
 
   // Get collapse states for dynamic layout
   const { notesCollapsed } = useNotebookColumnsStore();

@@ -79,6 +79,8 @@ class TestNoteUpdate:
         mock_note.created = "2026-01-01T00:00:00Z"
         mock_note.updated = "2026-01-01T00:00:00Z"
         mock_note.save.return_value = "command:embed789"
+        # Notes are owner-scoped; the test client authenticates as "anonymous".
+        mock_note.owner = "anonymous"
         mock_note_cls.get = AsyncMock(return_value=mock_note)
 
         response = client.put(
@@ -103,6 +105,8 @@ class TestNoteUpdate:
         mock_note.created = "2026-01-01T00:00:00Z"
         mock_note.updated = "2026-01-01T00:00:00Z"
         mock_note.save.return_value = None
+        # Notes are owner-scoped; the test client authenticates as "anonymous".
+        mock_note.owner = "anonymous"
         mock_note_cls.get = AsyncMock(return_value=mock_note)
 
         response = client.put(

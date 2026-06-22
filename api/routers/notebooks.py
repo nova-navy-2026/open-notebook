@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from api.auth import assert_owns, get_current_user_id, is_admin
+from api.collaboration_access import assert_can_read_notebook
 from api.models import (
     NotebookCreate,
     NotebookDeletePreview,
@@ -12,10 +13,37 @@ from api.models import (
     NotebookUpdate,
 )
 from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.domain.collaboration import (
+    delete_notebook_collaboration,
+    get_member_notebook_ids,
+)
 from open_notebook.domain.notebook import Notebook, Source
 from open_notebook.exceptions import InvalidInputError
 
 router = APIRouter()
+
+
+def _to_notebook_response(nb: dict, user_id: str) -> NotebookResponse:
+    """Build a NotebookResponse from a raw notebook row, including collaboration
+    metadata. ``member_count`` falls back to 1 for private notebooks (which have
+    no notebook_member rows)."""
+    owner = nb.get("owner")
+    collaborative = bool(nb.get("collaborative", False))
+    raw_members = nb.get("member_count") or 0
+    return NotebookResponse(
+        id=str(nb.get("id", "")),
+        name=nb.get("name", ""),
+        description=nb.get("description", ""),
+        archived=nb.get("archived", False),
+        created=str(nb.get("created", "")),
+        updated=str(nb.get("updated", "")),
+        source_count=nb.get("source_count", 0),
+        note_count=nb.get("note_count", 0),
+        owner=owner,
+        collaborative=collaborative,
+        member_count=raw_members if raw_members else 1,
+        is_owner=(owner is not None and owner == user_id),
+    )
 
 
 def _ensure_owner(nb_owner: Optional[str], user_id: str) -> None:
@@ -38,19 +66,25 @@ async def get_notebooks(
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
-        # Fail-closed scoping: regular users only see notebooks they own.
-        # Ownerless/legacy notebooks are NOT public. Admins see everything.
+        # Fail-closed scoping: regular users see notebooks they own PLUS the
+        # collaborative notebooks they are a member of. Ownerless/legacy
+        # notebooks are NOT public. Admins see everything.
         if is_admin(request):
             where_clause = ""
             params: dict = {}
         else:
-            where_clause = "WHERE owner = $owner"
-            params = {"owner": user_id}
+            member_ids = await get_member_notebook_ids(user_id)
+            where_clause = "WHERE owner = $owner OR id IN $member_ids"
+            params = {
+                "owner": user_id,
+                "member_ids": [ensure_record_id(n) for n in member_ids],
+            }
 
         query = f"""
             SELECT *,
             count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
+            count(<-artifact.in) as note_count,
+            count((SELECT id FROM notebook_member WHERE notebook = $parent.id)) as member_count
             FROM notebook
             {where_clause}
             ORDER BY {order_by}
@@ -62,19 +96,7 @@ async def get_notebooks(
         if archived is not None:
             result = [nb for nb in result if nb.get("archived") == archived]
 
-        return [
-            NotebookResponse(
-                id=str(nb.get("id", "")),
-                name=nb.get("name", ""),
-                description=nb.get("description", ""),
-                archived=nb.get("archived", False),
-                created=str(nb.get("created", "")),
-                updated=str(nb.get("updated", "")),
-                source_count=nb.get("source_count", 0),
-                note_count=nb.get("note_count", 0),
-            )
-            for nb in result
-        ]
+        return [_to_notebook_response(nb, user_id) for nb in result]
     except Exception as e:
         logger.error(f"Error fetching notebooks: {str(e)}")
         raise HTTPException(
@@ -151,6 +173,7 @@ async def get_notebook_delete_preview(
 @router.get("/notebooks/{notebook_id}", response_model=NotebookResponse)
 async def get_notebook(
     notebook_id: str,
+    request: Request,
     user_id: str = Depends(get_current_user_id),
 ):
     """Get a specific notebook by ID."""
@@ -159,7 +182,8 @@ async def get_notebook(
         query = """
             SELECT *,
             count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
+            count(<-artifact.in) as note_count,
+            count((SELECT id FROM notebook_member WHERE notebook = $parent.id)) as member_count
             FROM $notebook_id
         """
         result = await repo_query(query, {"notebook_id": ensure_record_id(notebook_id)})
@@ -168,17 +192,9 @@ async def get_notebook(
             raise HTTPException(status_code=404, detail="Notebook not found")
 
         nb = result[0]
-        _ensure_owner(nb.get("owner"), user_id)
-        return NotebookResponse(
-            id=str(nb.get("id", "")),
-            name=nb.get("name", ""),
-            description=nb.get("description", ""),
-            archived=nb.get("archived", False),
-            created=str(nb.get("created", "")),
-            updated=str(nb.get("updated", "")),
-            source_count=nb.get("source_count", 0),
-            note_count=nb.get("note_count", 0),
-        )
+        # Owner, admin, or member may read a notebook.
+        await assert_can_read_notebook(nb.get("owner"), notebook_id, request)
+        return _to_notebook_response(nb, user_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -261,14 +277,17 @@ async def add_source_to_notebook(
 ):
     """Add an existing source to a notebook (create the reference)."""
     try:
-        # Check if notebook exists and is owned by the caller
+        # Notebook must be readable by the caller (owner/admin/member). Members
+        # of a collaborative notebook may contribute sources to it.
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        assert_owns(getattr(notebook, "owner", None), request)
+        await assert_can_read_notebook(
+            getattr(notebook, "owner", None), notebook_id, request
+        )
 
-        # Check if source exists and is owned by the caller — prevents linking
-        # another user's source into your notebook (and vice versa).
+        # You may only link a source you own — prevents pulling another user's
+        # private source into a shared notebook they didn't consent to share.
         source = await Source.get(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
@@ -311,11 +330,15 @@ async def remove_source_from_notebook(
 ):
     """Remove a source from a notebook (delete the reference)."""
     try:
-        # Check if notebook exists and is owned by the caller
+        # Notebook must be readable by the caller (owner/admin/member). Members
+        # may curate the shared source list (this only unlinks, never deletes
+        # the underlying source record).
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        assert_owns(getattr(notebook, "owner", None), request)
+        await assert_can_read_notebook(
+            getattr(notebook, "owner", None), notebook_id, request
+        )
 
         # Delete the reference record linking source to notebook
         await repo_query(
@@ -359,6 +382,10 @@ async def delete_notebook(
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
         _ensure_owner(getattr(notebook, "owner", None), user_id)
+
+        # Remove collaboration metadata (members + invites) before the notebook
+        # itself is deleted.
+        await delete_notebook_collaboration(notebook_id)
 
         result = await notebook.delete(delete_exclusive_sources=delete_exclusive_sources)
 

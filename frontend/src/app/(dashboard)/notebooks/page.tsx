@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Plus, RefreshCw } from 'lucide-react'
 import { useNotebooks } from '@/lib/hooks/use-notebooks'
 import { CreateNotebookDialog } from '@/components/notebooks/CreateNotebookDialog'
+import { InvitesInbox } from '@/components/notebooks/InvitesInbox'
 import { Input } from '@/components/ui/input'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { PageInfoButton } from '@/components/common/PageInfoButton'
@@ -58,6 +59,7 @@ export default function NotebooksPage() {
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               <RefreshCw className="h-4 w-4" />
             </Button>
+            <InvitesInbox />
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 w-full sm:w-auto">
             <Input

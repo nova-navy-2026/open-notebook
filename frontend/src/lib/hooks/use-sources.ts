@@ -29,7 +29,7 @@ export function useSources(notebookId?: string) {
  * Hook for fetching notebook sources with infinite scroll pagination.
  * Returns flattened sources array and pagination controls.
  */
-export function useNotebookSources(notebookId: string) {
+export function useNotebookSources(notebookId: string, collaborative = false) {
   const queryClient = useQueryClient()
 
   const query = useInfiniteQuery({
@@ -52,6 +52,9 @@ export function useNotebookSources(notebookId: string) {
     enabled: !!notebookId,
     staleTime: 5 * 1000,
     refetchOnWindowFocus: true,
+    // Shared notebooks poll continuously so members see each other's sources
+    // appear without a manual refresh.
+    refetchInterval: collaborative ? 10_000 : false,
   })
 
   // Flatten all pages into a single array (memoized to prevent infinite re-renders)

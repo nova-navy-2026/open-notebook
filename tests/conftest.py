@@ -9,10 +9,12 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure password auth is disabled for tests BEFORE any imports
-# The PasswordAuthMiddleware skips auth when this env var is not set
-# Set to empty string instead of deleting to prevent it from being reloaded
+# Ensure auth is disabled for tests BEFORE any imports.
+# With no password set, the JWTAuthMiddleware fail-closes (401) unless
+# ALLOW_ANONYMOUS is set — so we set both here. These must be set before
+# api.main is imported, because the middleware reads them once at startup.
 os.environ["OPEN_NOTEBOOK_PASSWORD"] = ""
+os.environ["ALLOW_ANONYMOUS"] = "true"
 
 # Load environment variables from .env file
 # This must be done BEFORE any imports that depend on environment variables

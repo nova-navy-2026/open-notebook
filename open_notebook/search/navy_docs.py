@@ -265,17 +265,25 @@ _NAVY_RESULT_SOURCE = [
 ]
 
 
+# Sentinel: distinguishes "no ACL override given, derive from user_id" from
+# "override explicitly provided (possibly None / a collaborative filter)".
+_ACL_UNSET: Any = object()
+
+
 async def search_navy_documents(
     query: str,
     doc_ids: Optional[List[str]] = None,
     k: int = 10,
     user_id: Optional[str] = None,
+    acl_filter: Any = _ACL_UNSET,
 ) -> List[Dict[str, Any]]:
     """BM25 text search on the navy corpus, optionally filtered by doc_ids.
 
     When ``user_id`` is given, the navy access-control filter (clearance +
     department) is applied so that only documents the user is allowed to
-    see can be returned.
+    see can be returned. Pass ``acl_filter`` to override that per-user filter
+    with an explicit clause (e.g. a collaborative notebook's *effective*
+    clearance/department filter).
 
     Returns a list of dicts with:
         - doc_id, content, source, section_title, page_start, page_end, score
@@ -298,8 +306,11 @@ async def search_navy_documents(
         if doc_ids:
             filter_clause.append({"terms": {"doc_id": doc_ids}})
 
-        from open_notebook.access_control import build_opensearch_filter
-        acl = build_opensearch_filter(user_id)
+        if acl_filter is _ACL_UNSET:
+            from open_notebook.access_control import build_opensearch_filter
+            acl = build_opensearch_filter(user_id)
+        else:
+            acl = acl_filter
         if acl is not None:
             filter_clause.append(acl)
 
@@ -332,6 +343,7 @@ async def vector_search_navy_documents(
     k: int = 5,
     min_score: float = 0.0,
     user_id: Optional[str] = None,
+    acl_filter: Any = _ACL_UNSET,
 ) -> List[Dict[str, Any]]:
     """Semantic kNN search on the navy corpus using BGE-M3 embeddings.
 
@@ -357,7 +369,7 @@ async def vector_search_navy_documents(
                 "falling back to BM25"
             )
             return await search_navy_documents(
-                query, doc_ids=doc_ids, k=k, user_id=user_id
+                query, doc_ids=doc_ids, k=k, user_id=user_id, acl_filter=acl_filter
             )
 
         client = await get_client()
@@ -369,8 +381,11 @@ async def vector_search_navy_documents(
             "k": fetch_n,
         }
 
-        from open_notebook.access_control import build_opensearch_filter
-        acl = build_opensearch_filter(user_id)
+        if acl_filter is _ACL_UNSET:
+            from open_notebook.access_control import build_opensearch_filter
+            acl = build_opensearch_filter(user_id)
+        else:
+            acl = acl_filter
         knn_filters: List[Dict[str, Any]] = []
         if doc_ids:
             knn_filters.append({"terms": {"doc_id": doc_ids}})

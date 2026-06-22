@@ -6,11 +6,14 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { getApiErrorKey } from '@/lib/utils/error-handler'
 import { CreateNoteRequest, UpdateNoteRequest } from '@/lib/types/api'
 
-export function useNotes(notebookId?: string) {
+export function useNotes(notebookId?: string, collaborative = false) {
   return useQuery({
     queryKey: QUERY_KEYS.notes(notebookId),
     queryFn: () => notesApi.list({ notebook_id: notebookId }),
     enabled: !!notebookId,
+    // Shared notebooks poll continuously so members see notes update live.
+    refetchInterval: collaborative ? 10_000 : false,
+    refetchOnWindowFocus: true,
   })
 }
 

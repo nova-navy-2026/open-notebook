@@ -1,0 +1,8 @@
+-- Migration 20 Down: Remove collaborative notebook support
+
+REMOVE TABLE IF EXISTS notebook_invite;
+REMOVE TABLE IF EXISTS notebook_member;
+
+REMOVE FIELD IF EXISTS collaborative ON TABLE notebook;
+REMOVE FIELD IF EXISTS effective_clearance ON TABLE notebook;
+REMOVE FIELD IF EXISTS effective_departments ON TABLE notebook;

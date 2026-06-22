@@ -7,9 +7,10 @@ import { useTheme } from 'next-themes'
 import { NotebookResponse } from '@/lib/types/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Archive, ArchiveRestore, Trash2, FolderCog } from 'lucide-react'
+import { Archive, ArchiveRestore, Trash2, FolderCog, Users } from 'lucide-react'
 import { useUpdateNotebook } from '@/lib/hooks/use-notebooks'
 import { NotebookDeleteDialog } from './NotebookDeleteDialog'
+import { ShareNotebookDialog } from '@/components/notebooks/ShareNotebookDialog'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import { InlineEdit } from '@/components/common/InlineEdit'
@@ -27,6 +28,7 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
   const { resolvedTheme } = useTheme()
   const dfLocale = getDateLocale(language)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showShareDialog, setShowShareDialog] = useState(false)
 
   const logoSrc = resolvedTheme === 'dark' ? '/logo_dark.png' : '/logo_light.png'
 
@@ -93,8 +95,27 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
               {notebook.archived && (
                 <Badge variant="secondary">{t.notebooks.archived}</Badge>
               )}
+              {notebook.collaborative && (
+                <Badge variant="outline" className="gap-1">
+                  <Users className="h-3 w-3" />
+                  {t.collaboration.collaborative}
+                </Badge>
+              )}
             </div>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowShareDialog(true)}
+              >
+                <Users className="h-4 w-4 mr-2" />
+                {notebook.is_owner === false
+                  ? t.collaboration.members
+                  : t.collaboration.share}
+                {notebook.collaborative && notebook.member_count
+                  ? ` (${notebook.member_count})`
+                  : ''}
+              </Button>
               {onEditSources && (
                 <Button variant="outline" size="sm" onClick={onEditSources}>
                   <FolderCog className="h-4 w-4 mr-2" />
@@ -155,6 +176,12 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
         notebookId={notebook.id}
         notebookName={notebook.name}
         redirectAfterDelete
+      />
+
+      <ShareNotebookDialog
+        notebook={notebook}
+        open={showShareDialog}
+        onOpenChange={setShowShareDialog}
       />
     </>
   )

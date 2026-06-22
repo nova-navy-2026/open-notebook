@@ -3,7 +3,8 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
-from api.auth import assert_owns, get_current_user_id
+from api.auth import get_current_user_id
+from api.collaboration_access import assert_can_read_note
 from api.models import NoteCreate, NoteResponse, NoteUpdate
 from open_notebook.domain.notebook import Note
 from open_notebook.exceptions import InvalidInputError
@@ -13,6 +14,7 @@ router = APIRouter()
 
 @router.get("/notes", response_model=List[NoteResponse])
 async def get_notes(
+    request: Request,
     notebook_id: Optional[str] = Query(None, description="Filter by notebook ID"),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -21,10 +23,17 @@ async def get_notes(
         if notebook_id:
             # Get notes for a specific notebook
             from open_notebook.domain.notebook import Notebook
+            from api.collaboration_access import assert_can_read_notebook
 
             notebook = await Notebook.get(notebook_id)
             if not notebook:
                 raise HTTPException(status_code=404, detail="Notebook not found")
+            # Authorize: owner, admin, or member. Members of a collaborative
+            # notebook see the full shared note list (this also closes a prior
+            # gap where any caller could read a notebook's notes by id).
+            await assert_can_read_notebook(
+                getattr(notebook, "owner", None), notebook_id, request
+            )
             notes = await notebook.get_notes()
         else:
             # Get all notes
@@ -51,6 +60,7 @@ async def get_notes(
 @router.post("/notes", response_model=NoteResponse)
 async def create_note(
     note_data: NoteCreate,
+    request: Request,
     user_id: str = Depends(get_current_user_id),
 ):
     """Create a new note."""
@@ -89,10 +99,15 @@ async def create_note(
         # Add to notebook if specified
         if note_data.notebook_id:
             from open_notebook.domain.notebook import Notebook
+            from api.collaboration_access import assert_can_read_notebook
 
             notebook = await Notebook.get(note_data.notebook_id)
             if not notebook:
                 raise HTTPException(status_code=404, detail="Notebook not found")
+            # Only owner/admin/members may attach notes to a notebook.
+            await assert_can_read_notebook(
+                getattr(notebook, "owner", None), note_data.notebook_id, request
+            )
             await new_note.add_to_notebook(note_data.notebook_id)
 
         return NoteResponse(
@@ -120,7 +135,9 @@ async def get_note(note_id: str, request: Request):
         note = await Note.get(note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        assert_owns(getattr(note, "owner", None), request)
+        # Shared notes are readable and editable by every member of a
+        # collaborative notebook they belong to (joint curation).
+        await assert_can_read_note(getattr(note, "owner", None), note_id, request)
 
         return NoteResponse(
             id=note.id or "",
@@ -144,7 +161,9 @@ async def update_note(note_id: str, note_update: NoteUpdate, request: Request):
         note = await Note.get(note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        assert_owns(getattr(note, "owner", None), request)
+        # Shared notes are readable and editable by every member of a
+        # collaborative notebook they belong to (joint curation).
+        await assert_can_read_note(getattr(note, "owner", None), note_id, request)
 
         # Update only provided fields
         if note_update.title is not None:
@@ -186,7 +205,9 @@ async def delete_note(note_id: str, request: Request):
         note = await Note.get(note_id)
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        assert_owns(getattr(note, "owner", None), request)
+        # Shared notes are readable and editable by every member of a
+        # collaborative notebook they belong to (joint curation).
+        await assert_can_read_note(getattr(note, "owner", None), note_id, request)
 
         await note.delete()
 

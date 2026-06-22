@@ -7,6 +7,36 @@ export interface NotebookResponse {
   updated: string
   source_count: number
   note_count: number
+  // Collaboration metadata
+  owner?: string | null
+  collaborative?: boolean
+  member_count?: number
+  is_owner?: boolean
+}
+
+// Collaboration
+export interface NotebookMemberResponse {
+  user_id: string
+  email: string
+  role: string
+  created: string
+}
+
+export interface NotebookInviteResponse {
+  id: string
+  notebook_id: string
+  notebook_name?: string | null
+  invite_type: 'email' | 'link'
+  email?: string | null
+  token?: string | null
+  status: string
+  invited_by: string
+  created: string
+}
+
+export interface CreateInviteRequest {
+  invite_type: 'email' | 'link'
+  email?: string
 }
 
 export interface NoteResponse {

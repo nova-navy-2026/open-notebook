@@ -47,6 +47,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.excluded_paths = excluded_paths or self.EXEMPT_PATHS
         self.password = get_secret_from_env("OPEN_NOTEBOOK_PASSWORD")
+        # Read the anonymous-access flag once at startup (deploy-time config),
+        # rather than per request. This keeps the hot path off os.environ.
+        self.allow_anonymous = (
+            (os.environ.get("ALLOW_ANONYMOUS", "") or "").lower()
+            in ("1", "true", "yes")
+        )
     
     async def dispatch(self, request: Request, call_next):
         """
@@ -108,7 +114,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             # requests so the API never silently grants anonymous access in
             # production. Set ALLOW_ANONYMOUS=1 to restore the old open-access
             # behaviour (development / single-user only).
-            if os.environ.get("ALLOW_ANONYMOUS", "").lower() in ("1", "true", "yes"):
+            if self.allow_anonymous:
                 logger.debug("ℹ️ ALLOW_ANONYMOUS set — allowing unauthenticated access")
                 request.state.user = {"id": "anonymous", "email": "anonymous", "roles": ["viewer"]}
                 request.state.user_id = "anonymous"

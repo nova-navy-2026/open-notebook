@@ -68,12 +68,20 @@ def _is_admin_request(request: Request) -> bool:
     return "admin" in (roles or [])
 
 
-async def _authorize_source_access(source_id: str, request: Request) -> Source:
+async def _authorize_source_access(
+    source_id: str, request: Request, allow_members: bool = True
+) -> Source:
     """Fetch a source and ensure the current user is allowed to access it.
 
     A user may access a source if any of the following holds:
     - they are the source's owner,
-    - they have the ``admin`` role.
+    - they have the ``admin`` role,
+    - (read only, ``allow_members=True``) the source is shared into a
+      collaborative notebook the user is a member of.
+
+    Mutation endpoints pass ``allow_members=False`` so only the owner/admin can
+    edit, delete or retry a source — collaborators get read/download access but
+    not destructive control over another user's document.
 
     Fail-closed: sources with no owner (legacy data) are NOT public — they are
     denied to regular users (admins can still see them).
@@ -96,13 +104,20 @@ async def _authorize_source_access(source_id: str, request: Request) -> Source:
 
     owner = getattr(source, "owner", None)
     user_id = getattr(request.state, "user_id", "anonymous")
-    # Fail-closed: ownerless sources are private (denied), not public.
-    if owner is None or owner != user_id:
-        # Hide existence of other users' sources behind the same 404 we use
-        # for unknown ids, to avoid leaking information through error codes.
-        raise HTTPException(status_code=404, detail="Source not found")
+    if owner is not None and owner == user_id:
+        return source
 
-    return source
+    # Collaborative read access: allow members of a notebook containing this
+    # source (raises 404 if not a member).
+    if allow_members:
+        from api.collaboration_access import assert_can_read_source
+
+        await assert_can_read_source(owner, normalized_source_id, request)
+        return source
+
+    # Fail-closed: ownerless sources are private; non-owners get the same 404
+    # used for unknown ids, to avoid leaking existence through error codes.
+    raise HTTPException(status_code=404, detail="Source not found")
 
 
 def generate_unique_filename(original_filename: str, upload_folder: str) -> str:
@@ -296,13 +311,22 @@ async def get_sources(
             if not notebook:
                 raise HTTPException(status_code=404, detail="Notebook not found")
 
+            # Authorize: owner, admin, or a member of the (collaborative)
+            # notebook. Once access is granted, every source linked to the
+            # notebook is returned — collaborators share the same source list,
+            # regardless of which member uploaded each one.
+            from api.collaboration_access import assert_can_read_notebook
+
+            await assert_can_read_notebook(
+                getattr(notebook, "owner", None), notebook_id, request
+            )
+
             # Query sources for specific notebook - include command field with FETCH
             query = f"""
                 SELECT id, asset, created, title, updated, topics, command,
                 (SELECT VALUE count() FROM source_insight WHERE source = $parent.id GROUP ALL)[0].count OR 0 AS insights_count,
                 (SELECT VALUE id FROM source_embedding WHERE source = $parent.id LIMIT 1) != [] AS embedded
                 FROM (select value in from reference where out=$notebook_id)
-                {owner_filter_clause}
                 {order_clause}
                 LIMIT $limit START $offset
                 FETCH command
@@ -312,8 +336,6 @@ async def get_sources(
                 "limit": limit,
                 "offset": offset,
             }
-            if not is_admin:
-                params["owner"] = user_id
             result = await repo_query(query, params)
         else:
             # Query all sources - include command field with FETCH
@@ -922,7 +944,9 @@ async def get_source_status(source_id: str, request: Request):
 async def update_source(source_id: str, source_update: SourceUpdate, request: Request):
     """Update a source."""
     try:
-        source = await _authorize_source_access(source_id, request)
+        source = await _authorize_source_access(
+            source_id, request, allow_members=False
+        )
 
         # Update only provided fields
         if source_update.title is not None:
@@ -964,7 +988,9 @@ async def retry_source_processing(source_id: str, request: Request):
     """Retry processing for a failed or stuck source."""
     try:
         # First, verify source exists and the user can access it
-        source = await _authorize_source_access(source_id, request)
+        source = await _authorize_source_access(
+            source_id, request, allow_members=False
+        )
 
         # Check if source already has a running command
         if source.command:
@@ -1088,7 +1114,9 @@ async def retry_source_processing(source_id: str, request: Request):
 async def delete_source(source_id: str, request: Request):
     """Delete a source."""
     try:
-        source = await _authorize_source_access(source_id, request)
+        source = await _authorize_source_access(
+            source_id, request, allow_members=False
+        )
 
         await source.delete()
 
@@ -1146,7 +1174,9 @@ async def create_source_insight(
     """
     try:
         # Validate source exists and the user can access it
-        source = await _authorize_source_access(source_id, request)
+        source = await _authorize_source_access(
+            source_id, request, allow_members=False
+        )
 
         # Validate transformation exists
         transformation = await Transformation.get(request_body.transformation_id)

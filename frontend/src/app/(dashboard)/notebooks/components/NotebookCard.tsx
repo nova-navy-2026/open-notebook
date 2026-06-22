@@ -5,7 +5,7 @@ import { NotebookResponse } from '@/lib/types/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { MoreHorizontal, Archive, ArchiveRestore, Trash2, FileText, StickyNote } from 'lucide-react'
+import { MoreHorizontal, Archive, ArchiveRestore, Trash2, FileText, StickyNote, Users } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   DropdownMenu,
@@ -125,6 +125,16 @@ export function NotebookCard({ notebook }: NotebookCardProps) {
                 <StickyNote className="h-3 w-3" />
                 <span>{notebook.note_count}</span>
               </Badge>
+              {notebook.collaborative && (
+                <Badge
+                  variant="outline"
+                  className="text-xs flex items-center gap-1 px-1.5 py-0.5 ml-auto"
+                  title={t.collaboration.collaborative}
+                >
+                  <Users className="h-3 w-3" />
+                  <span>{notebook.member_count ?? ''}</span>
+                </Badge>
+              )}
             </div>
           </CardContent>
       </Card>

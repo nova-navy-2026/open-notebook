@@ -122,15 +122,37 @@ def _full_session_id(session_id: str) -> str:
     )
 
 
-def _ensure_notebook_access(notebook: Notebook, user_id: str) -> None:
+async def _ensure_notebook_access(notebook: Notebook, user_id: str) -> None:
+    """Allow the owner, a legacy ownerless notebook, or a collaborative member.
+
+    Chat sessions stay per-user, but a member must be able to open chats on a
+    shared notebook, so notebook access here is membership-aware.
+    """
     owner = getattr(notebook, "owner", None)
-    if owner is not None and owner != user_id:
-        raise HTTPException(status_code=404, detail="Notebook not found")
+    if owner is None or owner == user_id:
+        return
+    from open_notebook.domain.collaboration import get_member
+
+    if await get_member(str(notebook.id), user_id) is not None:
+        return
+    raise HTTPException(status_code=404, detail="Notebook not found")
 
 
-def _ensure_owned_object(obj: Any, user_id: str) -> bool:
+async def _can_use_object(
+    obj: Any, user_id: str, member_notebook_ids: List[str], relation: str
+) -> bool:
+    """True when ``user_id`` may pull ``obj`` (a source/note) into chat context:
+    they own it, it is ownerless legacy data, or it is shared into a
+    collaborative notebook they belong to. ``relation`` is ``reference`` for
+    sources, ``artifact`` for notes."""
     owner = getattr(obj, "owner", None)
-    return owner is None or owner == user_id
+    if owner is None or owner == user_id:
+        return True
+    from api.collaboration_access import _resource_in_member_notebook
+
+    return await _resource_in_member_notebook(
+        str(obj.id), relation, member_notebook_ids
+    )
 
 
 def _is_visual_source(source: Source) -> bool:
@@ -184,7 +206,7 @@ async def _ensure_session_access(full_session_id: str, user_id: str) -> Optional
     notebook = await Notebook.get(str(notebook_id))
     if not notebook:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_notebook_access(notebook, user_id)
+    await _ensure_notebook_access(notebook, user_id)
     return str(notebook_id)
 
 
@@ -211,7 +233,7 @@ async def get_sessions(
         notebook = await Notebook.get(notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        _ensure_notebook_access(notebook, user_id)
+        await _ensure_notebook_access(notebook, user_id)
 
         # Get sessions for this notebook
         sessions_list = await notebook.get_chat_sessions()
@@ -256,7 +278,7 @@ async def create_session(
         notebook = await Notebook.get(request.notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        _ensure_notebook_access(notebook, user_id)
+        await _ensure_notebook_access(notebook, user_id)
 
         # Create new session
         session = ChatSession(
@@ -641,7 +663,16 @@ async def build_context(
         notebook = await Notebook.get(request.notebook_id)
         if not notebook:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        _ensure_notebook_access(notebook, auth_user_id)
+        await _ensure_notebook_access(notebook, auth_user_id)
+
+        # Precompute the caller's collaborative memberships so shared sources
+        # and notes can be pulled into chat context, and derive the effective
+        # navy-corpus ACL filter for collaborative notebooks.
+        from api.collaboration_access import user_member_notebook_ids
+        from open_notebook.collaboration import effective_navy_filter
+
+        member_notebook_ids = await user_member_notebook_ids(auth_user_id)
+        navy_acl_override = effective_navy_filter(notebook)
 
         context_data: dict[str, list[dict[str, str]]] = {"sources": [], "notes": []}
         total_content = ""
@@ -666,7 +697,9 @@ async def build_context(
                         source = await Source.get(full_source_id)
                     except Exception:
                         continue
-                    if not source or not _ensure_owned_object(source, auth_user_id):
+                    if not source or not await _can_use_object(
+                        source, auth_user_id, member_notebook_ids, "reference"
+                    ):
                         continue
 
                     if "insights" in status or "full content" in status:
@@ -690,7 +723,9 @@ async def build_context(
                         note_id if note_id.startswith("note:") else f"note:{note_id}"
                     )
                     note = await Note.get(full_note_id)
-                    if not note or not _ensure_owned_object(note, auth_user_id):
+                    if not note or not await _can_use_object(
+                        note, auth_user_id, member_notebook_ids, "artifact"
+                    ):
                         continue
 
                     if "full content" in status:
@@ -705,7 +740,9 @@ async def build_context(
             sources = await notebook.get_sources()
             for source in sources:
                 try:
-                    if not _ensure_owned_object(source, auth_user_id):
+                    if not await _can_use_object(
+                        source, auth_user_id, member_notebook_ids, "reference"
+                    ):
                         continue
                     source_context = await source.get_context(context_size="short")
                     context_data["sources"].append(source_context)
@@ -717,7 +754,9 @@ async def build_context(
             notes = await notebook.get_notes()
             for note in notes:
                 try:
-                    if not _ensure_owned_object(note, auth_user_id):
+                    if not await _can_use_object(
+                        note, auth_user_id, member_notebook_ids, "artifact"
+                    ):
                         continue
                     note_context = note.get_context(context_size="short")
                     context_data["notes"].append(note_context)
@@ -739,11 +778,19 @@ async def build_context(
                     vector_search_navy_documents,
                 )
 
+                # In a collaborative notebook the corpus is filtered by the
+                # notebook's *effective* (most-restrictive) clearance +
+                # intersected departments, so no member can surface a document
+                # another member could not individually access.
+                navy_kwargs: Dict[str, Any] = {}
+                if navy_acl_override is not None:
+                    navy_kwargs["acl_filter"] = navy_acl_override
                 navy_results = await vector_search_navy_documents(
                     query=request.query,
                     doc_ids=navy_doc_ids,
                     k=5,
                     user_id=navy_user_id,
+                    **navy_kwargs,
                 )
                 navy_context_items = []
                 for r in navy_results:

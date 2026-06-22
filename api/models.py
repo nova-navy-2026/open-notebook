@@ -26,6 +26,44 @@ class NotebookResponse(BaseModel):
     updated: str
     source_count: int
     note_count: int
+    # Collaboration metadata (defaults keep non-collaborative notebooks unchanged).
+    owner: Optional[str] = None
+    collaborative: bool = False
+    member_count: int = 1
+    is_owner: bool = True
+
+
+# Collaboration models
+class NotebookMemberResponse(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    created: str
+
+
+class NotebookInviteResponse(BaseModel):
+    id: str
+    notebook_id: str
+    notebook_name: Optional[str] = None
+    invite_type: str
+    email: Optional[str] = None
+    token: Optional[str] = None
+    status: str
+    invited_by: str
+    created: str
+
+
+class CreateInviteRequest(BaseModel):
+    invite_type: Literal["email", "link"] = Field(
+        "email", description="Invite by email address or generate a shareable link"
+    )
+    email: Optional[str] = Field(
+        None, description="Target email (required for invite_type='email')"
+    )
+
+
+class AcceptLinkRequest(BaseModel):
+    token: str = Field(..., description="Invite link token to redeem")
 
 
 # Search models

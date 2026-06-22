@@ -15,10 +15,21 @@ from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
 
 class Notebook(ObjectModel):
     table_name: ClassVar[str] = "notebook"
+    nullable_fields: ClassVar[set[str]] = {
+        "effective_clearance",
+        "effective_departments",
+    }
     name: str
     description: str
     archived: Optional[bool] = False
     owner: Optional[str] = None
+    # Collaboration: a notebook becomes ``collaborative`` once it is shared with
+    # at least one other user. ``effective_clearance`` / ``effective_departments``
+    # are denormalized from the members' navy profiles (MIN clearance,
+    # INTERSECTION of departments) and recomputed on every membership change.
+    collaborative: Optional[bool] = False
+    effective_clearance: Optional[int] = None
+    effective_departments: Optional[List[str]] = None
 
     @field_validator("name")
     @classmethod
@@ -26,6 +37,27 @@ class Notebook(ObjectModel):
         if not v.strip():
             raise InvalidInputError("Notebook name cannot be empty")
         return v
+
+    async def get_members(self) -> List["NotebookMember"]:
+        from open_notebook.domain.collaboration import get_members
+
+        return await get_members(str(self.id))
+
+    async def is_member(self, user_id: Optional[str]) -> bool:
+        """True when ``user_id`` owns the notebook or is a member of it."""
+        if not user_id:
+            return False
+        if self.owner is not None and self.owner == user_id:
+            return True
+        from open_notebook.domain.collaboration import get_member
+
+        return await get_member(str(self.id), user_id) is not None
+
+    async def recompute_effective_access(self) -> None:
+        """Recompute and persist effective clearance/departments from members."""
+        from open_notebook.collaboration import recompute_effective_access
+
+        await recompute_effective_access(self)
 
     async def get_sources(self) -> List["Source"]:
         try:

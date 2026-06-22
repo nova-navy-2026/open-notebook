@@ -255,11 +255,36 @@ def build_opensearch_filter(
     clearance = user_clearance(user)
     departments = user_departments(user)
 
-    # Entities/departments the user is allowed to match:
-    #   - the user's own navy id  → individual documents,
-    #   - each of the user's departments → departmental documents,
+    return build_opensearch_filter_for_profile(
+        clearance, departments, extra_entities=[user_id]
+    )
+
+
+def build_opensearch_filter_for_profile(
+    clearance: int,
+    departments: List[str],
+    extra_entities: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Build an OpenSearch ``bool`` filter clause for a given access profile.
+
+    This is the profile-level core shared by per-user filtering
+    (``build_opensearch_filter``) and collaborative-notebook filtering
+    (``open_notebook.collaboration.effective_navy_filter``), which passes the
+    notebook's *effective* (most-restrictive) clearance + intersected
+    departments.
+
+    * ``clearance`` — max classification level the profile may read.
+    * ``departments`` — departmental entities the profile may match.
+    * ``extra_entities`` — additional allowed entities (e.g. an individual
+      navy user id, so personal documents stay visible to that user). Omitted
+      for collaborative notebooks, which have no single owning individual.
+    """
+    departments = list(departments or [])
+    # Entities the profile is allowed to match:
+    #   - each department → departmental documents,
+    #   - any extra entities (e.g. the user's own navy id → individual docs),
     #   - the "general" wildcard → general documents.
-    entities = [user_id, *departments, WILDCARD_DEPARTMENT]
+    entities = [*(extra_entities or []), *departments, WILDCARD_DEPARTMENT]
     access_should: List[Dict[str, Any]] = [
         {"terms": {ENTITY_FIELD: entities}},
         {"term": {ACCESS_SCOPE_FIELD: WILDCARD_DEPARTMENT}},
@@ -272,11 +297,7 @@ def build_opensearch_filter(
     return {
         "bool": {
             "must": [
-                {
-                    "range": {
-                        CLASSIFICATION_FIELD: {"lte": clearance}
-                    }
-                },
+                {"range": {CLASSIFICATION_FIELD: {"lte": clearance}}},
                 {
                     "bool": {
                         "should": access_should,
@@ -345,6 +366,7 @@ __all__ = [
     "CREATOR_DEPARTMENT_FIELD",
     "access_enabled",
     "build_opensearch_filter",
+    "build_opensearch_filter_for_profile",
     "get_user",
     "get_user_by_email",
     "is_document_allowed",

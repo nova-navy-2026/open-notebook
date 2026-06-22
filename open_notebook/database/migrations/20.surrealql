@@ -1,0 +1,53 @@
+-- Migration 20: Collaborative notebooks
+-- Adds shared-notebook support: a notebook can have multiple members who all
+-- see/edit its sources and notes (chat stays per-user). Membership respects the
+-- navy access rules: effective clearance = MIN over members, effective
+-- departments = INTERSECTION over members.
+
+-- =============================================
+-- NOTEBOOK: collaboration fields
+-- =============================================
+-- collaborative flips to true once a notebook is shared with anyone.
+DEFINE FIELD IF NOT EXISTS collaborative ON TABLE notebook TYPE bool DEFAULT false;
+-- Denormalized effective access, recomputed on every membership change.
+DEFINE FIELD IF NOT EXISTS effective_clearance ON TABLE notebook TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS effective_departments ON TABLE notebook TYPE option<array<string>>;
+
+-- =============================================
+-- NOTEBOOK_MEMBER TABLE
+-- =============================================
+-- One row per (notebook, user). The notebook owner also gets a member row
+-- (role = "owner") when the notebook is first shared.
+DEFINE TABLE IF NOT EXISTS notebook_member SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS notebook ON TABLE notebook_member TYPE record<notebook>;
+DEFINE FIELD IF NOT EXISTS user_id ON TABLE notebook_member TYPE string;
+DEFINE FIELD IF NOT EXISTS email ON TABLE notebook_member TYPE string;
+DEFINE FIELD IF NOT EXISTS role ON TABLE notebook_member TYPE string DEFAULT "member";
+DEFINE FIELD IF NOT EXISTS added_by ON TABLE notebook_member TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created ON notebook_member DEFAULT time::now() VALUE $before OR time::now();
+DEFINE FIELD IF NOT EXISTS updated ON notebook_member DEFAULT time::now() VALUE time::now();
+DEFINE INDEX IF NOT EXISTS idx_notebook_member_unique ON notebook_member FIELDS notebook, user_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_notebook_member_user ON notebook_member FIELDS user_id;
+
+-- =============================================
+-- NOTEBOOK_INVITE TABLE
+-- =============================================
+-- Pending/processed invitations. Email invites target a specific address;
+-- link invites carry a token that any eligible user can redeem.
+DEFINE TABLE IF NOT EXISTS notebook_invite SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS notebook ON TABLE notebook_invite TYPE record<notebook>;
+DEFINE FIELD IF NOT EXISTS invite_type ON TABLE notebook_invite TYPE string DEFAULT "email";
+DEFINE FIELD IF NOT EXISTS email ON TABLE notebook_invite TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS token ON TABLE notebook_invite TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS status ON TABLE notebook_invite TYPE string DEFAULT "pending";
+DEFINE FIELD IF NOT EXISTS invited_by ON TABLE notebook_invite TYPE string;
+DEFINE FIELD IF NOT EXISTS accepted_by ON TABLE notebook_invite TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS expires ON TABLE notebook_invite TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS created ON notebook_invite DEFAULT time::now() VALUE $before OR time::now();
+DEFINE FIELD IF NOT EXISTS updated ON notebook_invite DEFAULT time::now() VALUE time::now();
+-- token is a high-entropy random string (secrets.token_urlsafe); a plain index
+-- is used rather than UNIQUE so the many email invites with token = NONE do not
+-- collide (SurrealDB treats multiple NONE values as equal under a UNIQUE index).
+DEFINE INDEX IF NOT EXISTS idx_notebook_invite_token ON notebook_invite FIELDS token;
+DEFINE INDEX IF NOT EXISTS idx_notebook_invite_email ON notebook_invite FIELDS email;
+DEFINE INDEX IF NOT EXISTS idx_notebook_invite_notebook ON notebook_invite FIELDS notebook;

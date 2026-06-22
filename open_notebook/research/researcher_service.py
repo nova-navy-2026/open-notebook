@@ -407,23 +407,39 @@ def _provider_for_request(request: ResearchRequest) -> Optional[str]:
 # ── OpenSearch Pre-fetch via NOVA-Researcher API ──────────────────────
 
 
+_ACL_UNSET: Any = object()
+
+
 async def _prefetch_opensearch_docs(
-    query: str, index: str, max_results: int = 30, user_id: Optional[str] = None
+    query: str,
+    index: str,
+    max_results: int = 30,
+    user_id: Optional[str] = None,
+    acl_filter: Any = _ACL_UNSET,
 ) -> List[Dict[str, Any]]:
     """
     Pre-fetch documents from the navy OpenSearch corpus via the
     NOVA-Researcher /opensearch/prefetch endpoint.
 
+    ``acl_filter`` overrides the per-user filter with an explicit clause (used
+    for collaborative notebooks, whose effective clearance/departments differ
+    from any single member's).
+
     Returns a list of dicts with 'page_content' and 'metadata' keys.
     """
     try:
+        retriever_filter = (
+            build_opensearch_filter(user_id)
+            if acl_filter is _ACL_UNSET
+            else acl_filter
+        )
         resp = await _http_client.post(
             f"{NOVA_RESEARCHER_URL}/opensearch/prefetch",
             json={
                 "query": query,
                 "index": index,
                 "max_results": max_results,
-                "retriever_filter": build_opensearch_filter(user_id),
+                "retriever_filter": retriever_filter,
             },
             timeout=RESEARCH_PREFETCH_TIMEOUT_SECONDS,
         )
@@ -479,14 +495,30 @@ async def _load_app_upload_documents(request: ResearchRequest) -> List[Dict[str,
 
     params: Dict[str, Any] = {"owner": request.auth_user_id}
     if request.notebook_id:
-        query = """
+        params["notebook_id"] = ensure_record_id(request.notebook_id)
+        # A member/owner of the notebook may research over ALL its sources
+        # (shared collaboration); otherwise fall back to only the caller's own
+        # sources within the notebook.
+        nb_owner_rows = await repo_query(
+            "SELECT VALUE owner FROM $nb", {"nb": ensure_record_id(request.notebook_id)}
+        )
+        nb_owner = nb_owner_rows[0] if nb_owner_rows else None
+        is_member = nb_owner == request.auth_user_id
+        if not is_member:
+            from open_notebook.domain.collaboration import get_member
+
+            is_member = (
+                await get_member(str(request.notebook_id), request.auth_user_id)
+                is not None
+            )
+        owner_clause = "" if is_member else "WHERE owner = $owner"
+        query = f"""
             SELECT id, title, full_text, caption, file_mime, file_name, owner, updated
             FROM (SELECT VALUE in FROM reference WHERE out = $notebook_id)
-            WHERE owner = $owner
-            AND (full_text != NONE OR caption != NONE)
+            {owner_clause}
+            {"AND" if owner_clause else "WHERE"} (full_text != NONE OR caption != NONE)
             LIMIT 250
         """
-        params["notebook_id"] = ensure_record_id(request.notebook_id)
     else:
         query = """
             SELECT id, title, full_text, caption, file_mime, file_name, owner, updated
@@ -534,11 +566,27 @@ async def _build_accessible_research_documents(
     app_docs = await _load_app_upload_documents(request)
     if progress_callback:
         await progress_callback(navy_pct, "Fase 1: A pesquisar documentos Navy autorizados...")
+    # For a collaborative notebook, scope the corpus to the notebook's effective
+    # (most-restrictive) clearance + intersected departments rather than the
+    # acting member's own access — research output is shared with all members.
+    prefetch_kwargs: Dict[str, Any] = {}
+    if request.notebook_id:
+        try:
+            from open_notebook.collaboration import effective_navy_filter
+            from open_notebook.domain.notebook import Notebook
+
+            nb = await Notebook.get(str(request.notebook_id))
+            override = effective_navy_filter(nb)
+            if override is not None:
+                prefetch_kwargs["acl_filter"] = override
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning(f"Could not derive effective navy filter: {exc}")
     navy_docs = await _prefetch_opensearch_docs(
         query=request.query,
         index=NAVY_OPENSEARCH_INDEX,
         max_results=int(os.environ.get("AMALIA_PREFETCH_DOCS", "30")),
         user_id=request.user_id,
+        **prefetch_kwargs,
     )
     docs = [*app_docs, *navy_docs]
     if progress_callback:
