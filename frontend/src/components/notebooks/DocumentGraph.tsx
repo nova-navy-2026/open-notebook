@@ -69,41 +69,56 @@ export function DocumentGraph({ docIds, className }: DocumentGraphProps) {
 
   return (
     <div className={`flex flex-col gap-2 h-full min-h-0 ${className ?? ""}`}>
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Controls — single non-wrapping row so the toggles line up with the
+          Notes graph in the split view. */}
+      <div className="flex items-center gap-2 min-w-0">
         <Tabs value={mode} onValueChange={(v) => setMode(v as GraphMode)}>
           <TabsList className="h-7">
-            <TabsTrigger value="bipartite" className="text-[11px] px-2">
+            <TabsTrigger
+              value="bipartite"
+              className="whitespace-nowrap px-2 text-[11px]"
+            >
               {t.navyDocs?.graphModeBipartite ?? "Documents ↔ Topics"}
             </TabsTrigger>
-            <TabsTrigger value="similarity" className="text-[11px] px-2">
+            <TabsTrigger
+              value="similarity"
+              className="whitespace-nowrap px-2 text-[11px]"
+            >
               {t.navyDocs?.graphModeSimilarity ?? "Document similarity"}
             </TabsTrigger>
           </TabsList>
         </Tabs>
 
         <div className="flex-1" />
-        <Badge variant="secondary" className="text-[11px]">
+        <Badge variant="secondary" className="shrink-0 text-[11px]">
           {data.documents.length} {t.navyDocs?.graphDocsLabel ?? "docs"} ·{" "}
           {data.topics.length} {t.navyDocs?.graphTopicsLabel ?? "topics"}
         </Badge>
       </div>
 
-      {mode === "similarity" && (
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          {t.navyDocs?.graphThreshold ?? "Min. similarity"}
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value))}
-            className="flex-1 accent-primary"
-          />
-          <span className="tabular-nums w-8">{threshold.toFixed(2)}</span>
-        </label>
-      )}
+      {/* Reserve the slider row in both modes so split columns keep equal
+          canvas heights regardless of the selected mode. */}
+      <div className="flex h-6 items-center gap-2 text-xs text-muted-foreground">
+        {mode === "similarity" && (
+          <>
+            <span className="shrink-0">
+              {t.navyDocs?.graphThreshold ?? "Min. similarity"}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="flex-1 accent-primary"
+            />
+            <span className="tabular-nums w-8 shrink-0">
+              {threshold.toFixed(2)}
+            </span>
+          </>
+        )}
+      </div>
 
       <GraphCanvas
         className="flex-1"

@@ -1,17 +1,18 @@
 {
-  "version": 1,
-  "source": "mock",
-  "description": "Fixed, global topic taxonomy used to classify navy corpus chunks. While 'source' is 'mock' the classes are placeholders for prototyping the document-relationship graph; replace this file (or regenerate it via the bootstrap command) and re-run classification with mode='real' to produce the canonical taxonomy.",
+  "version": 2,
+  "source": "kmeans-gemma4-cleaned",
+  "description": "Data-driven topic taxonomy applied to every chunk in the amalia_navy_test index. Synced from doc_index/topic_taxonomy.json: MiniBatchKMeans over BGE-M3 chunk embeddings, named by Gemma 4, then hand-cleaned (merged it_glossary into it_terminology; merged placeholder_content + document_classification into a single boilerplate_noncontent bucket). These ids MUST match the topic_class values written into OpenSearch by doc_index/topic_classification.py — the graph builder keys topic nodes off this list. cluster_size is an approximate derivation hint, not the live classify count.",
+  "k_origin": 12,
   "classes": [
-    { "id": "navigation",     "label": "Navigation & Seamanship",    "color": "#2563eb" },
-    { "id": "propulsion",     "label": "Propulsion & Engineering",   "color": "#dc2626" },
-    { "id": "weapons",        "label": "Weapons & Armament",         "color": "#7c3aed" },
-    { "id": "sensors",        "label": "Sensors, Radar & Sonar",     "color": "#0891b2" },
-    { "id": "communications", "label": "Communications & Signals",   "color": "#ca8a04" },
-    { "id": "logistics",      "label": "Logistics & Supply",         "color": "#16a34a" },
-    { "id": "personnel",      "label": "Personnel & Training",       "color": "#db2777" },
-    { "id": "safety",         "label": "Safety & Damage Control",    "color": "#ea580c" },
-    { "id": "operations",     "label": "Operations & Tactics",       "color": "#4f46e5" },
-    { "id": "maintenance",    "label": "Maintenance & Repair",       "color": "#65a30d" }
+    { "id": "deck_operations",             "label": "Deck and Shipboard Operations",            "color": "#2563eb", "cluster_size": 6459 },
+    { "id": "wave_propagation",            "label": "Wave Propagation and Reflection",          "color": "#0891b2", "cluster_size": 4869 },
+    { "id": "electronic_circuits",         "label": "Electronic Circuits",                      "color": "#16a34a", "cluster_size": 6312 },
+    { "id": "naval_systems_technology",    "label": "Naval Systems and Technology",             "color": "#4f46e5", "cluster_size": 4577 },
+    { "id": "it_terminology",              "label": "IT Terminology (NATO Glossary)",           "color": "#dc2626", "cluster_size": 4262 },
+    { "id": "sectional_responsibilities",  "label": "Sectional Duties and Maintenance",         "color": "#7c3aed", "cluster_size": 4786 },
+    { "id": "ship_organization_manual",    "label": "Ship Organization and Manning",            "color": "#ca8a04", "cluster_size": 6287 },
+    { "id": "ship_command_administration", "label": "Ship Command and Administration",          "color": "#ea580c", "cluster_size": 6354 },
+    { "id": "administrative_management",   "label": "Administrative and Operational Management", "color": "#0d9488", "cluster_size": 4756 },
+    { "id": "boilerplate_noncontent",      "label": "Boilerplate / Non-content",                "color": "#94a3b8", "cluster_size": 6052 }
   ]
 }

@@ -5,7 +5,7 @@ import { useNotes } from "@/lib/hooks/use-notes";
 import { useTopics } from "@/lib/hooks/use-navy-docs";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, StickyNote, AlertCircle } from "lucide-react";
+import { Loader2, StickyNote, AlertCircle, Info } from "lucide-react";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { GraphCanvas } from "./GraphCanvas";
 import { buildNotesGraph, type NotesGraphMode } from "./graph-utils";
@@ -83,44 +83,69 @@ export function NotesGraph({ notebookId, className }: NotesGraphProps) {
 
   const matchedNotes = graphData.nodes.filter((n) => n.kind === "note").length;
   const topicCount = built?.legend.filter((l) => l.id !== "__none__").length ?? 0;
+  const heuristicHint =
+    t.navyDocs?.notesGraphHeuristicHint ??
+    "Topics are inferred from note text by keyword matching — a rough heuristic, not semantic classification.";
 
   return (
     <div className={`flex flex-col gap-2 h-full min-h-0 ${className ?? ""}`}>
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Controls — kept to a single non-wrapping row so the toggles in the
+          split view line up with the Sources graph. */}
+      <div className="flex items-center gap-2 min-w-0">
         <Tabs value={mode} onValueChange={(v) => setMode(v as NotesGraphMode)}>
           <TabsList className="h-7">
-            <TabsTrigger value="bipartite" className="text-[11px] px-2">
+            <TabsTrigger
+              value="bipartite"
+              className="whitespace-nowrap px-2 text-[11px]"
+            >
               {t.navyDocs?.notesModeBipartite ?? "Notes ↔ Topics"}
             </TabsTrigger>
-            <TabsTrigger value="similarity" className="text-[11px] px-2">
+            <TabsTrigger
+              value="similarity"
+              className="whitespace-nowrap px-2 text-[11px]"
+            >
               {t.navyDocs?.notesModeSimilarity ?? "Note similarity"}
             </TabsTrigger>
           </TabsList>
         </Tabs>
+        <span
+          title={heuristicHint}
+          aria-label={heuristicHint}
+          className="shrink-0 text-muted-foreground/70 hover:text-muted-foreground"
+        >
+          <Info className="h-3.5 w-3.5" />
+        </span>
 
         <div className="flex-1" />
-        <Badge variant="secondary" className="text-[11px]">
+        <Badge variant="secondary" className="shrink-0 text-[11px]">
           {matchedNotes} {t.navyDocs?.notesLabel ?? "notes"} · {topicCount}{" "}
           {t.navyDocs?.graphTopicsLabel ?? "topics"}
         </Badge>
       </div>
 
-      {mode === "similarity" && (
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          {t.navyDocs?.graphThreshold ?? "Min. similarity"}
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value))}
-            className="flex-1 accent-primary"
-          />
-          <span className="tabular-nums w-8">{threshold.toFixed(2)}</span>
-        </label>
-      )}
+      {/* Reserve the slider row in both modes so split columns keep equal
+          canvas heights regardless of the selected mode. */}
+      <div className="flex h-6 items-center gap-2 text-xs text-muted-foreground">
+        {mode === "similarity" && (
+          <>
+            <span className="shrink-0">
+              {t.navyDocs?.graphThreshold ?? "Min. similarity"}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+              className="flex-1 accent-primary"
+            />
+            <span className="tabular-nums w-8 shrink-0">
+              {threshold.toFixed(2)}
+            </span>
+          </>
+        )}
+      </div>
 
       <GraphCanvas
         className="flex-1"

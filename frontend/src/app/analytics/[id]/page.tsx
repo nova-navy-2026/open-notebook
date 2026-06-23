@@ -50,18 +50,13 @@ function SourcesPanel({
   );
 }
 
-/** Notes panel content: the notes↔topics graph plus the heuristic disclaimer. */
+/**
+ * Notes panel content: the notes graph. The heuristic disclaimer now lives as
+ * an info icon inside the graph's control bar, so this panel mirrors the
+ * Sources panel exactly (same flex-fill structure → equal canvas heights).
+ */
 function NotesPanel({ notebookId }: { notebookId: string }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <NotesGraph notebookId={notebookId} className="flex-1" />
-      <p className="flex-shrink-0 pt-2 text-[11px] text-muted-foreground">
-        {t.navyDocs?.notesGraphHeuristicHint ??
-          "Topics are inferred from note text by keyword matching — a rough heuristic, not semantic classification."}
-      </p>
-    </div>
-  );
+  return <NotesGraph notebookId={notebookId} className="flex-1" />;
 }
 
 /**
