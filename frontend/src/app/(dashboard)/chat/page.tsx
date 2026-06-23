@@ -18,10 +18,10 @@ import { Button } from "@/components/ui/button";
 import { globalChatApi } from "@/lib/api/global-chat";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 import {
-  conversationsToMarkdown,
-  downloadMarkdown,
+  conversationsToDocx,
+  downloadDocx,
   type ExportableConversation,
-} from "@/lib/utils/export-markdown";
+} from "@/lib/utils/export-docx";
 import { toast } from "sonner";
 
 export default function GlobalChatPage() {
@@ -56,11 +56,11 @@ export default function GlobalChatPage() {
         toast.info(t.chat.noConversationsToExport ?? "Não há conversas para exportar");
         return;
       }
-      const markdown = conversationsToMarkdown(
+      const doc = conversationsToDocx(
         conversations,
         t.chat.exportAllConversations ?? "Conversas exportadas",
       );
-      downloadMarkdown(markdown, "conversas");
+      downloadDocx(doc, "conversas");
       toast.success(t.chat.conversationsExported ?? "Conversas exportadas");
     } catch (error) {
       console.error("Failed to export conversations:", error);

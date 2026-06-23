@@ -14,7 +14,16 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Search, ChevronDown, X, FileText, FileSearch } from "lucide-react";
+import {
+  Search,
+  ChevronDown,
+  X,
+  FileText,
+  FileSearch,
+  StickyNote,
+  Lightbulb,
+  FileBox,
+} from "lucide-react";
 import { useSearch } from "@/lib/hooks/use-search";
 import { useSettings } from "@/lib/hooks/use-settings";
 import { useModelDefaults } from "@/lib/hooks/use-models";
@@ -155,6 +164,19 @@ export default function SearchPage() {
     return Array.from(groups.entries());
   }, [searchMutation.data]);
 
+  const typeMeta = (type: string, isNavy: boolean) => {
+    if (isNavy)
+      return { label: "Document", Icon: FileBox, color: "text-sky-600 dark:text-sky-400" };
+    switch (type) {
+      case "source":
+        return { label: "Source", Icon: FileText, color: "text-violet-600 dark:text-violet-400" };
+      case "note":
+        return { label: "Note", Icon: StickyNote, color: "text-amber-600 dark:text-amber-400" };
+      default:
+        return { label: "Insight", Icon: Lightbulb, color: "text-emerald-600 dark:text-emerald-400" };
+    }
+  };
+
   const renderResult = (result: (typeof groupedResults)[number][1][number], key: string | number) => {
     if (!result.parent_id) {
       console.warn("Search result with null parent_id:", result);
@@ -167,72 +189,84 @@ export default function SearchPage() {
       : type === "source_insight"
         ? "insight"
         : (type as "source" | "note" | "insight");
-    const typeLabel = isNavy
-      ? "Document"
-      : type === "source"
-        ? "Source"
-        : type === "note"
-          ? "Note"
-          : "Insight";
+    const { label: typeLabel, Icon, color } = typeMeta(type, isNavy);
     const matchCount = result.matches?.length ?? 0;
+    const preview = result.matches?.[0];
 
     return (
-      <Card key={key} className="hover:border-primary/30 transition-colors">
-        <CardContent className="pt-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <Badge variant="outline" className="text-xs flex-shrink-0">
-                  {typeLabel}
-                </Badge>
-                <Badge variant="secondary" className="text-xs flex-shrink-0">
-                  {result.final_score.toFixed(2)}
-                </Badge>
-                {matchCount > 1 && (
-                  <Badge variant="secondary" className="text-xs flex-shrink-0">
-                    {matchCount} chunks
-                  </Badge>
-                )}
-              </div>
+      <Card
+        key={key}
+        className="group overflow-hidden border-border/60 transition-all hover:border-primary/40 hover:shadow-sm"
+      >
+        <CardContent className="flex gap-3 p-4">
+          <div
+            className={`mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-muted ${color}`}
+          >
+            <Icon className="h-4 w-4" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
               {modalType ? (
                 <button
                   onClick={() => openModal(modalType, id)}
-                  className="text-primary hover:underline font-medium text-left truncate block w-full"
+                  className="truncate text-left font-medium text-foreground hover:text-primary hover:underline"
+                  title={result.title}
                 >
                   {result.title}
                 </button>
               ) : (
                 <span
-                  className="font-medium text-left truncate block w-full"
+                  className="truncate font-medium text-foreground"
                   title={result.title}
                 >
                   {result.title}
                 </span>
               )}
+              <span className="flex-shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium tabular-nums text-primary">
+                {result.final_score.toFixed(2)}
+              </span>
             </div>
-          </div>
 
-          {result.matches && result.matches.length > 0 && (
-            <Collapsible className="mt-3">
-              <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-                <ChevronDown className="h-4 w-4" />
-                {t.searchPage.matches.replace(
-                  "{count}",
-                  result.matches.length.toString(),
-                )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2 space-y-1">
-                {result.matches.map((match, i) => (
-                  <div
-                    key={i}
-                    className="text-sm pl-6 py-1 border-l-2 border-muted"
-                  >
-                    {match}
-                  </div>
-                ))}
-              </CollapsibleContent>
-            </Collapsible>
-          )}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <Badge variant="outline" className="text-[10px] font-normal">
+                {typeLabel}
+              </Badge>
+              {matchCount > 1 && (
+                <Badge variant="secondary" className="text-[10px] font-normal">
+                  {matchCount} chunks
+                </Badge>
+              )}
+            </div>
+
+            {preview && (
+              <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+                {preview}
+              </p>
+            )}
+
+            {result.matches && result.matches.length > 1 && (
+              <Collapsible className="mt-2">
+                <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&[data-state=open]>svg]:rotate-180">
+                  <ChevronDown className="h-3.5 w-3.5 transition-transform" />
+                  {t.searchPage.matches.replace(
+                    "{count}",
+                    result.matches.length.toString(),
+                  )}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2 space-y-1.5">
+                  {result.matches.map((match, i) => (
+                    <div
+                      key={i}
+                      className="rounded-md border-l-2 border-primary/30 bg-muted/40 py-1.5 pl-3 pr-2 text-sm text-muted-foreground"
+                    >
+                      {match}
+                    </div>
+                  ))}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+          </div>
         </CardContent>
       </Card>
     );

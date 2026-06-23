@@ -270,6 +270,48 @@ _NAVY_RESULT_SOURCE = [
 _ACL_UNSET: Any = object()
 
 
+async def filter_allowed_doc_ids(
+    doc_ids: List[str], acl_filter: Optional[Dict[str, Any]]
+) -> List[str]:
+    """Return the subset of ``doc_ids`` still visible under ``acl_filter``.
+
+    Used to prune a collaborative notebook's selected navy documents when its
+    effective access tightens (e.g. a lower-clearance member joins): documents
+    the new effective profile can no longer reach are dropped so they are no
+    longer associated with the notebook. Original order is preserved.
+
+    Best-effort: ``acl_filter is None`` means "no restriction" (returns the
+    input de-duplicated); on any OpenSearch error the input is returned
+    unchanged — the query-time ACL filter still prevents access regardless.
+    """
+    ordered = list(dict.fromkeys(doc_ids or []))  # de-dupe, keep order
+    if not ordered:
+        return []
+    if acl_filter is None:
+        return ordered
+    try:
+        client = await get_client()
+        body: Dict[str, Any] = {
+            "size": 0,
+            "query": {
+                "bool": {"filter": [acl_filter, {"terms": {"doc_id": ordered}}]}
+            },
+            "aggs": {"allowed": {"terms": {"field": "doc_id", "size": len(ordered)}}},
+        }
+        response = await _search_with_retry(client, body)
+        buckets = (
+            response.get("aggregations", {}).get("allowed", {}).get("buckets", [])
+        )
+        allowed = {b["key"] for b in buckets}
+        return [d for d in ordered if d in allowed]
+    except Exception as exc:  # noqa: BLE001 - best-effort prune
+        logger.warning(
+            f"Could not prune navy doc selection against effective ACL "
+            f"(keeping current selection; query-time ACL still applies): {exc}"
+        )
+        return ordered
+
+
 async def search_navy_documents(
     query: str,
     doc_ids: Optional[List[str]] = None,

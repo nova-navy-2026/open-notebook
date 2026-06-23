@@ -296,7 +296,20 @@ async def update_notebook_navy_docs(
             if doc_id and doc_id not in seen:
                 seen.add(doc_id)
                 deduped.append(doc_id)
-        notebook.navy_doc_ids = deduped[:15]
+        deduped = deduped[:15]
+
+        # For a collaborative notebook the selection is shared and must stay
+        # within the notebook's effective (most-restrictive) access — drop any
+        # doc the effective clearance/departments can't reach, so a member can't
+        # attach corpus another member couldn't see.
+        if getattr(notebook, "collaborative", False):
+            from open_notebook.collaboration import effective_navy_filter
+            from open_notebook.search.navy_docs import filter_allowed_doc_ids
+
+            deduped = await filter_allowed_doc_ids(
+                deduped, effective_navy_filter(notebook)
+            )
+        notebook.navy_doc_ids = deduped
         await notebook.save()
 
         query = """

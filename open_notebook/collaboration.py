@@ -105,6 +105,16 @@ async def recompute_effective_access(notebook) -> None:
     if notebook.collaborative:
         notebook.effective_clearance = min_clearance
         notebook.effective_departments = departments
+        # Drop any previously-selected navy corpus docs that the (possibly now
+        # lower) effective clearance / narrowed departments can no longer reach,
+        # so they are no longer associated with the notebook.
+        selected = getattr(notebook, "navy_doc_ids", None) or []
+        if selected:
+            from open_notebook.search.navy_docs import filter_allowed_doc_ids
+
+            notebook.navy_doc_ids = await filter_allowed_doc_ids(
+                selected, effective_navy_filter(notebook)
+            )
     else:
         notebook.effective_clearance = None
         notebook.effective_departments = None

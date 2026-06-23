@@ -215,26 +215,45 @@ async def opensearch_text_search(
         if acl is not None:
             filters = list(filters) + [acl]
 
+        search_fields = [
+            "document_name^3",
+            "title^2",
+            "section_title^2",
+            "source^2",
+            "content",
+        ]
         body: Dict[str, Any] = {
             "size": results * 3,  # over-fetch for deduplication
             "query": {
                 "bool": {
-                    "must": [
+                    # Fuzzy/partial matching: a query matches if ANY of the
+                    # clauses below fire. This makes the search forgiving of
+                    # typos and partial words instead of requiring an exact
+                    # token match.
+                    "should": [
+                        # Typo tolerance: per-term edit-distance matching.
                         {
                             "multi_match": {
                                 "query": keyword,
-                                "fields": [
-                                    "document_name^3",
-                                    "title^2",
-                                    "section_title^2",
-                                    "source^2",
-                                    "content",
-                                ],
+                                "fields": search_fields,
                                 "type": "best_fields",
                                 "fuzziness": "AUTO",
+                                "prefix_length": 1,
+                                "max_expansions": 50,
                             }
-                        }
+                        },
+                        # Partial-word / as-you-type matching (e.g. "subm"
+                        # matches "submarino").
+                        {
+                            "multi_match": {
+                                "query": keyword,
+                                "fields": search_fields,
+                                "type": "phrase_prefix",
+                                "slop": 2,
+                            }
+                        },
                     ],
+                    "minimum_should_match": 1,
                     "filter": filters,
                 }
             },

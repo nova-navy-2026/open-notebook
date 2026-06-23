@@ -28,5 +28,15 @@
     "email": "miguel.domingos@teste.com",
     "departments": ["SI-DITIC"],
     "clearance_level": 3
+  },
+  "m10004": {
+    "email": "rafael.ferreira@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 2
+  },
+  "m10005": {
+    "email": "guilherme.frazao@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 3
   }
 }

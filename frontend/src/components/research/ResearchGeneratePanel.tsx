@@ -243,9 +243,23 @@ export function ResearchGeneratePanel({
               </SelectTrigger>
               <SelectContent>
                 {availableReportTypes.map((rt) => (
-                  <SelectItem key={rt.value} value={rt.value}>
-                    {rt.label}
-                    {rt.speed ? ` (${rt.speed})` : ""}
+                  <SelectItem
+                    key={rt.value}
+                    value={rt.value}
+                    textValue={rt.label}
+                    title={rt.description}
+                  >
+                    <div className="flex flex-col gap-0.5 py-0.5">
+                      <span className="font-medium">
+                        {rt.label}
+                        {rt.speed ? ` (${rt.speed})` : ""}
+                      </span>
+                      {rt.description && (
+                        <span className="max-w-[280px] whitespace-normal text-xs text-muted-foreground">
+                          {rt.description}
+                        </span>
+                      )}
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>

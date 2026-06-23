@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, User, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square } from 'lucide-react'
+import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square } from 'lucide-react'
 import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -27,7 +27,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { conversationToMarkdown, downloadMarkdown } from '@/lib/utils/export-markdown'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { useAuthStore } from '@/lib/stores/auth-store'
+import { conversationToDocx, downloadDocx } from '@/lib/utils/export-docx'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
@@ -229,6 +231,15 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { openModal } = useModalManager()
+  const { user } = useAuthStore()
+  const userInitials = user?.name
+    ? user.name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+    : (user?.email?.[0] || 'U').toUpperCase()
   const { data: reportTypes = [] } = useReportTypes()
   const { data: tones = [] } = useResearchTones()
   const { data: modelDefaults } = useModelDefaults()
@@ -388,11 +399,11 @@ export function ChatPanel({
       toast.info(t.chat.noMessagesToExport ?? 'Não há mensagens para exportar')
       return
     }
-    const markdown = conversationToMarkdown({
+    const doc = conversationToDocx({
       title: resolvedTitle,
       messages,
     })
-    downloadMarkdown(markdown, resolvedTitle)
+    downloadDocx(doc, resolvedTitle)
     toast.success(t.chat.conversationExported ?? 'Conversa exportada')
   }, [messages, resolvedTitle, t])
 
@@ -563,9 +574,17 @@ export function ChatPanel({
                   </div>
                   {message.type === 'human' && (
                     <div className="flex-shrink-0">
-                      <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center">
-                        <User className="h-4 w-4 text-primary-foreground" />
-                      </div>
+                      <Avatar className="h-8 w-8">
+                        {user?.avatar && (
+                          <AvatarImage
+                            src={user.avatar}
+                            alt={user.name || user.email}
+                          />
+                        )}
+                        <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                          {userInitials}
+                        </AvatarFallback>
+                      </Avatar>
                     </div>
                   )}
                 </div>
