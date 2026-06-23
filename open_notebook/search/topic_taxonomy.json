@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "source": "mock",
+  "description": "Fixed, global topic taxonomy used to classify navy corpus chunks. While 'source' is 'mock' the classes are placeholders for prototyping the document-relationship graph; replace this file (or regenerate it via the bootstrap command) and re-run classification with mode='real' to produce the canonical taxonomy.",
+  "classes": [
+    { "id": "navigation",     "label": "Navigation & Seamanship",    "color": "#2563eb" },
+    { "id": "propulsion",     "label": "Propulsion & Engineering",   "color": "#dc2626" },
+    { "id": "weapons",        "label": "Weapons & Armament",         "color": "#7c3aed" },
+    { "id": "sensors",        "label": "Sensors, Radar & Sonar",     "color": "#0891b2" },
+    { "id": "communications", "label": "Communications & Signals",   "color": "#ca8a04" },
+    { "id": "logistics",      "label": "Logistics & Supply",         "color": "#16a34a" },
+    { "id": "personnel",      "label": "Personnel & Training",       "color": "#db2777" },
+    { "id": "safety",         "label": "Safety & Damage Control",    "color": "#ea580c" },
+    { "id": "operations",     "label": "Operations & Tactics",       "color": "#4f46e5" },
+    { "id": "maintenance",    "label": "Maintenance & Repair",       "color": "#65a30d" }
+  ]
+}

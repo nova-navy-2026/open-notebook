@@ -3,6 +3,48 @@ import { navyDocsApi } from "@/lib/api/navy-docs";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
 export const NAVY_DOCS_QUERY_KEY = ["navy-docs"] as const;
+export const NAVY_DOC_GRAPH_QUERY_KEY = ["navy-doc-graph"] as const;
+export const NAVY_TOPICS_QUERY_KEY = ["navy-topics"] as const;
+
+/**
+ * Fetch the fixed, global topic taxonomy. Used to assign notes to topics
+ * client-side (keyword heuristic) for the Notes ↔ Topics visualization.
+ */
+export function useTopics() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.token);
+
+  return useQuery({
+    queryKey: NAVY_TOPICS_QUERY_KEY,
+    queryFn: () => navyDocsApi.topics(),
+    enabled: isAuthenticated && !!token,
+    staleTime: 30 * 60 * 1000, // taxonomy is effectively static
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
+
+/**
+ * Build the document-relationship graph for a set of navy doc_ids (the
+ * notebook's selected documents). Disabled when nothing is selected.
+ */
+export function useDocumentGraph(docIds: string[], enabled = true) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const token = useAuthStore((s) => s.token);
+  // Stable key regardless of selection order.
+  const sortedIds = [...docIds].sort();
+
+  return useQuery({
+    queryKey: [...NAVY_DOC_GRAPH_QUERY_KEY, sortedIds],
+    queryFn: () => navyDocsApi.graph(docIds),
+    enabled: enabled && isAuthenticated && !!token && docIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
 
 export function useNavyDocuments() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);

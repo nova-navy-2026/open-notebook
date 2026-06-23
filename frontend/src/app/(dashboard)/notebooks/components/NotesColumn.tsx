@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, StickyNote, Bot, User, MoreVertical, Trash2, Image as ImageIcon, Video as VideoIcon, PlayCircle } from 'lucide-react'
+import { Plus, StickyNote, Bot, User, MoreVertical, Trash2, Image as ImageIcon, Video as VideoIcon, PlayCircle, Network } from 'lucide-react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +36,9 @@ interface NotesColumnProps {
   notebookId: string
   contextSelections?: Record<string, ContextMode>
   onContextModeChange?: (noteId: string, mode: ContextMode) => void
+  /** Knowledge-base documents selected for this notebook; drives the
+   *  relationship graph rendered in this panel. */
+  selectedNavyDocIds?: Set<string>
 }
 
 /**
@@ -102,7 +105,8 @@ export function NotesColumn({
   isLoading,
   notebookId,
   contextSelections,
-  onContextModeChange
+  onContextModeChange,
+  selectedNavyDocIds
 }: NotesColumnProps) {
   const { t, language } = useTranslation()
   const [showAddDialog, setShowAddDialog] = useState(false)
@@ -112,6 +116,28 @@ export function NotesColumn({
   const [noteToDelete, setNoteToDelete] = useState<string | null>(null)
 
   const deleteNote = useDeleteNote()
+
+  // The visualization tab is useful once there's something to plot: ≥2 selected
+  // knowledge-base docs (Sources graph) OR at least one note (Notes graph).
+  const selectedDocCount = selectedNavyDocIds?.size ?? 0
+  const canVisualize = selectedDocCount >= 2 || (notes?.length ?? 0) >= 1
+
+  // Open the data-analytics workspace in its own window (no app chrome) so the
+  // graphs run edge-to-edge — this side panel is the app's narrowest region.
+  // Requesting a size makes browsers open a separate window rather than a tab;
+  // re-using a stable window name focuses the existing one instead of stacking.
+  const openVisualization = () => {
+    if (!notebookId) return
+    const url = `/analytics/${encodeURIComponent(notebookId)}`
+    const name = `data-analytics-${notebookId}`
+    if (typeof window === 'undefined') return
+    const w = Math.min(1600, Math.round(window.screen.availWidth * 0.9))
+    const h = Math.min(1000, Math.round(window.screen.availHeight * 0.9))
+    const left = Math.round((window.screen.availWidth - w) / 2)
+    const top = Math.round((window.screen.availHeight - h) / 2)
+    const features = `popup=yes,noopener,noreferrer,width=${w},height=${h},left=${left},top=${top}`
+    window.open(url, name, features)
+  }
 
   // Collapsible column state
   const { notesCollapsed, toggleNotes } = useNotebookColumnsStore()
@@ -148,8 +174,26 @@ export function NotesColumn({
         <Card className="h-full flex flex-col flex-1 overflow-hidden">
           <CardHeader className="px-3 pb-3 sm:px-4 flex-shrink-0">
             <div className="flex items-center justify-between gap-2 min-w-0">
-              <CardTitle className="min-w-0 truncate text-base xl:text-lg">{t.notebooks.agentNotes}</CardTitle>
+              <CardTitle className="min-w-0 truncate text-base xl:text-lg">
+                {t.notebooks.agentNotes}
+              </CardTitle>
               <div className="flex items-center gap-1 flex-shrink-0">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9"
+                  onClick={openVisualization}
+                  disabled={!canVisualize}
+                  title={
+                    canVisualize
+                      ? (t.navyDocs?.visualizeButton ?? 'Open visualizations')
+                      : (t.navyDocs?.visualizeNeedsData ??
+                        'Add notes or select knowledge base documents to visualize relationships.')
+                  }
+                  aria-label={t.navyDocs?.visualizeButton ?? 'Open visualizations'}
+                >
+                  <Network className="h-4 w-4" />
+                </Button>
                 <Button
                   size="icon"
                   className="h-9 w-9"
@@ -167,7 +211,7 @@ export function NotesColumn({
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-y-auto min-h-0 px-3 sm:px-4">
+          <CardContent className="flex-1 min-h-0 px-3 sm:px-4 overflow-y-auto">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <LoadingSpinner />

@@ -396,6 +396,7 @@ export default function NotebookPage() {
                   onContextModeChange={(noteId, mode) =>
                     handleContextModeChange(noteId, mode, "note")
                   }
+                  selectedNavyDocIds={selectedNavyDocIds}
                 />
               )}
               {mobileActiveTab === "chat" && (
@@ -442,6 +443,7 @@ export default function NotebookPage() {
               onContextModeChange={(noteId, mode) =>
                 handleContextModeChange(noteId, mode, "note")
               }
+              selectedNavyDocIds={selectedNavyDocIds}
             />
           </div>
         </div>

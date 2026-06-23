@@ -46,6 +46,10 @@ def _build_index_mapping(dimension: int) -> Dict[str, Any]:
                 "content": {"type": "text", "analyzer": "standard"},
                 "insight_type": {"type": "keyword"},
                 "owner": {"type": "keyword"},
+                # Topic class for the document-relationship graph (see
+                # open_notebook.search.topics). Mirrors the field written onto
+                # navy-corpus chunks so both indexes share one schema.
+                "topic_class": {"type": "keyword"},
                 "embedding": {
                     "type": "knn_vector",
                     "dimension": dimension,

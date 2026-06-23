@@ -499,6 +499,32 @@ export const ptPT = {
     prev: "Anterior",
     next: "Seguinte",
     loadError: "Erro ao carregar base de conhecimento",
+    graphModeBipartite: "Documentos ↔ Tópicos",
+    graphModeSimilarity: "Semelhança entre documentos",
+    graphThreshold: "Semelhança mín.",
+    graphLegend: "Tópicos",
+    graphLoading: "A construir as relações entre documentos...",
+    graphError: "Falha ao construir o grafo de documentos.",
+    graphEmpty:
+      "Sem documentos classificados para mostrar. Selecione documentos e execute a classificação por tópicos.",
+    graphDocsLabel: "docs",
+    graphTopicsLabel: "tópicos",
+    graphNeedsDocs:
+      "Selecione pelo menos 2 documentos da base de conhecimento para ver as suas relações.",
+    notesLabel: "notas",
+    visualizeTitle: "Análise de dados",
+    visualizeButton: "Abrir análise de dados",
+    visualizeNeedsData:
+      "Adicione notas ou selecione documentos da base de conhecimento para visualizar as relações.",
+    vizTabSources: "Fontes",
+    vizTabNotes: "Notas",
+    vizTabSplit: "Dividir",
+    notesGraphLoading: "A construir as relações entre notas...",
+    notesGraphError: "Falha ao construir o grafo de notas.",
+    notesGraphEmpty:
+      "Ainda não há notas para visualizar. Adicione notas a este notebook para ver como se relacionam com os tópicos.",
+    notesGraphHeuristicHint:
+      "Os tópicos são inferidos do texto das notas por correspondência de palavras-chave — uma heurística aproximada, não uma classificação semântica.",
   },
   chat: {
     sessions: "Sessões",

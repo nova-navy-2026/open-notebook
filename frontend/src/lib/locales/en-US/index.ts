@@ -493,6 +493,34 @@ export const enUS = {
     prev: "Prev",
     next: "Next",
     loadError: "Error loading knowledge base",
+    graphModeBipartite: "Documents ↔ Topics",
+    graphModeSimilarity: "Document similarity",
+    graphThreshold: "Min. similarity",
+    graphLegend: "Topics",
+    graphLoading: "Building document relationships...",
+    graphError: "Failed to build the document graph.",
+    graphEmpty:
+      "No classified documents to display. Select documents and run topic classification.",
+    graphDocsLabel: "docs",
+    graphTopicsLabel: "topics",
+    graphNeedsDocs:
+      "Select at least 2 knowledge base documents to see their relationships.",
+    notesLabel: "notes",
+    visualizeTitle: "Data analytics",
+    visualizeButton: "Open data analytics",
+    visualizeNeedsData:
+      "Add notes or select knowledge base documents to visualize relationships.",
+    vizTabSources: "Sources",
+    vizTabNotes: "Notes",
+    vizTabSplit: "Split",
+    notesModeBipartite: "Notes ↔ Topics",
+    notesModeSimilarity: "Note similarity",
+    notesGraphLoading: "Building note relationships...",
+    notesGraphError: "Failed to build the notes graph.",
+    notesGraphEmpty:
+      "No notes to visualize yet. Add notes to this notebook to see how they relate to topics.",
+    notesGraphHeuristicHint:
+      "Topics are inferred from note text by keyword matching — a rough heuristic, not semantic classification.",
   },
   chat: {
     sessions: "Sessions",

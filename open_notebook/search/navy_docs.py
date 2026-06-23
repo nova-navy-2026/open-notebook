@@ -15,6 +15,7 @@ embedding model in the open-notebook process.
 
 import asyncio
 import json
+import math
 import re
 import time
 from typing import Any, Dict, List, Optional
@@ -23,6 +24,12 @@ from loguru import logger
 
 from open_notebook.config import NAVY_OPENSEARCH_INDEX
 from open_notebook.search.client import get_client
+from open_notebook.search.topics import (
+    TOPIC_CLASS_FIELD,
+    get_topic_class_ids,
+    get_topic_color_map,
+    get_topic_label_map,
+)
 
 
 async def _search_with_retry(
@@ -204,6 +211,204 @@ async def _list_navy_documents_uncached(
     except Exception as e:
         logger.error(f"Failed to list navy documents: {e}")
         raise
+
+
+def _pretty_doc_label(doc_id: str, sample: Dict[str, Any]) -> str:
+    """Human-readable label for a document node."""
+    name = sample.get("document_name") or sample.get("source")
+    if name:
+        return str(name)
+    return doc_id.replace("_", " ").replace(".pdf", "").strip() or doc_id
+
+
+def _cosine(a: Dict[str, int], b: Dict[str, int]) -> float:
+    """Cosine similarity between two class→count vectors."""
+    shared = set(a) & set(b)
+    if not shared:
+        return 0.0
+    dot = sum(a[c] * b[c] for c in shared)
+    na = math.sqrt(sum(v * v for v in a.values()))
+    nb = math.sqrt(sum(v * v for v in b.values()))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+# The navy index may map ``topic_class`` either as a pure ``keyword`` (when the
+# corpus is reindexed with an explicit mapping) or — when the field is first
+# created dynamically — as ``text`` with a ``.keyword`` sub-field. Aggregations
+# require the keyword variant, so resolve it once from the live mapping.
+_topic_agg_field_cache: Optional[str] = None
+
+
+async def _topic_agg_field(client: Any) -> str:
+    global _topic_agg_field_cache
+    if _topic_agg_field_cache:
+        return _topic_agg_field_cache
+    try:
+        mapping = await asyncio.to_thread(
+            client.indices.get_mapping, index=NAVY_OPENSEARCH_INDEX
+        )
+        props = (
+            mapping.get(NAVY_OPENSEARCH_INDEX, {})
+            .get("mappings", {})
+            .get("properties", {})
+        )
+        fld = props.get(TOPIC_CLASS_FIELD, {})
+        if fld.get("type") == "keyword":
+            _topic_agg_field_cache = TOPIC_CLASS_FIELD
+        elif "keyword" in (fld.get("fields") or {}):
+            _topic_agg_field_cache = f"{TOPIC_CLASS_FIELD}.keyword"
+        else:
+            _topic_agg_field_cache = TOPIC_CLASS_FIELD
+    except Exception as e:  # noqa: BLE001 - fall back to the common dynamic case
+        logger.warning(f"Could not resolve topic_class agg field: {e}")
+        _topic_agg_field_cache = f"{TOPIC_CLASS_FIELD}.keyword"
+    return _topic_agg_field_cache
+
+
+async def build_document_graph(
+    doc_ids: List[str],
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the document-relationship graph for a set of navy documents.
+
+    Clusters the given documents by the ``topic_class`` of their chunks (a fixed,
+    global taxonomy). Because a document's chunks can carry different classes, a
+    document can belong to several clusters at once.
+
+    Returns a payload with both graph topologies (the frontend toggles between
+    them):
+      - ``documents``  : per-doc class profile ``{id, label, chunk_count, classes}``
+      - ``topics``     : the topic nodes present ``{id, label, color, doc_count, chunk_count}``
+      - ``edges_bipartite``  : document→topic edges, weight = chunks of that class
+      - ``edges_similarity`` : document↔document edges, weight = cosine over class
+        profiles (0..1); only pairs sharing at least one class are included
+    """
+    from open_notebook.access_control import build_opensearch_filter
+
+    color_map = get_topic_color_map()
+    label_map = get_topic_label_map()
+
+    empty: Dict[str, Any] = {
+        "documents": [],
+        "topics": [],
+        "edges_bipartite": [],
+        "edges_similarity": [],
+    }
+    if not doc_ids:
+        return empty
+
+    client = await get_client()
+
+    filter_clauses: List[Dict[str, Any]] = [{"terms": {"doc_id": doc_ids}}]
+    acl = build_opensearch_filter(user_id)
+    if acl is not None:
+        filter_clauses.append(acl)
+
+    class_ids = get_topic_class_ids()
+    agg_field = await _topic_agg_field(client)
+    body: Dict[str, Any] = {
+        "size": 0,
+        "query": {"bool": {"filter": filter_clauses}},
+        "aggs": {
+            "docs": {
+                "terms": {"field": "doc_id", "size": max(len(doc_ids), 1)},
+                "aggs": {
+                    "classes": {
+                        "terms": {
+                            "field": agg_field,
+                            "size": max(len(class_ids), 1),
+                        }
+                    },
+                    "sample": {
+                        "top_hits": {
+                            "size": 1,
+                            "_source": ["document_name", "source"],
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    response = await _search_with_retry(client, body)
+    buckets = response.get("aggregations", {}).get("docs", {}).get("buckets", [])
+
+    documents: List[Dict[str, Any]] = []
+    profiles: Dict[str, Dict[str, int]] = {}
+    topic_doc_count: Dict[str, int] = {}
+    topic_chunk_count: Dict[str, int] = {}
+    edges_bipartite: List[Dict[str, Any]] = []
+
+    for bucket in buckets:
+        doc_id = bucket["key"]
+        chunk_count = bucket["doc_count"]
+        sample_hits = bucket.get("sample", {}).get("hits", {}).get("hits", [])
+        sample = sample_hits[0]["_source"] if sample_hits else {}
+
+        class_buckets = bucket.get("classes", {}).get("buckets", [])
+        profile: Dict[str, int] = {}
+        classes_out: List[Dict[str, Any]] = []
+        for cb in class_buckets:
+            cls = cb["key"]
+            count = cb["doc_count"]
+            profile[cls] = count
+            classes_out.append({"class": cls, "count": count})
+            topic_doc_count[cls] = topic_doc_count.get(cls, 0) + 1
+            topic_chunk_count[cls] = topic_chunk_count.get(cls, 0) + count
+            edges_bipartite.append(
+                {"source": doc_id, "topic": cls, "weight": count}
+            )
+
+        profiles[doc_id] = profile
+        documents.append(
+            {
+                "id": doc_id,
+                "label": _pretty_doc_label(doc_id, sample),
+                "chunk_count": chunk_count,
+                "classes": classes_out,
+            }
+        )
+
+    # Topic nodes: only those actually present, in taxonomy order.
+    topics = [
+        {
+            "id": cls,
+            "label": label_map.get(cls, cls),
+            "color": color_map.get(cls, "#94a3b8"),
+            "doc_count": topic_doc_count[cls],
+            "chunk_count": topic_chunk_count[cls],
+        }
+        for cls in class_ids
+        if cls in topic_doc_count
+    ]
+
+    # Document↔document similarity edges (cosine over class profiles). Notebook
+    # selections are capped (<= ~15 docs) so all-pairs is cheap.
+    ids = list(profiles.keys())
+    edges_similarity: List[Dict[str, Any]] = []
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            w = _cosine(profiles[ids[i]], profiles[ids[j]])
+            if w > 0:
+                edges_similarity.append(
+                    {
+                        "source": ids[i],
+                        "target": ids[j],
+                        "weight": round(w, 4),
+                        "shared": sorted(
+                            set(profiles[ids[i]]) & set(profiles[ids[j]])
+                        ),
+                    }
+                )
+
+    return {
+        "documents": documents,
+        "topics": topics,
+        "edges_bipartite": edges_bipartite,
+        "edges_similarity": edges_similarity,
+    }
 
 
 def _collapse_navy_hits(
