@@ -1,5 +1,6 @@
 export const enUS = {
   common: {
+    account: "Account",
     search: "Search...",
     create: "New",
     new: "New",

@@ -71,6 +71,29 @@ def _gemma_model() -> str:
     return raw.split(":")[-1] if raw else "google/gemma-4-31B-it"
 
 
+def _language_instruction(language: Optional[str]) -> str:
+    """Instruction telling the vision LLM which language to answer in.
+
+    ``language`` is the app's current locale (e.g. "pt-PT", "fr-FR", "en-US"),
+    forwarded by the frontend. When absent we keep the previous default of
+    European Portuguese so behaviour is unchanged for older callers.
+    """
+    from open_notebook.ai.vision import caption_language_name
+
+    name = caption_language_name(language)
+    if name == "European Portuguese (pt-PT)":
+        return (
+            "Responde em português europeu (pt-PT). Não uses português do Brasil "
+            "(evita 'você', 'usuário', 'arquivo', 'tela', 'celular')."
+        )
+    if name:
+        return f"Responde sempre em {name}, exceto citações textuais."
+    return (
+        "Responde em português europeu (pt-PT), exceto se o pedido do utilizador "
+        "estiver claramente noutra língua."
+    )
+
+
 def _extract_video_frames(video_path: str) -> List[bytes]:
     """
     Sample frames from a video at _VIDEO_FRAME_STRIDE intervals, up to
@@ -601,6 +624,7 @@ async def _run_gemma_ocr(
     images: List[Tuple[bytes, str]],
     context: Optional[str] = None,
     media_kind: str = "imagem",
+    language: Optional[str] = None,
 ) -> dict:
     prompt = (
         "Atua como um motor de OCR rigoroso.\n"
@@ -611,8 +635,7 @@ async def _run_gemma_ocr(
         "- Se houver várias zonas de texto, organiza por blocos/linhas.\n"
         "- Se algum texto estiver ilegível, marca como [ilegível] em vez de inventar.\n"
         "- Depois da transcrição, acrescenta uma nota curta sobre a confiança/leiturabilidade.\n"
-        "- Responde em português europeu (pt-PT), exceto se o pedido do utilizador estiver claramente noutra língua.\n"
-        "- Se responderes em português, não uses português do Brasil. Evita formas como 'você', 'usuário', 'arquivo', 'mídia', 'tela', 'ônibus' e 'celular'; prefere pt-PT.\n"
+        f"- {_language_instruction(language)}\n"
     )
     if context and context.strip():
         prompt = f"{prompt}\n\nContexto visual anterior, se for útil:\n{context.strip()}"
@@ -796,6 +819,7 @@ async def _run_ocr_with_fallback(
     images: List[Tuple[bytes, str]],
     context: Optional[str] = None,
     media_kind: str = "imagem",
+    language: Optional[str] = None,
 ) -> dict:
     if _docling_ocr_enabled():
         try:
@@ -828,6 +852,7 @@ async def _run_ocr_with_fallback(
         images=images,
         context=context,
         media_kind=media_kind,
+        language=language,
     )
     if gemma_result.get("route") == "ocr":
         gemma_result["text"] = (
@@ -981,6 +1006,7 @@ async def multimodal_chat(
     session_id: Optional[str] = Form(None),
     notebook_id: Optional[str] = Form(None),
     model_id: Optional[str] = Form(None),
+    language: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -1011,6 +1037,10 @@ async def multimodal_chat(
     saved_path: Optional[str] = None
     uploaded_ext: Optional[str] = None
     log_file: Optional[Dict[str, Any]] = None
+    # Audio transcript from an uploaded video's soundtrack (best-effort). When
+    # set, it is fed to the vision LLM as context AND appended to the reply so
+    # the spoken content is captured alongside the frame-by-frame description.
+    video_audio_transcript: Optional[str] = None
     requested_force_engine = (force_engine or "").strip().lower()
     if requested_force_engine not in {"", "sam3", "rfdetr"}:
         raise HTTPException(
@@ -1075,6 +1105,7 @@ async def multimodal_chat(
                     images=[(file_bytes, mime_map.get(ext, "image/jpeg"))],
                     context=context,
                     media_kind="imagem",
+                    language=language,
                 )
                 logger.success(
                     "ChatAgent tool success | agent=multimodal route=ocr "
@@ -1399,21 +1430,46 @@ async def multimodal_chat(
                         f"amostrados {len(ocr_frames)} fotogramas ao longo de toda a "
                         "duração. Descreve de forma breve o que se vê e como evolui "
                         "(cenas, ações, mudanças). O texto detetado por OCR é tratado "
-                        "à parte, por isso foca-te na descrição visual."
+                        "à parte, por isso foca-te na descrição visual.\n\n"
+                        f"{_language_instruction(language)}"
                     )
                     analysis_images = [(fb, "image/jpeg") for fb, _ in ocr_frames]
+
+                    async def _video_audio_section() -> Optional[str]:
+                        """Extract + transcribe the video's audio (best-effort)."""
+                        try:
+                            from open_notebook.ai.vision import (
+                                _extract_video_audio,
+                                _transcribe_video_audio,
+                            )
+
+                            audio_bytes = await _extract_video_audio(saved_path)
+                            if not audio_bytes:
+                                return None
+                            return await _transcribe_video_audio(
+                                audio_bytes, language=language
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Video audio transcription failed ({}); continuing "
+                                "without it.",
+                                type(e).__name__,
+                            )
+                            return None
+
                     try:
-                        # Run frame OCR and the visual analysis concurrently. The
-                        # analysis is allowed to fail without losing the OCR text
-                        # (the primary deliverable), so collect exceptions instead
-                        # of letting gather abort the whole request.
-                        ocr_combined, gemma_outcome = await asyncio.gather(
+                        # Run frame OCR, the visual analysis and the audio
+                        # transcription concurrently. OCR is the primary
+                        # deliverable; the other two may fail without aborting the
+                        # request, so collect exceptions instead of propagating.
+                        ocr_combined, gemma_outcome, audio_outcome = await asyncio.gather(
                             _ocr_video_frames_combined(ocr_frames, query, context),
                             _call_gemma(
                                 analysis_prompt,
                                 analysis_images,
                                 purpose="multimodal_chat",
                             ),
+                            _video_audio_section(),
                             return_exceptions=True,
                         )
                         # OCR is primary — if it failed, surface that error.
@@ -1443,6 +1499,10 @@ async def multimodal_chat(
                             f"{ocr_section}\n\n"
                             f"## Análise visual\n{analysis_section}"
                         )
+                        if isinstance(audio_outcome, str) and audio_outcome.strip():
+                            combined_text += (
+                                f"\n\n## Transcrição do áudio\n{audio_outcome.strip()}"
+                            )
                         result = {
                             "text": combined_text,
                             "route": "ocr",
@@ -1511,6 +1571,27 @@ async def multimodal_chat(
                     frames = [frame]
                 for fr in frames:
                     images.append((fr, "image/jpeg"))
+                # Transcribe the audio track (best-effort) so the spoken content
+                # is captured too — not just the visual frames. Reuses the same
+                # ffmpeg + Whisper pipeline as source uploads; returns None when
+                # the video has no audio or the Whisper service is unreachable.
+                try:
+                    from open_notebook.ai.vision import (
+                        _extract_video_audio,
+                        _transcribe_video_audio,
+                    )
+
+                    audio_bytes = await _extract_video_audio(saved_path)
+                    if audio_bytes:
+                        video_audio_transcript = await _transcribe_video_audio(
+                            audio_bytes, language=language
+                        )
+                except Exception as e:  # never let audio failure abort the analysis
+                    logger.warning(
+                        "Video audio transcription failed ({}); continuing with "
+                        "frame analysis only.",
+                        type(e).__name__,
+                    )
                 prompt = (
                     f"{prompt}\n\nNota: o ficheiro enviado é um vídeo. "
                     f"Foram amostrados {len(frames)} fotogramas distribuídos cronologicamente "
@@ -1520,6 +1601,11 @@ async def multimodal_chat(
                     "Para deteção/seguimento de objetos, pede explicitamente para detetar, "
                     "contar, identificar ou seguir o alvo."
                 )
+                if video_audio_transcript:
+                    prompt = (
+                        f"{prompt}\n\nTranscrição do áudio do vídeo (usa-a para "
+                        f"contextualizar a descrição):\n{video_audio_transcript}"
+                    )
         else:
             mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
             images.append((file_bytes, mime_map.get(ext, "image/jpeg")))
@@ -1575,7 +1661,12 @@ async def multimodal_chat(
                 "context_len": len(context) if context else 0,
             },
         )
+        prompt = f"{prompt}\n\n{_language_instruction(language)}"
         text = await _call_gemma(prompt, images or None, purpose="multimodal_chat")
+        if video_audio_transcript:
+            text = (
+                f"{text}\n\n## Transcrição do áudio\n{video_audio_transcript}"
+            )
         logger.success(
             "ChatAgent tool success | agent=multimodal route=gemma_multimodal "
             "duration_ms={} images={} chars={}",

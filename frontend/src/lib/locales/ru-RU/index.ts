@@ -1,5 +1,6 @@
 export const ruRU = {
   common: {
+    account: "Аккаунт",
     search: "Поиск...",
     create: "Создать",
     new: "Новый",

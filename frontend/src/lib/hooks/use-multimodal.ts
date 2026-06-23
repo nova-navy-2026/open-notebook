@@ -170,7 +170,7 @@ export function useMultimodalChat({
   contextSelections,
   selectedNavyDocIds,
 }: UseMultimodalChatParams) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<NotebookChatMessage[]>([])
@@ -818,6 +818,7 @@ export function useMultimodalChat({
           run_id: agentContext.runId,
           notebook_id: agentContext.notebookId,
           model_id: agentContext.modelId,
+          language,
         })
 
         const content = await formatMultimodalResponse(result)

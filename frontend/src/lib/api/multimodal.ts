@@ -11,6 +11,7 @@ export interface MultimodalRequest {
   session_id?: string
   notebook_id?: string
   model_id?: string
+  language?: string
 }
 
 export interface MultimodalResponse {
@@ -33,6 +34,7 @@ export const multimodalApi = {
     if (data.session_id) form.append('session_id', data.session_id)
     if (data.notebook_id) form.append('notebook_id', data.notebook_id)
     if (data.model_id) form.append('model_id', data.model_id)
+    if (data.language) form.append('language', data.language)
     if (data.file) form.append('file', data.file)
     const response = await apiClient.post<MultimodalResponse>('/vision/multimodal', form)
     return response.data

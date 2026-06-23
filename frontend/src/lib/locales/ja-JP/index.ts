@@ -1,5 +1,6 @@
 export const jaJP = {
   common: {
+    account: "アカウント",
     search: "検索...",
     create: "新規",
     new: "新規",

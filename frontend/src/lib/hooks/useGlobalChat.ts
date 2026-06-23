@@ -118,7 +118,7 @@ async function formatMultimodalResponse(result: MultimodalResponse): Promise<str
 }
 
 export function useGlobalChat() {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<NotebookChatMessage[]>([])
@@ -721,6 +721,7 @@ export function useGlobalChat() {
           run_id: agentContext.runId,
           session_id: agentContext.sessionId,
           model_id: agentContext.modelId,
+          language,
         })
         const content = await formatMultimodalResponse(result)
         logChatAgentEvent({

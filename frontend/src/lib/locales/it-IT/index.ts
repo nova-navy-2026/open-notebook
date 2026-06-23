@@ -1,5 +1,6 @@
 export const itIT = {
   common: {
+    account: "Account",
     search: "Cerca...",
     create: "Nuovo",
     new: "Nuovo",

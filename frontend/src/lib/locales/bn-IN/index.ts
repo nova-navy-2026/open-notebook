@@ -1,5 +1,6 @@
 ﻿export const bnIN = {
   common: {
+    account: "অ্যাকাউন্ট",
     search: "অনুসন্ধান...",
     create: "নতুন",
     new: "নতুন",

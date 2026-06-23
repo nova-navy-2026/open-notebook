@@ -1,5 +1,6 @@
 export const zhCN = {
   common: {
+    account: "账户",
     search: "搜索...",
     create: "新建",
     new: "新建",

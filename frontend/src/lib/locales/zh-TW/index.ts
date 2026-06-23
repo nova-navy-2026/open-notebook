@@ -1,5 +1,6 @@
 export const zhTW = {
   common: {
+    account: "帳戶",
     search: "搜尋...",
     create: "新增",
     new: "新建",

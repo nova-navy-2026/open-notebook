@@ -1,5 +1,6 @@
 export const ptPT = {
   common: {
+    account: "Conta",
     search: "Pesquisar...",
     create: "Novo",
     new: "Novo",
@@ -519,6 +520,8 @@ export const ptPT = {
     vizTabSources: "Fontes",
     vizTabNotes: "Notas",
     vizTabSplit: "Dividir",
+    notesModeBipartite: "Notas ↔ Tópicos",
+    notesModeSimilarity: "Similaridade de notas",
     notesGraphLoading: "A construir as relações entre notas...",
     notesGraphError: "Falha ao construir o grafo de notas.",
     notesGraphEmpty:
