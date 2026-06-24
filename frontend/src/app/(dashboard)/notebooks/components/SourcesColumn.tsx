@@ -32,6 +32,7 @@ import {
 import { NavyDocsSection } from "@/components/notebooks/NavyDocsSection";
 import { useNotebookColumnsStore } from "@/lib/stores/notebook-columns-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
+import { cn } from "@/lib/utils";
 
 interface SourcesColumnProps {
   sources?: SourceListResponse[];

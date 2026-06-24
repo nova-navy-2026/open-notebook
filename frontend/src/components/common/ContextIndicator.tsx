@@ -38,7 +38,7 @@ export function ContextIndicator({
   if (!hasContext) {
     return (
       <div className={cn('flex-shrink-0 text-xs text-muted-foreground py-2 px-3 border-t', className)}>
-        No sources or notes included in context. Toggle icons on cards to include them.
+        No notes included in context. Toggle icons on cards to include them or add notes.
       </div>
     )
   }
@@ -98,17 +98,9 @@ export function ContextIndicator({
         )}
       </div>
 
-      {(tokenCount !== undefined || charCount !== undefined) && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {tokenCount !== undefined && tokenCount > 0 && (
-            <span>{formatNumber(tokenCount)} tokens</span>
-          )}
-          {tokenCount !== undefined && charCount !== undefined && tokenCount > 0 && charCount > 0 && (
-            <span>/</span>
-          )}
-          {charCount !== undefined && charCount > 0 && (
-            <span>{formatNumber(charCount)} chars</span>
-          )}
+      {tokenCount !== undefined && tokenCount > 0 && (
+        <div className="text-xs text-muted-foreground">
+          <span>{formatNumber(tokenCount)} tokens</span>
         </div>
       )}
     </div>
