@@ -845,22 +845,22 @@ export function ChatPanel({
               {showVisionControls && (
                 <>
                 <div className="space-y-1">
-                  <Label className="text-xs">Modo visual</Label>
+                  <Label className="text-xs">{t.chat.visionMode}</Label>
                   <Select value={visionMode} onValueChange={(value) => setVisionMode(value as 'auto' | 'describe' | 'ocr' | 'detect' | 'track')} disabled={isStreaming}>
                     <SelectTrigger className="h-8">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="auto">Auto</SelectItem>
-                      <SelectItem value="describe">Descrever</SelectItem>
+                      <SelectItem value="describe">{t.chat.visionDescribe}</SelectItem>
                       <SelectItem value="ocr">OCR</SelectItem>
-                      <SelectItem value="detect">Detetar</SelectItem>
-                      <SelectItem value="track">Seguir</SelectItem>
+                      <SelectItem value="detect">{t.chat.visionDetect}</SelectItem>
+                      <SelectItem value="track">{t.chat.visionTrack}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Motor</Label>
+                  <Label className="text-xs">{t.chat.visionEngine}</Label>
                   <Select value={visionEngine} onValueChange={(value) => setVisionEngine(value as 'auto' | 'sam3' | 'rfdetr')} disabled={isStreaming}>
                     <SelectTrigger className="h-8">
                       <SelectValue />

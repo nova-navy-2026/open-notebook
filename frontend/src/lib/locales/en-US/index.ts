@@ -575,6 +575,11 @@ export const enUS = {
     voiceUnsupported:
       "Voice input isn't available in this browser (requires HTTPS or localhost)",
     voiceFailed: "Could not transcribe the audio",
+    visionMode: "Visual Mode",
+    visionDescribe: "Describe",
+    visionDetect: "Detect",
+    visionTrack: "Track",
+    visionEngine: "Engine",
   },
   searchPage: {
     askAndSearch: "Ask and Search",

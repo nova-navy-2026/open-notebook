@@ -581,6 +581,11 @@ export const ptPT = {
     voiceUnsupported:
       "A entrada por voz não está disponível neste navegador (requer HTTPS ou localhost)",
     voiceFailed: "Não foi possível transcrever o áudio",
+    visionMode: "Modo visual",
+    visionDescribe: "Descrever",
+    visionDetect: "Detetar",
+    visionTrack: "Seguir",
+    visionEngine: "Motor",
   },
   searchPage: {
     askAndSearch: "Perguntar e Pesquisar",
