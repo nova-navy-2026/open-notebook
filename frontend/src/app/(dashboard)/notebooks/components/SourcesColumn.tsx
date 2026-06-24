@@ -234,10 +234,7 @@ export function SourcesColumn({
             </div>
           </CardHeader>
 
-          <CardContent
-            ref={scrollContainerRef}
-            className="flex-1 overflow-y-auto min-h-0"
-          >
+          <CardContent className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <LoadingSpinner />
@@ -249,7 +246,15 @@ export function SourcesColumn({
                 description={t.sources.createFirstSource}
               />
             ) : hasUploadedSources ? (
-              <div className="space-y-2">
+              <div
+                ref={scrollContainerRef}
+                className={cn(
+                  "space-y-2 overflow-y-auto",
+                  selectedNavyDocIds !== undefined
+                    ? "flex-shrink-0 max-h-[35vh]"
+                    : "flex-1",
+                )}
+              >
                 {sources!.map((source) => (
                   <SourceCard
                     key={source.id}
@@ -284,7 +289,12 @@ export function SourcesColumn({
             {selectedNavyDocIds &&
               onNavyDocSelectionChange &&
               onNavyDocSelectAll && (
-                <div className="mt-4">
+                <div
+                  className={cn(
+                    "flex-1 min-h-0 flex flex-col",
+                    hasUploadedSources && "mt-4",
+                  )}
+                >
                   <NavyDocsSection
                     selectedDocIds={selectedNavyDocIds}
                     onSelectionChange={onNavyDocSelectionChange}

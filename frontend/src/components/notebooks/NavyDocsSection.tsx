@@ -196,7 +196,7 @@ export function NavyDocsSection({
       <div
         key={doc.doc_id}
         className={cn(
-          "flex items-start gap-2 px-2 py-1.5 rounded transition-colors",
+          "flex items-start gap-3 px-3 py-2.5 rounded transition-colors",
           readOnly
             ? ""
             : disabledByLimit
@@ -219,24 +219,24 @@ export function NavyDocsSection({
           <div className="text-sm font-medium truncate" title={doc.doc_id}>
             {label}
           </div>
-          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
             {doc.creator_department && groupBy !== "department" && (
-              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5">
-                <Building2 className="h-2.5 w-2.5" />
+              <Badge variant="outline" className="text-xs px-1.5 py-0.5 gap-1">
+                <Building2 className="h-3 w-3" />
                 {doc.creator_department}
               </Badge>
             )}
             {doc.classification_level !== null &&
               doc.classification_level !== undefined &&
               groupBy !== "classification" && (
-                <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5">
-                  <ShieldCheck className="h-2.5 w-2.5" />
+                <Badge variant="outline" className="text-xs px-1.5 py-0.5 gap-1">
+                  <ShieldCheck className="h-3 w-3" />
                   {classificationLabel(doc.classification_level)}
                 </Badge>
               )}
             {doc.document_type && groupBy !== "type" && (
-              <Badge variant="outline" className="text-[10px] px-1 py-0 gap-0.5">
-                <Tag className="h-2.5 w-2.5" />
+              <Badge variant="outline" className="text-xs px-1.5 py-0.5 gap-1">
+                <Tag className="h-3 w-3" />
                 {doc.document_type}
               </Badge>
             )}
@@ -285,8 +285,8 @@ export function NavyDocsSection({
   }
 
   return (
-    <div className="border rounded-lg mt-3">
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <div className="border rounded-lg mt-3 flex flex-col flex-1 min-h-0">
+      <Collapsible open={isOpen} onOpenChange={setIsOpen} className="flex flex-col flex-1 min-h-0">
         <CollapsibleTrigger asChild>
           <button className="flex items-center justify-between w-full p-3 hover:bg-accent/50 rounded-t-lg transition-colors">
             <div className="flex items-center gap-2">
@@ -308,8 +308,9 @@ export function NavyDocsSection({
           </button>
         </CollapsibleTrigger>
 
-        <CollapsibleContent>
-          <div className="px-3 pb-3 space-y-2">
+        <CollapsibleContent className="flex flex-col flex-1 min-h-0">
+          {/* Fixed controls — always visible regardless of scroll position */}
+          <div className="px-3 pt-2 pb-2 space-y-2 border-b flex-shrink-0">
             {/* Currently selected documents — always visible so the user can
                 see and trim their selection regardless of search / grouping. */}
             {!readOnly && selectedDocs.length > 0 && (
@@ -393,7 +394,10 @@ export function NavyDocsSection({
                 />
               </div>
             </div>
+          </div>
 
+          {/* Scrollable document list */}
+          <div className="flex-1 overflow-y-auto min-h-0 px-3 py-2">
             {/* Grouped document tree (hierarchical) */}
             {groupBy !== "none" ? (
               <div className="space-y-1">
@@ -401,35 +405,37 @@ export function NavyDocsSection({
                   const groupCollapsed = !expandedGroups.has(group.key);
                   return (
                     <div key={group.key || "__none__"}>
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(group.key)}
-                        className="flex items-center gap-1.5 w-full px-1 py-1 rounded hover:bg-accent/50 transition-colors"
-                      >
-                        {groupCollapsed ? (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        ) : (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                        {groupBy === "department" ? (
-                          <Building2 className="h-3.5 w-3.5 text-primary" />
-                        ) : groupBy === "classification" ? (
-                          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-                        ) : (
-                          <Tag className="h-3.5 w-3.5 text-primary" />
-                        )}
-                        <span className="text-xs font-semibold truncate">
-                          {group.label}
-                        </span>
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] px-1 py-0 ml-1"
+                      <div className="sticky top-0 z-10 bg-background">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(group.key)}
+                          className="flex items-center gap-2 w-full px-2 py-2.5 rounded hover:bg-accent/50 transition-colors"
                         >
-                          {group.docs.length}
-                        </Badge>
-                      </button>
+                          {groupCollapsed ? (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          {groupBy === "department" ? (
+                            <Building2 className="h-4 w-4 text-primary" />
+                          ) : groupBy === "classification" ? (
+                            <ShieldCheck className="h-4 w-4 text-primary" />
+                          ) : (
+                            <Tag className="h-4 w-4 text-primary" />
+                          )}
+                          <span className="text-sm font-semibold truncate">
+                            {group.label}
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            className="text-xs ml-1"
+                          >
+                            {group.docs.length}
+                          </Badge>
+                        </button>
+                      </div>
                       {!groupCollapsed && (
-                        <div className="ml-4 border-l pl-2 space-y-0.5">
+                        <div className="ml-5 border-l pl-2 space-y-0.5 overflow-y-auto max-h-[40vh]">
                           {group.docs.map((doc) => renderDocRow(doc))}
                         </div>
                       )}

@@ -242,9 +242,9 @@ export function SourceCard({
       )}
       onClick={handleCardClick}
     >
-      <CardContent className="px-3 py-1">
+      <CardContent className="px-4 py-3">
         {/* Header with status indicator */}
-        <div className="flex items-start justify-between gap-3 mb-1">
+        <div className="flex items-start justify-between gap-3 mb-2">
           <div className="flex-1 min-w-0">
             {/* Status badge - only show if not completed */}
             {!isCompleted && (
