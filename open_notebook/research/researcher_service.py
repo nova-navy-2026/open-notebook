@@ -149,6 +149,9 @@ class ResearchJob(BaseModel):
     # Authenticated user id this job belongs to. Used to enforce that users
     # only see / poll / delete their own research reports.
     user_id: Optional[str] = None
+    # Ids of notebook notes created from this report (via "Save to Notebook").
+    # When the report is deleted from the history, these notes are deleted too.
+    saved_note_ids: List[str] = []
 
 
 # ── Persistent job store ──────────────────────────────────────────────
@@ -357,14 +360,21 @@ def _get_job(job_id: str) -> Optional[ResearchJob]:
 
 
 def _list_jobs() -> List[ResearchJob]:
-    # Refresh all jobs from disk so listing does not preserve stale active
-    # state in a worker-local cache.
+    # Disk is the cross-worker source of truth. REBUILD this worker's cache from
+    # it (rather than an additive .update()) so jobs another worker deleted are
+    # dropped here too — otherwise a deleted report lingers in a stale worker's
+    # memory and keeps reappearing on every poll that this worker happens to
+    # answer. Locally-running jobs are the authoritative in-process objects, so
+    # they always survive the rebuild and overlay any older disk snapshot.
     try:
         disk_jobs = _read_jobs_from_disk()
-        if disk_jobs:
-            _jobs.update(disk_jobs)
-        _jobs.update(_running_jobs)
+        rebuilt: Dict[str, ResearchJob] = dict(disk_jobs)
+        rebuilt.update(_running_jobs)
+        _jobs.clear()
+        _jobs.update(rebuilt)
     except Exception as exc:
+        # On a transient disk-read failure keep the existing cache rather than
+        # wiping it; the next poll will reconcile.
         logger.debug(f"Could not merge jobs from disk: {exc}")
     changed = False
     for job in _jobs.values():
@@ -1432,15 +1442,47 @@ def list_research_jobs() -> List[ResearchJob]:
 
 
 def delete_research_job(job_id: str) -> bool:
-    """Delete a research job by ID. Returns True if deleted, False if not found."""
-    if job_id not in _jobs:
+    """Delete a research job by ID. Returns True if deleted, False if not found.
+
+    Works across Uvicorn workers: the job may live only on disk (created/owned by
+    another worker) and not in this worker's in-memory cache. We therefore drop
+    it from the local cache AND the running set AND the persisted disk state, and
+    report success if it existed in any of them.
+    """
+    existed_locally = _jobs.pop(job_id, None) is not None
+    # Also drop any locally-running reference so it can't be re-added by the
+    # _running_jobs overlay in _save_jobs()/_list_jobs().
+    _running_jobs.pop(job_id, None)
+
+    try:
+        on_disk = job_id in _read_jobs_from_disk()
+    except Exception:
+        on_disk = False
+
+    if not existed_locally and not on_disk:
         return False
-    del _jobs[job_id]
+
     # Pass the deleted ID so _save_jobs() removes it from the disk state before
     # writing — without this the merge would read the job back from disk and
     # restore it, making the deletion appear to succeed but then immediately
     # reappear in the job list.
     _save_jobs(_deleted={job_id})
+    return True
+
+
+def record_saved_note(job_id: str, note_id: str) -> bool:
+    """Record that a notebook note was created from this report.
+
+    Lets ``delete_research_job`` (via the delete endpoint) also remove the saved
+    notes. Returns True when the link was recorded, False when the job is gone.
+    """
+    job = _get_job(job_id)
+    if not job:
+        return False
+    if note_id not in job.saved_note_ids:
+        job.saved_note_ids.append(note_id)
+        job.updated_at = _now_iso()
+        _persist_job(job)
     return True
 
 

@@ -72,7 +72,7 @@ export function LoginForm() {
 
         // If auth is not required, redirect to notebooks
         if (!required) {
-          router.push("/notebooks");
+          router.push("/chat");
         }
       } catch (error) {
         console.error("Error checking auth requirement:", error);
@@ -84,14 +84,14 @@ export function LoginForm() {
 
     // If user is already authenticated, redirect to notebooks immediately
     if (isAuthenticated) {
-      router.push("/notebooks");
+      router.push("/chat");
       return;
     }
 
     // If we already know auth status, use it
     if (authRequired !== null) {
       if (!authRequired) {
-        router.push("/notebooks");
+        router.push("/chat");
       } else {
         setIsCheckingAuth(false);
       }

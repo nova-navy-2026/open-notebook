@@ -45,7 +45,7 @@ export function ProtectedRouteGuard({
 
       if (!hasRequiredRole) {
         console.warn(`User lacks required role to access route`);
-        router.push("/notebooks");
+        router.push("/chat");
         return;
       }
     }
@@ -53,7 +53,7 @@ export function ProtectedRouteGuard({
     // Check permission requirement
     if (requiredPermission && !hasPermission(requiredPermission)) {
       console.warn(`User lacks required permission: ${requiredPermission}`);
-      router.push("/notebooks");
+      router.push("/chat");
       return;
     }
   }, [

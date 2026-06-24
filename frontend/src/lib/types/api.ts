@@ -127,6 +127,9 @@ export interface CreateNoteRequest {
   content: string
   note_type?: string
   notebook_id?: string
+  /** Research job id this note was saved from; links the note to that report
+   *  so deleting the report from the Deep Research history also deletes it. */
+  research_id?: string
 }
 
 export interface CreateSourceRequest {

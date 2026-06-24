@@ -48,8 +48,8 @@ export default function OAuthCallbackPage() {
         const success = await handleOAuthCallback(code, state, provider);
 
         if (success) {
-          // Redirect to dashboard
-          router.push("/notebooks");
+          // Redirect to chat (the default landing page)
+          router.push("/chat");
         } else {
           setError("Authentication failed. Please try again.");
           setIsProcessing(false);

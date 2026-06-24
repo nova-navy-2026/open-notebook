@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { notesApi } from '@/lib/api/notes'
+import { parseResearchJobId } from '@/lib/chat-agents/deep-research-agent'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import type { NotebookChatMessage, NotebookResponse } from '@/lib/types/api'
 import {
@@ -185,6 +186,9 @@ export async function runGlobalSaveNoteAgent({
       title: noteTitleForSave(message, 'Nota criada a partir do chat'),
       content,
       note_type: 'ai',
+      // If we're saving a deep-research report message, link it to its job so
+      // deleting the report from the history also removes this note.
+      research_id: parseResearchJobId(previous.id) ?? undefined,
     })
   } catch (error) {
     logChatAgentEvent({
@@ -263,6 +267,9 @@ export async function runNotebookSaveNoteAgent({
       title: noteTitleForSave(message, 'Nota criada a partir do chat'),
       content,
       note_type: 'ai',
+      // If we're saving a deep-research report message, link it to its job so
+      // deleting the report from the history also removes this note.
+      research_id: parseResearchJobId(previous.id) ?? undefined,
     })
   } catch (error) {
     logChatAgentEvent({

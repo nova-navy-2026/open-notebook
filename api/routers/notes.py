@@ -110,6 +110,22 @@ async def create_note(
             )
             await new_note.add_to_notebook(note_data.notebook_id)
 
+        # Link the note to its originating research report (if saved from one),
+        # so deleting that report from the Deep Research history also removes
+        # this note — matching the /research/save-as-note behaviour.
+        if note_data.research_id and new_note.id:
+            try:
+                from open_notebook.research.researcher_service import (
+                    record_saved_note,
+                )
+
+                record_saved_note(note_data.research_id, new_note.id)
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning(
+                    f"Could not link note {new_note.id} to research "
+                    f"{note_data.research_id}: {exc}"
+                )
+
         return NoteResponse(
             id=new_note.id or "",
             title=new_note.title,

@@ -230,6 +230,13 @@ class NoteCreate(BaseModel):
     notebook_id: Optional[str] = Field(
         None, description="Notebook ID to add the note to"
     )
+    research_id: Optional[str] = Field(
+        None,
+        description=(
+            "Research job id this note was saved from. When set, the note is "
+            "linked to that report so deleting the report also deletes the note."
+        ),
+    )
 
 
 class NoteUpdate(BaseModel):

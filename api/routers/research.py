@@ -26,12 +26,13 @@ from open_notebook.research.researcher_service import (
     get_source_info,
     get_tone_info,
     list_research_jobs,
+    record_saved_note,
     revise_research_report,
     run_research,
     submit_research_job,
     update_report_directly,
 )
-from open_notebook.domain.notebook import Notebook
+from open_notebook.domain.notebook import Note, Notebook
 
 router = APIRouter()
 
@@ -304,10 +305,33 @@ async def delete_job(
         raise HTTPException(status_code=404, detail="Research job not found")
     if not _job_visible_to_user(job, user_id, auth_user_id):
         raise HTTPException(status_code=404, detail="Research job not found")
+
+    # Capture the notes this report was saved into before removing the job, so
+    # we can delete them too (the report and its notebook copies are deleted
+    # together).
+    saved_note_ids = list(getattr(job, "saved_note_ids", []) or [])
+
     deleted = delete_research_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Research job not found")
-    return {"success": True, "message": f"Job {job_id} deleted"}
+
+    # Best-effort cleanup of the linked notebook notes. A failure to delete one
+    # note must not fail the whole request (the report itself is already gone).
+    removed_notes = 0
+    for note_id in saved_note_ids:
+        try:
+            note = await Note.get(note_id)
+            if note and _object_belongs_to_user(note, auth_user_id):
+                await note.delete()
+                removed_notes += 1
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning(f"Could not delete linked note {note_id}: {exc}")
+
+    return {
+        "success": True,
+        "message": f"Job {job_id} deleted",
+        "deleted_notes": removed_notes,
+    }
 
 
 class ReviseResearchRequest(BaseModel):
@@ -386,8 +410,6 @@ async def save_research_as_note(
         raise HTTPException(status_code=404, detail="Research job not found or not completed")
 
     try:
-        from open_notebook.domain.notebook import Note
-
         await _require_owned_notebook(request.notebook_id, auth_user_id)
 
         title = request.title or f"Research: {job.query[:80]}"
@@ -395,9 +417,16 @@ async def save_research_as_note(
             title=title,
             content=job.result.report,
             note_type="ai",
+            # Own the note like every other note-creation path does, so it is
+            # scoped to this user (and deletable when the report is deleted).
+            owner=auth_user_id,
         )
         await note.save()
         await note.add_to_notebook(request.notebook_id)
+
+        # Link the note back to the research job so deleting the report from the
+        # history also removes the notes it was saved into.
+        record_saved_note(request.research_id, note.id)
 
         logger.info(
             f"Saved research result {request.research_id} as note {note.id} "

@@ -226,12 +226,12 @@ async def opensearch_text_search(
             "size": results * 3,  # over-fetch for deduplication
             "query": {
                 "bool": {
-                    # Fuzzy/partial matching: a query matches if ANY of the
-                    # clauses below fire. This makes the search forgiving of
-                    # typos and partial words instead of requiring an exact
-                    # token match.
-                    "should": [
-                        # Typo tolerance: per-term edit-distance matching.
+                    "must": [
+                        # Typo-tolerant matching: per-term edit-distance
+                        # (fuzziness AUTO) makes the search forgiving of small
+                        # spelling mistakes. ``best_fields`` works across both
+                        # text- and keyword-mapped fields, so all of
+                        # ``search_fields`` can be queried safely.
                         {
                             "multi_match": {
                                 "query": keyword,
@@ -241,19 +241,8 @@ async def opensearch_text_search(
                                 "prefix_length": 1,
                                 "max_expansions": 50,
                             }
-                        },
-                        # Partial-word / as-you-type matching (e.g. "subm"
-                        # matches "submarino").
-                        {
-                            "multi_match": {
-                                "query": keyword,
-                                "fields": search_fields,
-                                "type": "phrase_prefix",
-                                "slop": 2,
-                            }
-                        },
+                        }
                     ],
-                    "minimum_should_match": 1,
                     "filter": filters,
                 }
             },
