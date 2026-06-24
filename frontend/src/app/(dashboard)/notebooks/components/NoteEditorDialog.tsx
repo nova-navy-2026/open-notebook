@@ -133,7 +133,7 @@ export function NoteEditorDialog({ open, onOpenChange, notebookId, note }: NoteE
             </div>
           ) : (
             <>
-              <div className="border-b px-6 py-4">
+              <div className="border-b px-6 py-4 pr-12">
                 <InlineEdit
                   id="note-title"
                   name="title"

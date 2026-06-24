@@ -83,15 +83,17 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
                   style={{ width: 'auto', height: 'auto' }}
                 />
               </button>
-              <InlineEdit
-                id="notebook-name"
-                name="notebook-name"
-                value={notebook.name}
-                onSave={handleUpdateName}
-                className="text-2xl font-bold"
-                inputClassName="text-2xl font-bold"
-                placeholder={t.notebooks.namePlaceholder}
-              />
+              <div className="flex-1 min-w-0 mr-2">
+                <InlineEdit
+                  id="notebook-name"
+                  name="notebook-name"
+                  value={notebook.name}
+                  onSave={handleUpdateName}
+                  className="text-2xl font-bold"
+                  inputClassName="text-2xl font-bold"
+                  placeholder={t.notebooks.namePlaceholder}
+                />
+              </div>
               {notebook.archived && (
                 <Badge variant="secondary">{t.notebooks.archived}</Badge>
               )}
@@ -102,7 +104,7 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
                 </Badge>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 shrink-0">
               <Button
                 variant="outline"
                 size="sm"
