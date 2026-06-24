@@ -1345,9 +1345,10 @@ export const frFR = {
     formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
     replaceHint: "Cliquez ou glissez pour remplacer",
     languageLabel: "Langue",
-    languagePlaceholder: "ex. fr, en, pt",
-    languageHint:
-      "Code ISO-639-1. Laissez vide pour la détection automatique de la langue.",
+    languageAuto: "Automatique",
+    languagePortuguese: "Portugais",
+    languageEnglish: "Anglais",
+    languageFrench: "Français",
     optional: "(optionnel)",
     diarizeLabel: "Identifier les locuteurs (diarisation)",
     diarizeHint:
@@ -1368,6 +1369,11 @@ export const frFR = {
     copy: "Copier",
     download: "Télécharger",
     invalidFile: "Veuillez sélectionner un fichier audio valide.",
+    saveToNotebook: "Enregistrer comme note",
+    saveToNotebookTitle: "Enregistrer la transcription dans un carnet",
+    saveToNotebookDescription:
+      "Choisissez un carnet pour enregistrer la transcription comme note.",
+    defaultNoteTitle: "Transcription",
   },
   collaboration: {
     share: "Partager",

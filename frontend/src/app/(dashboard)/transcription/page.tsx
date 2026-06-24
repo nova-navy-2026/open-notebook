@@ -31,6 +31,7 @@ import {
 import { useTranscriptionStore } from "@/lib/stores/transcription-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
+import { SaveTranscriptToNotebook } from "@/components/transcription/SaveTranscriptToNotebook";
 
 // Stable colour palette for speaker badges (Tailwind classes).
 const SPEAKER_PALETTE = [
@@ -283,15 +284,20 @@ export default function TranscriptionPage() {
             {tp.languageLabel}{" "}
             <span className="text-muted-foreground text-xs">{tp.optional}</span>
           </Label>
-          <Input
-            id="language"
-            type="text"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            placeholder={tp.languagePlaceholder}
-            maxLength={10}
-          />
-          <p className="text-xs text-muted-foreground">{tp.languageHint}</p>
+          <Select
+            value={language || "auto"}
+            onValueChange={(v) => setLanguage(v === "auto" ? "" : v)}
+          >
+            <SelectTrigger id="language">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">{tp.languageAuto}</SelectItem>
+              <SelectItem value="pt">{tp.languagePortuguese}</SelectItem>
+              <SelectItem value="en">{tp.languageEnglish}</SelectItem>
+              <SelectItem value="fr">{tp.languageFrench}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Diarization */}
@@ -455,6 +461,11 @@ export default function TranscriptionPage() {
                   <Download className="h-4 w-4 mr-1" />
                   {tp.download}
                 </Button>
+                <SaveTranscriptToNotebook
+                  content={result.text || ""}
+                  defaultTitle={reportTitle.trim() || tp.defaultNoteTitle}
+                  disabled={!result.text}
+                />
               </div>
             </CardHeader>
             <CardContent>

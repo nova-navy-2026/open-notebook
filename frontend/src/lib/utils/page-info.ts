@@ -243,7 +243,7 @@ const enUS: PageInfoMap = {
     description: 'Convert audio and video into text with automatic speaker identification.',
     items: [
       'Upload an audio or video file (WAV, MP3, MP4, …).',
-      'Specify the language (e.g. pt, en) or leave blank for auto-detection.',
+      'Select the language from the dropdown, or choose Auto for automatic detection.',
       'Enable diarization to separate speakers with colours and timestamps.',
       'Copy the transcript or download in TXT/SRT/VTT.',
       'Use the transcription as a basis for notes or sources in a notebook.',

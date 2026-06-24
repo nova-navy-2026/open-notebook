@@ -1325,9 +1325,10 @@ export const ptPT = {
     formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
     replaceHint: "Clique ou arraste para substituir",
     languageLabel: "Idioma",
-    languagePlaceholder: "ex.: pt, en, fr",
-    languageHint:
-      "Código ISO-639-1. Deixe vazio para detecção automática do idioma.",
+    languageAuto: "Automático",
+    languagePortuguese: "Português",
+    languageEnglish: "Inglês",
+    languageFrench: "Francês",
     optional: "(opcional)",
     diarizeLabel: "Identificar interlocutores (diarização)",
     diarizeHint:
@@ -1348,6 +1349,11 @@ export const ptPT = {
     copy: "Copiar",
     download: "Transferir",
     invalidFile: "Por favor selecione um ficheiro áudio válido.",
+    saveToNotebook: "Guardar como nota",
+    saveToNotebookTitle: "Guardar transcrição num bloco de notas",
+    saveToNotebookDescription:
+      "Escolha um bloco de notas para guardar a transcrição como nota.",
+    defaultNoteTitle: "Transcrição",
   },
   collaboration: {
     share: "Partilhar",

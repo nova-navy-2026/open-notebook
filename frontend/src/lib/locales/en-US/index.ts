@@ -1322,9 +1322,10 @@ export const enUS = {
     formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
     replaceHint: "Click or drag to replace",
     languageLabel: "Language",
-    languagePlaceholder: "e.g. en, pt, fr",
-    languageHint:
-      "ISO-639-1 code. Leave empty for automatic language detection.",
+    languageAuto: "Auto",
+    languagePortuguese: "Portuguese",
+    languageEnglish: "English",
+    languageFrench: "French",
     optional: "(optional)",
     diarizeLabel: "Identify speakers (diarization)",
     diarizeHint:
@@ -1345,6 +1346,11 @@ export const enUS = {
     copy: "Copy",
     download: "Download",
     invalidFile: "Please select a valid audio file.",
+    saveToNotebook: "Save as note",
+    saveToNotebookTitle: "Save transcript to notebook",
+    saveToNotebookDescription:
+      "Choose a notebook to save the transcript as a note.",
+    defaultNoteTitle: "Transcript",
   },
   collaboration: {
     share: "Share",
