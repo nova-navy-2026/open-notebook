@@ -92,6 +92,7 @@ function buildVisualContext(previousResponse: string): string | undefined {
 
 function messagesContainVisualExchange(messages: NotebookChatMessage[]): boolean {
   return messages.some((message) => {
+    if (message.attachments?.some(a => a.kind === 'image' || a.kind === 'video')) return true
     const content = normaliseForMatching(message.content)
     return (
       content.includes('[anexo:')
@@ -422,11 +423,7 @@ export function useGlobalChat() {
     const userMessage: NotebookChatMessage = {
       id: `temp-${Date.now()}`,
       type: 'human',
-      content: file
-        ? `${message}\n\n[Anexo: ${file.name}]`
-        : isVisualFollowUp && visualFile
-          ? `${message}\n\n[Imagem anterior: ${visualFile.name}]`
-          : message,
+      content: message,
       attachments: createAttachment(file ?? (isVisualFollowUp ? visualFile : undefined)),
       timestamp: new Date().toISOString()
     }
@@ -956,7 +953,16 @@ export function useGlobalChat() {
         const serverMessages = result.data?.messages
         if (serverMessages && serverMessages.length >= messages.length + 2) {
           localMessagesDirtyRef.current = false
-          setMessages(serverMessages)
+          // Preserve ephemeral blob attachments — they are never persisted to
+          // the server. Use the functional form so `prev` reflects the current
+          // state (including the optimistic user message with its attachment),
+          // not the stale closure value of `messages`.
+          setMessages((prev) => serverMessages.map((serverMsg, i) => {
+            const localMsg = prev[i]
+            return localMsg?.attachments?.length
+              ? { ...serverMsg, attachments: localMsg.attachments }
+              : serverMsg
+          }))
           setIsVisualModelLocked(messagesContainVisualExchange(serverMessages))
         }
       }).catch(() => undefined)

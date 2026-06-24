@@ -215,7 +215,16 @@ export function useMultimodalChat({
       return
     }
     if (serverMessages.length > 0) {
-      setMessages(serverMessages)
+      // Preserve ephemeral blob attachments — they are never persisted to the
+      // server, so a server sync would otherwise silently drop the image preview.
+      setMessages((prev) =>
+        serverMessages.map((serverMsg, i) => {
+          const localMsg = prev[i]
+          return localMsg?.attachments?.length
+            ? { ...serverMsg, attachments: localMsg.attachments }
+            : serverMsg
+        }),
+      )
     }
   }, [currentSession, isSending])
 
@@ -431,11 +440,7 @@ export function useMultimodalChat({
       const userMessage: NotebookChatMessage = {
         id: `temp-${Date.now()}`,
         type: 'human',
-        content: file
-          ? `${message}\n\n[Anexo: ${file.name}]`
-          : isVisualFollowUp && visualFile
-            ? `${message}\n\n[Imagem anterior: ${visualFile.name}]`
-            : message,
+        content: message,
         attachments: createAttachment(file ?? (isVisualFollowUp ? visualFile : undefined)),
         timestamp: new Date().toISOString(),
       }

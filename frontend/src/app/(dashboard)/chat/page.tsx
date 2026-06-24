@@ -149,7 +149,7 @@ export default function GlobalChatPage() {
                 size="icon"
                 className="h-7 w-7"
                 onClick={() => setSidebarOpen(false)}
-                title={t.common.collapse ?? "Recolher"}
+                title={t.common.collapseHistory ?? "Collapse history"}
               >
                 <PanelLeftClose className="h-4 w-4" />
               </Button>
@@ -178,7 +178,7 @@ export default function GlobalChatPage() {
               size="icon"
               className="h-7 w-7"
               onClick={() => setSidebarOpen(true)}
-              title={t.common.expand ?? "Expandir"}
+              title={t.common.expandHistory ?? "Expand history"}
             >
               <PanelLeftOpen className="h-4 w-4" />
             </Button>
@@ -196,7 +196,7 @@ export default function GlobalChatPage() {
             modelOverride={activeModelOverride}
             onModelChange={(model) => chat.setModelOverride(model ?? null)}
             title={t.common.chat ?? "Chat"}
-            contextType="notebook"
+            contextType="global"
             enableAttachments
             visualModelLocked={chat.isVisualModelLocked}
             enableDeepResearch

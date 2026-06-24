@@ -92,7 +92,7 @@ interface ChatPanelProps {
   loadingSessions?: boolean
   // Generic props for reusability
   title?: string
-  contextType?: 'source' | 'notebook'
+  contextType?: 'source' | 'notebook' | 'global'
   // Notebook context stats (for notebook chat)
   notebookContextStats?: NotebookContextStats
   // Notebook ID for saving notes
@@ -329,7 +329,7 @@ export function ChatPanel({
         }
         : undefined
       onSendMessage(
-        input.trim() || 'Analisa este ficheiro.',
+        input.trim() || t.chat.analyzeFile,
         modelOverride,
         deepResearch ? undefined : selectedFile ?? undefined,
         deepResearch,
@@ -530,9 +530,13 @@ export function ChatPanel({
               <div className="text-center text-muted-foreground py-8">
                 <Bot className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-sm">
-                  {t.chat.startConversation.replace('{type}', contextType === 'source' ? t.navigation.sources : t.common.notebook)}
+                  {contextType === 'global'
+                    ? t.chat.startChat
+                    : t.chat.startConversation.replace('{type}', contextType === 'source' ? t.navigation.sources : t.common.notebook)}
                 </p>
-                <p className="text-xs mt-2">{t.chat.askQuestions}</p>
+                {contextType !== 'global' && (
+                  <p className="text-xs mt-2">{t.chat.askQuestions}</p>
+                )}
               </div>
             ) : (
               messages.map((message) => (
@@ -585,7 +589,7 @@ export function ChatPanel({
                     <div
                       className={`rounded-lg px-4 py-2 ${
                         message.type === 'human'
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'bg-primary text-primary-foreground w-fit self-end'
                           : 'bg-muted'
                       }`}
                     >
