@@ -757,6 +757,7 @@ export function ChatPanel({
                         {reportTypes.map((reportType) => (
                           <SelectItem key={reportType.value} value={reportType.value}>
                             {reportType.label}
+                            {reportType.speed ? ` (${reportType.speed})` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
