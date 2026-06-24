@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
@@ -7,6 +8,20 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from open_notebook.utils.encryption import get_secret_from_env
+
+
+def _allow_navy_user_override() -> bool:
+    """Whether the X-Navy-User impersonation header is honoured.
+
+    Off by default: when set, a password-authenticated caller can assume any
+    navy identity (clearance/departments), bypassing the corpus ACL. Intended
+    only for load testing — enable with ALLOW_NAVY_USER_OVERRIDE=1.
+    """
+    return (os.environ.get("ALLOW_NAVY_USER_OVERRIDE", "") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def get_current_user_id(request: Request) -> str:
@@ -87,6 +102,11 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, excluded_paths: Optional[list] = None):
         super().__init__(app)
         self.password = get_secret_from_env("OPEN_NOTEBOOK_PASSWORD")
+        # X-Navy-User lets a password-authenticated caller assume ANY navy
+        # identity (clearance/departments) — a full ACL bypass. It exists only
+        # for load testing and is OFF by default in production. Opt in with
+        # ALLOW_NAVY_USER_OVERRIDE=1.
+        self.allow_navy_override = _allow_navy_user_override()
         self.excluded_paths = excluded_paths or [
             "/",
             "/health",
@@ -140,13 +160,14 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
 
         # Password is correct, proceed with the request.
         # Allow callers to supply a navy user identity via X-Navy-User header.
-        # This is only honoured AFTER the password has been validated above, so
-        # it cannot be abused by unauthenticated clients.  JWT-authenticated
-        # requests never reach this point (they bypass the middleware via the
-        # JWTAuthMiddleware that runs first).
-        navy_user_override = request.headers.get("X-Navy-User")
-        if navy_user_override:
-            request.state.navy_user_id = navy_user_override
+        # This is only honoured AFTER the password has been validated above AND
+        # only when explicitly enabled (ALLOW_NAVY_USER_OVERRIDE=1), because it
+        # lets the caller impersonate any navy user's clearance/departments.
+        # Off by default for production.
+        if self.allow_navy_override:
+            navy_user_override = request.headers.get("X-Navy-User")
+            if navy_user_override:
+                request.state.navy_user_id = navy_user_override
 
         # Proceed with the request
         response = await call_next(request)

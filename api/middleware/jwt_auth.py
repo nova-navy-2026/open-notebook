@@ -53,6 +53,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             (os.environ.get("ALLOW_ANONYMOUS", "") or "").lower()
             in ("1", "true", "yes")
         )
+        # X-Navy-User impersonation (ACL bypass) — off by default; load-test only.
+        from api.auth import _allow_navy_user_override
+
+        self.allow_navy_override = _allow_navy_user_override()
     
     async def dispatch(self, request: Request, call_next):
         """
@@ -154,8 +158,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 # Allow callers to supply a navy user identity via X-Navy-User
                 # so the load test (and other tooling) can exercise the proper
                 # OpenSearch ACL filter path without needing a full JWT token.
-                # This is only honoured AFTER the password has been validated.
-                navy_user_override = request.headers.get("X-Navy-User")
+                # Only honoured AFTER the password is validated AND when
+                # explicitly enabled (ALLOW_NAVY_USER_OVERRIDE=1) — it lets the
+                # caller impersonate any navy clearance/department. Off in prod.
                 request.state.user = {
                     "id": "password-auth",
                     "email": "password-auth@internal",
@@ -165,8 +170,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 request.state.user_id = "password-auth"
                 request.state.user_role = "admin"
                 request.state.user_permissions = ["admin"]
-                if navy_user_override:
-                    request.state.navy_user_id = navy_user_override
+                if self.allow_navy_override:
+                    navy_user_override = request.headers.get("X-Navy-User")
+                    if navy_user_override:
+                        request.state.navy_user_id = navy_user_override
                 
                 logger.debug("✅ Password auth successful")
                 

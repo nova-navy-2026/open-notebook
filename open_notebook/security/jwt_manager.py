@@ -16,6 +16,12 @@ class JWTManager:
     SECRET = os.getenv("JWT_SECRET", "change-me-in-production-with-secret-key")
     ALGORITHM = "HS256"
     EXPIRY_SECONDS = int(os.getenv("JWT_EXPIRY_SECONDS", "3600"))
+    # Absolute session lifetime: once a session is this old (counted from the
+    # original login, not the last refresh), the token can no longer be
+    # refreshed and the user must log in again. 0 disables the cap (default,
+    # = current behaviour). Set e.g. 43200 (12h) in production so revoked /
+    # offboarded accounts cannot keep refreshing access indefinitely.
+    MAX_SESSION_SECONDS = int(os.getenv("JWT_MAX_SESSION_SECONDS", "0"))
     
     @staticmethod
     def create_token(
@@ -54,6 +60,10 @@ class JWTManager:
             "exp": exp_ts,
             "iat": now_ts,
         })
+        # Original login time, preserved across refreshes (a non-standard claim,
+        # so refresh_token carries it forward). Used to enforce an absolute
+        # session lifetime independent of the per-token expiry.
+        payload.setdefault("auth_time", now_ts)
         
         try:
             token = jwt.encode(
@@ -98,7 +108,20 @@ class JWTManager:
                 algorithms=[JWTManager.ALGORITHM],
                 options={"verify_exp": False}
             )
-            
+
+            # Enforce the absolute session lifetime: past the cap, refresh is
+            # refused and the user must re-authenticate. Counts from the original
+            # login (auth_time), falling back to iat for tokens minted before
+            # this claim existed.
+            max_age = JWTManager.MAX_SESSION_SECONDS
+            if max_age > 0:
+                started = payload.get("auth_time") or payload.get("iat")
+                if started and (int(time.time()) - int(started)) > max_age:
+                    logger.warning("Token refresh refused: session exceeded max lifetime")
+                    raise jwt.InvalidTokenError(
+                        "Session expired; please log in again"
+                    )
+
             # Create new token with same claims but new expiry, including
             # any app-specific extra claims (e.g. navy_user_id).
             standard_keys = {"sub", "user_id", "email", "roles", "exp", "iat"}
