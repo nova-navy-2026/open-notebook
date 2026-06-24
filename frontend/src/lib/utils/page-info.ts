@@ -179,7 +179,6 @@ const enUS: PageInfoMap = {
     description: 'Find information across your knowledge base with full control over the search mode.',
     items: [
       'Choose a mode: Text (exact keyword match), Vector (semantic) or Hybrid (combines both).',
-      'Vector and Hybrid require a configured embedding model; Text always works.',
       'Enable "Group by type" to see results organised by Sources, Notes, Insights and Documents.',
       'Recent searches appear as clickable chips — reuse them in one click.',
       'Expand each result to see matching fragments and click the title to open the object.',
