@@ -29,11 +29,11 @@ export function PageInfoButton({ pageKey, className }: PageInfoButtonProps) {
           type="button"
           variant="ghost"
           size="icon"
-          className={`h-7 w-7 text-muted-foreground hover:text-foreground ${className ?? ''}`}
+          className={`h-10 w-10 text-muted-foreground hover:text-foreground ${className ?? ''}`}
           aria-label={content.title}
           title={content.title}
         >
-          <Info className="h-4 w-4" />
+          <Info className="h-6 w-6" />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] w-full max-w-md sm:max-w-md p-0">
