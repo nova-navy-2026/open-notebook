@@ -431,6 +431,7 @@ export const frFR = {
     no: "Non",
     loadingMore: "Chargement...",
     noSourcesYet: "Aucune source pour le moment",
+    uploadedSources: "Sources importées",
     allSourcesDescShort: "Affichez toutes vos sources ici.",
     cannotSaveNoteNoNotebook:
       "Impossible d'enregistrer la note : ID du carnet non disponible",

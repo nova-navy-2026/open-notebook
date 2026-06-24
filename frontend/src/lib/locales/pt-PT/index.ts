@@ -308,6 +308,7 @@ export const ptPT = {
     no: "Não",
     loadingMore: "A carregar mais...",
     noSourcesYet: "Nenhuma fonte ainda",
+    uploadedSources: "Fontes Carregadas",
     allSourcesDescShort: "Veja todas as suas fontes aqui.",
     searchSources: "Pesquisar fontes...",
     filterByType: "Tipo",

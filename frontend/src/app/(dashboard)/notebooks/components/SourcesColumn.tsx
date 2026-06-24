@@ -97,6 +97,14 @@ export function SourcesColumn({
   const hasUploadedSources = uploadedCount > 0;
   const selectedNavyCount = selectedNavyDocIds?.size ?? 0;
   const totalSourcesCount = uploadedCount + selectedNavyCount;
+  // The OpenSearch (navy corpus) selector is only available when the parent
+  // wires its props (notebook chat context). When present it is shown on top,
+  // with the uploaded sources beneath it.
+  const hasNavySection = !!(
+    selectedNavyDocIds &&
+    onNavyDocSelectionChange &&
+    onNavyDocSelectAll
+  );
 
   // Collapsible column state
   const { sourcesCollapsed, toggleSources } = useNotebookColumnsStore();
@@ -236,73 +244,84 @@ export function SourcesColumn({
           </CardHeader>
 
           <CardContent className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <LoadingSpinner />
+            {/* OpenSearch / Knowledge Base (navy corpus) sources — shown on top. */}
+            {hasNavySection && (
+              <div className="flex-1 min-h-0 flex flex-col">
+                <NavyDocsSection
+                  selectedDocIds={selectedNavyDocIds!}
+                  onSelectionChange={onNavyDocSelectionChange!}
+                  onSelectAll={onNavyDocSelectAll!}
+                />
               </div>
-            ) : !hasUploadedSources && selectedNavyCount === 0 ? (
-              <EmptyState
-                icon={FileText}
-                title={t.sources.noSourcesYet}
-                description={t.sources.createFirstSource}
-              />
-            ) : hasUploadedSources ? (
-              <div
-                ref={scrollContainerRef}
-                className={cn(
-                  "space-y-2 overflow-y-auto",
-                  selectedNavyDocIds !== undefined
-                    ? "flex-shrink-0 max-h-[35vh]"
-                    : "flex-1",
-                )}
-              >
-                {sources!.map((source) => (
-                  <SourceCard
-                    key={source.id}
-                    source={source}
-                    onClick={handleSourceClick}
-                    onDelete={isNotebookOwner ? handleDeleteClick : undefined}
-                    onRetry={handleRetry}
-                    onRemoveFromNotebook={
-                      isNotebookOwner ? handleRemoveFromNotebook : undefined
-                    }
-                    onRefresh={onRefresh}
-                    showRemoveFromNotebook={isNotebookOwner}
-                    canManage={isNotebookOwner}
-                    contextMode={contextSelections?.[source.id]}
-                    onContextModeChange={
-                      onContextModeChange
-                        ? (mode) => onContextModeChange(source.id, mode)
-                        : undefined
-                    }
-                  />
-                ))}
-                {/* Loading indicator for infinite scroll */}
-                {isFetchingNextPage && (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-            ) : null}
+            )}
 
-            {/* Navy Corpus Knowledge Base */}
-            {selectedNavyDocIds &&
-              onNavyDocSelectionChange &&
-              onNavyDocSelectAll && (
+            {/* Uploaded sources — always visible (even when empty), beneath the
+                OpenSearch sources. */}
+            <div
+              className={cn(
+                "flex flex-col min-h-0",
+                hasNavySection ? "mt-4 flex-shrink-0" : "flex-1",
+              )}
+            >
+              <div className="mb-2 flex flex-shrink-0 items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t.sources.uploadedSources ?? "Uploaded Sources"}
+                </span>
+                {uploadedCount > 0 && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {uploadedCount}
+                  </Badge>
+                )}
+              </div>
+
+              {isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <LoadingSpinner />
+                </div>
+              ) : hasUploadedSources ? (
                 <div
+                  ref={scrollContainerRef}
                   className={cn(
-                    "flex-1 min-h-0 flex flex-col",
-                    hasUploadedSources && "mt-4",
+                    "space-y-2 overflow-y-auto",
+                    hasNavySection ? "max-h-[35vh]" : "flex-1",
                   )}
                 >
-                  <NavyDocsSection
-                    selectedDocIds={selectedNavyDocIds}
-                    onSelectionChange={onNavyDocSelectionChange}
-                    onSelectAll={onNavyDocSelectAll}
-                  />
+                  {sources!.map((source) => (
+                    <SourceCard
+                      key={source.id}
+                      source={source}
+                      onClick={handleSourceClick}
+                      onDelete={isNotebookOwner ? handleDeleteClick : undefined}
+                      onRetry={handleRetry}
+                      onRemoveFromNotebook={
+                        isNotebookOwner ? handleRemoveFromNotebook : undefined
+                      }
+                      onRefresh={onRefresh}
+                      showRemoveFromNotebook={isNotebookOwner}
+                      canManage={isNotebookOwner}
+                      contextMode={contextSelections?.[source.id]}
+                      onContextModeChange={
+                        onContextModeChange
+                          ? (mode) => onContextModeChange(source.id, mode)
+                          : undefined
+                      }
+                    />
+                  ))}
+                  {/* Loading indicator for infinite scroll */}
+                  {isFetchingNextPage && (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <EmptyState
+                  icon={FileText}
+                  title={t.sources.noSourcesYet}
+                  description={t.sources.createFirstSource}
+                />
               )}
+            </div>
           </CardContent>
         </Card>
   );

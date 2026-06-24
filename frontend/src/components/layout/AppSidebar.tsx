@@ -164,9 +164,7 @@ export function AppSidebar() {
   const { isCollapsed, toggleCollapse } = useSidebarStore();
   const { openSourceDialog, openNotebookDialog, openPodcastDialog } =
     useCreateDialogs();
-  // Keep these around to silence unused warnings while still exposing them
-  // through the sidebar context (other surfaces still call them).
-  void openSourceDialog;
+  // Kept exposed through the sidebar context (other surfaces still call them).
   void openPodcastDialog;
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -181,7 +179,7 @@ export function AppSidebar() {
         openNotebookDialog();
         break;
       case "source":
-        router.push("/sources");
+        openSourceDialog();
         break;
       case "research":
         router.push("/research");

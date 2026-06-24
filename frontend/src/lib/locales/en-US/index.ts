@@ -307,6 +307,7 @@ export const enUS = {
     no: "No",
     loadingMore: "Loading more...",
     noSourcesYet: "No sources yet",
+    uploadedSources: "Uploaded Sources",
     allSourcesDescShort: "View all your sources here.",
     searchSources: "Search sources...",
     filterByType: "Type",
