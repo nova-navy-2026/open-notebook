@@ -1587,36 +1587,6 @@ def get_report_type_info() -> List[Dict[str, str]]:
             "speed": "quick",
         },
         {
-            "value": "outline_report",
-            "label": "Outline Report",
-            "description": "Structured hierarchical outline of the research topic",
-            "speed": "quick",
-        },
-        {
-            "value": "custom_report",
-            "label": "Custom Report",
-            "description": "Flexible user-defined report — adapts to your prompt instructions",
-            "speed": "balanced",
-        },
-        {
-            "value": "detailed_report",
-            "label": "Detailed Report",
-            "description": "In-depth multi-subtopic analysis with thorough coverage",
-            "speed": "in-depth",
-        },
-        {
-            "value": "subtopic_report",
-            "label": "Subtopic Report",
-            "description": "Deep dive into a single subtopic within a broader subject",
-            "speed": "balanced",
-        },
-        {
-            "value": "deep",
-            "label": "Deep Research",
-            "description": "Recursive multi-layer exploration with extensive analysis",
-            "speed": "in-depth",
-        },
-        {
             "value": "ttd_dr",
             "label": "TTD-DR",
             "description": "Iterative Draft Denoising — generates, reviews and expands a structured report (~2500+ words, pt-PT)",
@@ -1641,19 +1611,12 @@ def get_tone_info() -> List[Dict[str, str]]:
     """Return metadata about available tones for the UI."""
     return [
         {"value": "Objective", "label": "Objective", "description": "Impartial and unbiased"},
-        {"value": "Formal", "label": "Formal", "description": "Academic standards"},
         {"value": "Analytical", "label": "Analytical", "description": "Critical evaluation"},
-        {"value": "Persuasive", "label": "Persuasive", "description": "Convincing viewpoint"},
+        {"value": "Formal", "label": "Formal", "description": "Academic standards"},
         {"value": "Informative", "label": "Informative", "description": "Clear and comprehensive"},
         {"value": "Explanatory", "label": "Explanatory", "description": "Clarifying complex concepts"},
-        {"value": "Descriptive", "label": "Descriptive", "description": "Detailed depiction"},
         {"value": "Critical", "label": "Critical", "description": "Judging validity"},
         {"value": "Comparative", "label": "Comparative", "description": "Juxtaposing theories/data"},
-        {"value": "Speculative", "label": "Speculative", "description": "Exploring hypotheses"},
-        {"value": "Reflective", "label": "Reflective", "description": "Personal insights"},
-        {"value": "Narrative", "label": "Narrative", "description": "Story-telling"},
-        {"value": "Simple", "label": "Simple", "description": "Young readers, basic vocab"},
-        {"value": "Casual", "label": "Casual", "description": "Conversational and relaxed"},
     ]
 
 
