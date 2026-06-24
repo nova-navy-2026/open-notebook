@@ -41,6 +41,14 @@ export const sourceChatApi = {
     return response.data
   },
 
+  generateTitle: async (sourceId: string, sessionId: string, message: string) => {
+    const response = await apiClient.post<SourceChatSession>(
+      `/sources/${sourceId}/chat/sessions/${sessionId}/generate-title`,
+      { message }
+    )
+    return response.data
+  },
+
   deleteSession: async (sourceId: string, sessionId: string) => {
     await apiClient.delete(`/sources/${sourceId}/chat/sessions/${sessionId}`)
   },

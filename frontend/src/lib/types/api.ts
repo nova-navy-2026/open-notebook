@@ -271,6 +271,7 @@ export interface SendNotebookChatMessageRequest {
   }
   model_override?: string
   agent_instruction?: string
+  app_language?: string
 }
 
 export interface BuildContextRequest {

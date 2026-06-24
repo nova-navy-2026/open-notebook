@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
@@ -42,7 +42,6 @@ import {
   FileText,
   Plus,
   Wrench,
-  Command,
   LayoutDashboard,
   FlaskConical,
   MessageCircle,
@@ -171,13 +170,6 @@ export function AppSidebar() {
   void openPodcastDialog;
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
-  const [isMac, setIsMac] = useState(true); // Default to Mac for SSR
-
-  // Detect platform for keyboard shortcut display
-  useEffect(() => {
-    setIsMac(navigator.platform.toLowerCase().includes("mac"));
-  }, []);
-
   const handleCreateSelection = (target: CreateTarget) => {
     setCreateMenuOpen(false);
 
@@ -519,29 +511,6 @@ export function AppSidebar() {
             isCollapsed && "px-2",
           )}
         >
-          {/* Command Palette hint */}
-          {!isCollapsed && (
-            <div className="px-3 py-1.5 text-xs text-sidebar-foreground/60">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Command className="h-3 w-3" />
-                  {t.common.quickActions}
-                </span>
-                <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
-                  {isMac ? (
-                    <span className="text-xs">⌘</span>
-                  ) : (
-                    <span>Ctrl+</span>
-                  )}
-                  K
-                </kbd>
-              </div>
-              <p className="mt-1 text-[10px] text-sidebar-foreground/40">
-                {t.common.quickActionsDesc}
-              </p>
-            </div>
-          )}
-
           <div
             className={cn(
               "flex flex-col gap-2",

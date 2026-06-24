@@ -39,6 +39,14 @@ export const globalChatApi = {
     return response.data
   },
 
+  generateTitle: async (sessionId: string, message: string) => {
+    const response = await apiClient.post<GlobalChatSession>(
+      `/global-chat/sessions/${sessionId}/generate-title`,
+      { message }
+    )
+    return response.data
+  },
+
   persistExchange: async (
     sessionId: string,
     data: {
@@ -59,7 +67,7 @@ export const globalChatApi = {
     await apiClient.delete(`/global-chat/sessions/${sessionId}`)
   },
 
-  sendMessage: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string }) => {
+  sendMessage: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
     const response = await apiClient.post<{
       session_id: string
       messages: NotebookChatMessage[]
@@ -71,7 +79,7 @@ export const globalChatApi = {
     return response.data
   },
 
-  sendMessageStream: (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string }) => {
+  sendMessageStream: (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
     let token: string | null = null
     if (typeof window !== 'undefined') {
       const authStorage = localStorage.getItem('auth-storage')

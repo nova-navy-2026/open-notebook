@@ -6,7 +6,7 @@ React hooks for API data fetching, state management, and complex workflows (chat
 
 - **Query hooks** (`useNotebookSources`, `useSource`, `useSources`): TanStack Query wrappers for source data with infinite scroll and refetch strategies
 - **Mutation hooks** (`useCreateSource`, `useUpdateSource`, `useDeleteSource`, `useFileUpload`, `useRetrySource`): Server mutations with toast notifications and cache invalidation
-- **Chat hooks** (`useNotebookChat`, `useSourceChat`): Complex session management, context building, and message streaming
+- **Chat hooks** (`useMultimodalChat` for notebook chat, `useSourceChat`, `useGlobalChat`): Complex session management, context building, and message streaming
 - **Streaming hooks** (`useAsk`): SSE parsing for multi-stage Ask workflows (strategy → answers → final answer)
 - **Model/config hooks** (`useModels`, `useSettings`, `useTransformations`): Application-level settings and model management
 - **Utility hooks** (`useMediaQuery`, `useToast`, `useNavigation`, `useAuth`): UI state and auth checking
@@ -21,7 +21,7 @@ React hooks for API data fetching, state management, and complex workflows (chat
 - **Manual refetch controls**: Hooks return `refetch()` for parent components to trigger refresh
 - **SSE streaming pattern**: `useAsk` manually parses newline-delimited JSON from `/api/search/ask`; handles incomplete buffers
 - **Status polling**: `useSourceStatus` auto-refetches every 2s while `status === 'running' | 'queued' | 'new'`
-- **Context building**: `useNotebookChat.buildContext()` assembles selected sources + notes with token/char counts
+- **Context building**: `useMultimodalChat.buildContext()` assembles selected sources + notes with token/char counts
 - **i18n Proxy pattern**: `useTranslation` returns `t` object with Proxy; access `t.section.key` instead of `t('section.key')`
 
 ## Key Dependencies
@@ -36,15 +36,15 @@ React hooks for API data fetching, state management, and complex workflows (chat
 
 1. **Data queries**: Create `useQuery` hook wrapping API call; use `QUERY_KEYS.entityName(id)` for cache key
 2. **Mutations**: Create `useMutation` hook with `onSuccess` cache invalidation + toast feedback
-3. **Complex state**: Use `useState` + callbacks for local state (see `useAsk`, `useNotebookChat`)
+3. **Complex state**: Use `useState` + callbacks for local state (see `useAsk`, `useMultimodalChat`)
 4. **Return shape**: Export object with both state and action functions for composability
 
 ## Important Quirks & Gotchas
 
 - **Cache invalidation breadth**: Invalidating `['sources']` affects ALL source queries; be precise if performance matters
-- **Optimistic updates + error handling**: `useNotebookChat` removes optimistic messages on error; ensure cleanup
+- **Optimistic updates + error handling**: `useMultimodalChat` removes optimistic messages on error; ensure cleanup
 - **SSE buffer handling**: `useAsk` keeps incomplete lines in buffer between reads; incomplete JSON silently skipped
-- **Model override timing**: `useNotebookChat` stores pending model override if no session exists; applied on session creation
+- **Model override timing**: `useMultimodalChat` stores pending model override if no session exists; applied on session creation
 - **Pagination cursor**: `useNotebookSources` uses offset-based pagination; `nextOffset` calculated from page size
 - **Status polling race**: `useSourceStatus` may refetch stale data before server catches up; retry logic has 3-attempt limit
 - **Keyboard trap in dialogs**: Some hooks manage modal state; ensure Dialog/Modal components handle escape key properly

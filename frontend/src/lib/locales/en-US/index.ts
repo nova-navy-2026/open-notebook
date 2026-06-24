@@ -45,7 +45,6 @@ export const enUS = {
     done: "Done",
     processing: "Processing...",
     creating: "Creating...",
-    linked: "Linked",
     adding: "Adding...",
     addSelected: "Add Selected",
     customModel: "Custom Model",
@@ -430,9 +429,9 @@ export const enUS = {
     retryProcessing: "Retry Processing",
     deleteSource: "Delete Source",
     retry: "Retry",
-    addExistingTitle: "Add Existing Sources",
+    addExistingTitle: "Reuse a source from another notebook",
     addExistingDesc:
-      "Select existing sources from across all your notebooks to add to the current one.",
+      "Link a source you already uploaded to another notebook into this one. Sources already in this notebook are not shown.",
     searchPlaceholder: "Search sources by name or URL...",
     noNotebooksFound: "No notebooks found.",
     showingFirst100:
@@ -555,6 +554,7 @@ export const enUS = {
     sessionUpdated: "Session updated",
     sessionDeleted: "Session deleted",
     globalChatDescription: "Chat with all your indexed documents",
+    documentsUsed: "Documents used in this conversation",
     exportConversation: "Export conversation",
     exportCurrentConversation: "Export current conversation",
     exportAllConversations: "Export all conversations",
@@ -1148,7 +1148,7 @@ export const enUS = {
   research: {
     title: "Research",
     subtitle:
-      "Generate in-depth research reports powered by NOVA-Researcher and AMALIA AI.",
+      "Generate in-depth, multi-source research reports from your documents.",
     newResearch: "New Research",
     history: "History",
     queryTitle: "Research Query",
@@ -1224,14 +1224,14 @@ export const enUS = {
     queryPlaceholderSam3:
       "e.g. red boat, person wearing a helmet, license plate...",
     queryPlaceholderRfdetr:
-      "Leave empty to detect everything, or type a COCO class (person, car, boat...) to filter",
+      "e.g. boat, person, car — separate classes with commas, or leave empty to detect everything",
     engineLabel: "Detection Engine",
     engineSam3: "SAM3 (open-vocabulary, high-quality)",
     engineRfdetr: "RF-DETR (COCO classes, real-time)",
     engineHintSam3:
       "Describe anything in natural language. Slower but more flexible.",
     engineHintRfdetr:
-      "Detects COCO-80 classes (person, car, boat, dog...). Leave query blank to detect everything; type a class name to filter.",
+      "Detects 80 common object classes (person, car, boat, dog...). Leave the query blank to detect everything, or list one or more classes separated by commas to filter — for example: boat, person, truck.",
     analyze: "Analyze Image",
     analyzing: "Analyzing...",
     clear: "Clear",
@@ -1304,7 +1304,7 @@ export const enUS = {
     generateDocumentHint: "Generate a document from the transcript",
     title: "Transcription & Diarization",
     subtitle:
-      "Upload an audio recording (e.g. VHF radio chatter, a meeting) and convert it to text with Whisper. Optionally label who said what with pyannote speaker diarization.",
+      "Upload an audio recording (e.g. VHF radio chatter, a meeting) and convert it to text. Optionally label who said what with speaker diarization.",
     uploadLabel: "Audio file",
     dropHint: "Drop an audio file here or click to browse",
     formats: "WAV, MP3, M4A, FLAC, OGG, WEBM, MP4",
@@ -1316,7 +1316,7 @@ export const enUS = {
     optional: "(optional)",
     diarizeLabel: "Identify speakers (diarization)",
     diarizeHint:
-      "Uses pyannote.audio to segment the recording by speaker. Requires the pyannote.audio package and a Hugging Face token.",
+      "Segments the recording by speaker so you can see who said what. May be unavailable depending on server configuration.",
     diarizationUnavailable:
       "Speaker diarization is not available in this environment.",
     numSpeakersLabel: "Number of speakers",

@@ -11,6 +11,11 @@ export function useNotebookMembers(notebookId: string, enabled = true) {
     queryKey: QUERY_KEYS.notebookMembers(notebookId),
     queryFn: () => collaborationApi.listMembers(notebookId),
     enabled: !!notebookId && enabled,
+    // Poll while enabled (i.e. the share dialog is open) so the owner sees a
+    // member appear as soon as an invited user accepts — without the owner's
+    // client there is no other signal that membership changed.
+    refetchInterval: enabled ? 8_000 : false,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -19,6 +24,10 @@ export function useNotebookInvites(notebookId: string, enabled = true) {
     queryKey: QUERY_KEYS.notebookInvites(notebookId),
     queryFn: () => collaborationApi.listInvites(notebookId),
     enabled: !!notebookId && enabled,
+    // Poll while the dialog is open so a pending invite that gets accepted
+    // (and thus disappears from the pending list) refreshes promptly.
+    refetchInterval: enabled ? 8_000 : false,
+    refetchOnWindowFocus: true,
   })
 }
 

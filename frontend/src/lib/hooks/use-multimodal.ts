@@ -48,6 +48,7 @@ import {
   instructionForVisualMode,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
+import { promptLanguageLabel } from '@/lib/utils/prompt-language'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 interface UseMultimodalChatParams {
@@ -395,16 +396,24 @@ export function useMultimodalChat({
       let sessionId = currentSessionId
       if (!sessionId) {
         try {
-          const defaultTitle = message.length > 30 ? `${message.substring(0, 30)}...` : message
           const newSession = await chatApi.createSession({
             notebook_id: notebookId,
-            title: defaultTitle,
+            title: t.chat.newChat ?? 'Nova conversa',
             model_override: pendingModelOverride ?? undefined,
           })
           sessionId = newSession.id
           setCurrentSessionId(sessionId)
           setPendingModelOverride(null)
           queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+          if (message.trim()) {
+            const createdSessionId = sessionId
+            void chatApi
+              .generateTitle(createdSessionId, message)
+              .then(() => {
+                queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+              })
+              .catch(() => undefined)
+          }
         } catch (err: unknown) {
           const error = err as { response?: { data?: { detail?: string } }; message?: string }
           toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
@@ -725,6 +734,7 @@ export function useMultimodalChat({
             context: rawContext,
             model_override: modelOverride ?? (currentSession?.model_override ?? undefined),
             agent_instruction: instruction,
+            app_language: promptLanguageLabel(language),
           })
 
           if (!body) throw new Error('No response body')
@@ -892,6 +902,23 @@ export function useMultimodalChat({
     setCurrentSessionId(sessionId)
   }, [])
 
+  // Start a brand-new, empty conversation WITHOUT persisting anything. The
+  // session is created lazily on the first message (see sendMessage), so
+  // repeatedly clicking "New conversation" never spawns empty/internal-id rows.
+  const newConversation = useCallback(() => {
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
+    // Keep auto-select from re-picking the most recent session for the user.
+    autoSelectedRef.current = true
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(storageKeyForNotebook(notebookId))
+    }
+    setPendingModelOverride(null)
+    setCurrentSessionId(null)
+    setMessages([])
+  }, [notebookId])
+
   const createSession = useCallback((title?: string) => {
     return createSessionMutation.mutate({
       title,
@@ -977,6 +1004,7 @@ export function useMultimodalChat({
     clearMessages,
     buildContext,
     createSession,
+    newConversation,
     updateSession,
     deleteSession,
     switchSession,

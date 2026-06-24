@@ -27,6 +27,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user_id, get_navy_acl_user_id
+from api.chat_title import (
+    DEFAULT_SESSION_TITLE,
+    fallback_title,
+    generate_session_title,
+)
 from open_notebook.database.repository import repo_query
 from open_notebook.domain.notebook import ChatSession
 from open_notebook.exceptions import NotFoundError
@@ -75,6 +80,12 @@ class UpdateGlobalSessionRequest(BaseModel):
     )
 
 
+class GenerateTitleRequest(BaseModel):
+    message: str = Field(
+        ..., description="First user message to base the generated title on"
+    )
+
+
 class ChatMessage(BaseModel):
     id: str
     type: str
@@ -104,6 +115,11 @@ class ExecuteGlobalChatRequest(BaseModel):
     agent_instruction: Optional[str] = Field(
         None,
         description="Optional internal instruction for a chat agent mode",
+    )
+    app_language: Optional[str] = Field(
+        None,
+        description="Human-readable UI language name, used as a secondary "
+        "preference for the reply language",
     )
 
 
@@ -451,7 +467,7 @@ async def create_global_session(
     """Create a new global chat session, scoped to the authenticated user."""
     try:
         session = ChatSession(
-            title=request.title or f"Chat {asyncio.get_event_loop().time():.0f}",
+            title=request.title or DEFAULT_SESSION_TITLE,
             model_override=request.model_override,
             owner=_owner_tag(user_id),
         )
@@ -570,6 +586,58 @@ async def update_global_session(
         raise
     except Exception as e:
         logger.error(f"Error updating global session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/global-chat/sessions/{session_id}/generate-title",
+    response_model=GlobalChatSessionResponse,
+)
+async def generate_global_session_title(
+    session_id: str,
+    request: GenerateTitleRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Generate and persist a concise title for a session from its first message.
+
+    Called by the frontend right after the session is created on the first send,
+    so the sidebar shows a meaningful name instead of the raw user prompt.
+    """
+    try:
+        full_id = (
+            session_id
+            if session_id.startswith("chat_session:")
+            else f"chat_session:{session_id}"
+        )
+        session = await ChatSession.get(full_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        title = await generate_session_title(request.message)
+        if not title:
+            title = fallback_title(request.message)
+
+        session.title = title
+        await session.save()
+
+        msg_count = await get_session_message_count(chat_graph, full_id)
+
+        return GlobalChatSessionResponse(
+            id=session.id or "",
+            title=session.title or "",
+            created=str(session.created),
+            updated=str(session.updated),
+            message_count=msg_count,
+            model_override=session.model_override,
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating global session title: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -739,6 +807,7 @@ async def execute_global_chat(
         state_values["context"] = context_for_prompt
         state_values["model_override"] = model_override
         state_values["prompt_template"] = "global_chat/system"
+        state_values["app_language"] = request.app_language
 
         from langchain_core.messages import HumanMessage
 
@@ -798,6 +867,7 @@ async def _stream_global_chat_sse(
     context_stats: Dict[str, Any],
     model_override: Optional[str],
     agent_instruction: Optional[str] = None,
+    app_language: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Wrap ``astream_chat_response`` as Server-Sent Events for global chat."""
     yield f"data: {json.dumps({'type': 'user_message', 'content': user_message})}\n\n"
@@ -809,6 +879,7 @@ async def _stream_global_chat_sse(
             context=_context_with_agent_instruction(context, agent_instruction),
             model_override=model_override,
             prompt_template="global_chat/system",
+            app_language=app_language,
         ):
             yield f"data: {json.dumps(event)}\n\n"
     except Exception as e:
@@ -872,6 +943,7 @@ async def execute_global_chat_stream(
             context_stats=context_stats,
             model_override=model_override,
             agent_instruction=request.agent_instruction,
+            app_language=request.app_language,
         ),
         media_type="text/event-stream",
         headers={

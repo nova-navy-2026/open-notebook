@@ -12,6 +12,7 @@ import {
   NotebookChatMessage,
   UpdateGlobalChatSessionRequest,
   GlobalChatContextStats,
+  GlobalChatDocument,
   GlobalChatSession,
 } from '@/lib/types/api'
 import {
@@ -45,6 +46,7 @@ import {
   instructionForVisualMode,
 } from '@/lib/utils/chat-agents'
 import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
+import { promptLanguageLabel } from '@/lib/utils/prompt-language'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 function createAttachment(file?: File): NotebookChatMessage['attachments'] {
@@ -117,6 +119,33 @@ async function formatMultimodalResponse(result: MultimodalResponse): Promise<str
   return parts.filter((part) => part && part.trim()).join('\n\n')
 }
 
+// Merge newly-referenced documents into the running list for a conversation,
+// deduping by name: pages are unioned (sorted) and chunk counts kept at the max
+// seen, so the badge reflects everything used across the whole chat.
+function mergeSessionDocuments(
+  existing: GlobalChatDocument[],
+  incoming: GlobalChatDocument[] | undefined,
+): GlobalChatDocument[] {
+  if (!incoming || incoming.length === 0) return existing
+  const byName = new Map<string, GlobalChatDocument>()
+  for (const doc of existing) byName.set(doc.name, doc)
+  for (const doc of incoming) {
+    const prev = byName.get(doc.name)
+    if (!prev) {
+      byName.set(doc.name, { ...doc, pages: [...(doc.pages ?? [])] })
+      continue
+    }
+    const pages = Array.from(new Set([...(prev.pages ?? []), ...(doc.pages ?? [])]))
+      .sort((a, b) => a - b)
+    byName.set(doc.name, {
+      ...prev,
+      pages,
+      chunks: Math.max(prev.chunks ?? 0, doc.chunks ?? 0),
+    })
+  }
+  return Array.from(byName.values())
+}
+
 export function useGlobalChat() {
   const { t, language } = useTranslation()
   const queryClient = useQueryClient()
@@ -126,6 +155,10 @@ export function useGlobalChat() {
   const [isVisualModelLocked, setIsVisualModelLocked] = useState(false)
   const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
   const [contextStats, setContextStats] = useState<GlobalChatContextStats | null>(null)
+  // Every document referenced so far in the current conversation (accumulated
+  // across messages), not just those used for the most recent answer. Reset
+  // whenever we switch to / start a different conversation.
+  const [sessionDocuments, setSessionDocuments] = useState<GlobalChatDocument[]>([])
   // Whether auto-select-most-recent has already run. After the user
   // explicitly deletes the active session we keep the conversation cleared
   // and do NOT pick another session for them.
@@ -294,6 +327,7 @@ export function useGlobalChat() {
         setIsVisualModelLocked(false)
         setCurrentSessionId(null)
         setMessages([])
+        setSessionDocuments([])
       }
       return { previousSessions, wasActive }
     },
@@ -333,14 +367,14 @@ export function useGlobalChat() {
       runId?: string
     } = {}
 
-    // Auto-create session if none exists
+    // Auto-create session if none exists. The session is created lazily on the
+    // first message (the "New conversation" button only clears local state), so
+    // we never leave behind empty sessions titled with an internal id. Start
+    // with a neutral placeholder, then generate a real title in the background.
     if (!sessionId) {
       try {
-        const defaultTitle = message.length > 30
-          ? `${message.substring(0, 30)}...`
-          : message
         const newSession = await globalChatApi.createSession({
-          title: defaultTitle,
+          title: t.chat.newChat ?? 'Nova conversa',
           model_override: pendingModelOverride ?? undefined
         })
         sessionId = newSession.id
@@ -350,6 +384,18 @@ export function useGlobalChat() {
         queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.globalChatSessions
         })
+        // Generate a concise title from the first message in parallel with
+        // processing it — don't block the send. The title shows in the sidebar.
+        if (message.trim()) {
+          const createdSessionId = sessionId
+          void globalChatApi.generateTitle(createdSessionId, message)
+            .then(() => {
+              queryClient.invalidateQueries({
+                queryKey: QUERY_KEYS.globalChatSessions
+              })
+            })
+            .catch(() => undefined)
+        }
       } catch (err: unknown) {
         const error = err as { response?: { data?: { detail?: string } }, message?: string }
         toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
@@ -790,6 +836,7 @@ export function useGlobalChat() {
         message,
         model_override: modelOverride ?? (currentSession?.model_override ?? undefined),
         agent_instruction: agentInstruction,
+        app_language: promptLanguageLabel(language),
       })
 
       if (!body) throw new Error('No response body')
@@ -837,7 +884,10 @@ export function useGlobalChat() {
                 prev.map(m => m.id === aiMessageId ? { ...m, content: aiContent } : m)
               )
             } else if (data.type === 'context_stats') {
-              if (data.data) setContextStats(data.data)
+              if (data.data) {
+                setContextStats(data.data)
+                setSessionDocuments(prev => mergeSessionDocuments(prev, data.data.documents))
+              }
             } else if (data.type === 'error') {
               throw new Error(data.message || 'Stream error')
             }
@@ -919,6 +969,7 @@ export function useGlobalChat() {
     setIsVisualModelLocked(false)
     setCurrentSessionId(sessionId)
     setContextStats(null)
+    setSessionDocuments([])
   }, [])
 
   // Create session
@@ -931,6 +982,27 @@ export function useGlobalChat() {
     setIsVisualModelLocked(false)
     return createSessionMutation.mutate({ title })
   }, [createSessionMutation])
+
+  // Start a brand-new, empty conversation WITHOUT persisting anything. The
+  // actual session is created lazily on the first message (see sendMessage), so
+  // repeatedly clicking "New conversation" never spawns empty/internal-id rows.
+  const newConversation = useCallback(() => {
+    hasLocalMultimodalMessagesRef.current = false
+    localMessagesDirtyRef.current = false
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
+    lastDataFileRef.current = null
+    // Keep auto-select from re-picking the most recent session for the user.
+    autoSelectedRef.current = true
+    setIsVisualModelLocked(false)
+    setPendingModelOverride(null)
+    currentSessionIdRef.current = null
+    setCurrentSessionId(null)
+    setMessages([])
+    setContextStats(null)
+    setSessionDocuments([])
+  }, [])
 
   // Update session
   const updateSession = useCallback((sessionId: string, data: UpdateGlobalChatSessionRequest) => {
@@ -1011,8 +1083,10 @@ export function useGlobalChat() {
     loadingSessions,
     pendingModelOverride,
     contextStats,
+    sessionDocuments,
 
     createSession,
+    newConversation,
     updateSession,
     deleteSession,
     switchSession,

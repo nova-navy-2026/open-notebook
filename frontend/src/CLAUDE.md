@@ -48,7 +48,7 @@ User interactions trigger mutations/queries via hooks, which communicate with th
 #### `lib/hooks/` — React Query + Custom Logic
 - **Query hooks**: `useNotebookSources`, `useSources`, `useSource` — TanStack Query wrappers with cache keys
 - **Mutation hooks**: `useCreateSource`, `useUpdateSource`, `useDeleteSource` — mutations with toast feedback + cache invalidation
-- **Complex hooks**: `useNotebookChat`, `useSourceChat` — session management, message streaming, context building
+- **Complex hooks**: `useMultimodalChat` (notebook chat), `useSourceChat`, `useGlobalChat` — session management, message streaming, context building
 - **SSE streaming**: `useAsk` — parses newline-delimited JSON from backend for multi-stage workflows
 - **Pattern**: Hooks return `{ data, isLoading, error, refetch }` + action functions; cache invalidation on mutations
 
@@ -71,7 +71,7 @@ User interactions trigger mutations/queries via hooks, which communicate with th
 
 ### Example: Notebook Chat
 1. **Page** (`notebooks/[id]/page.tsx`) fetches initial data, passes `notebookId` to `ChatColumn` component
-2. **Hook call** (`useNotebookChat()`):
+2. **Hook call** (`useMultimodalChat()`):
    - Queries sessions for notebook via TanStack Query
    - Sets up message state + context building logic
    - Returns `{ messages, sendMessage(), setModelOverride() }`

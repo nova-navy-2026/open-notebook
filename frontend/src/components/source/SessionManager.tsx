@@ -47,6 +47,9 @@ interface SessionManagerProps {
   // Optional: start a brand-new chat (sidebar "New chat" button). Falls back to
   // creating a default-titled session when not provided.
   onNewChat?: () => void
+  // Disable the sidebar "New chat" button when the current conversation is
+  // already empty, so repeated clicks don't spawn redundant empty sessions.
+  newChatDisabled?: boolean
 }
 
 export function SessionManager({
@@ -59,6 +62,7 @@ export function SessionManager({
   loadingSessions,
   variant = 'panel',
   onNewChat,
+  newChatDisabled = false,
 }: SessionManagerProps) {
   const isSidebar = variant === 'sidebar'
   const { t, language } = useTranslation()
@@ -159,6 +163,7 @@ export function SessionManager({
           {isSidebar ? (
             <Button
               className="w-full justify-start gap-2"
+              disabled={newChatDisabled}
               onClick={() => (onNewChat ? onNewChat() : onCreateSession(t.chat.newChat ?? 'Nova conversa'))}
             >
               <Plus className="h-4 w-4" />

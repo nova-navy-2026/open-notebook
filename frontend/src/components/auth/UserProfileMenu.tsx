@@ -81,10 +81,12 @@ export function UserProfileMenu() {
           </>
         )}
 
-        <DropdownMenuItem onClick={() => router.push("/settings")}>
-          <Settings className="h-4 w-4 mr-2" />
-          Settings
-        </DropdownMenuItem>
+        {isAdmin && (
+          <DropdownMenuItem onClick={() => router.push("/settings")}>
+            <Settings className="h-4 w-4 mr-2" />
+            Settings
+          </DropdownMenuItem>
+        )}
 
         <DropdownMenuSeparator />
 

@@ -70,7 +70,9 @@ export default function GlobalChatPage() {
     }
   };
 
-  const documents = chat.contextStats?.documents ?? [];
+  // All documents referenced so far in the conversation (accumulated across
+  // messages), so the badge reflects the whole chat — not just the last answer.
+  const documents = chat.sessionDocuments ?? [];
   const gemmaModel = models.find((model) => {
     const provider = model.provider?.toLowerCase() ?? "";
     const name = model.name?.toLowerCase() ?? "";
@@ -117,6 +119,9 @@ export default function GlobalChatPage() {
 
           {docsExpanded && (
             <div className="mt-2 rounded-md border p-3 text-xs max-h-48 overflow-y-auto">
+              <p className="mb-2 font-medium text-muted-foreground">
+                {t.chat.documentsUsed ?? "Documents used in this conversation"}
+              </p>
               <ul className="space-y-0.5">
                 {documents.map((doc, i) => (
                   <li key={i} className="text-foreground">
@@ -154,7 +159,8 @@ export default function GlobalChatPage() {
                 variant="sidebar"
                 sessions={chat.sessions}
                 currentSessionId={chat.currentSessionId}
-                onNewChat={() => chat.createSession()}
+                onNewChat={() => chat.newConversation()}
+                newChatDisabled={!chat.currentSessionId && chat.messages.length === 0}
                 onCreateSession={(title) => chat.createSession(title)}
                 onSelectSession={chat.switchSession}
                 onUpdateSession={(sessionId, title) =>

@@ -14,6 +14,11 @@ interface LanguageToggleProps {
   iconOnly?: boolean;
 }
 
+// French is intentionally hidden from the language picker for now. The locale
+// and all its translations remain in the codebase — flip this to `true` to
+// bring the option back.
+const SHOW_FRENCH = false;
+
 export function LanguageToggle({ iconOnly = false }: LanguageToggleProps) {
   const { language, setLanguage, t } = useTranslation();
 
@@ -58,16 +63,18 @@ export function LanguageToggle({ iconOnly = false }: LanguageToggleProps) {
         >
           <span>{t.common.portuguese}</span>
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => setLanguage("fr-FR")}
-          className={
-            currentLang === "fr-FR" || currentLang.startsWith("fr")
-              ? "bg-accent"
-              : ""
-          }
-        >
-          <span>{t.common.french}</span>
-        </DropdownMenuItem>
+        {SHOW_FRENCH && (
+          <DropdownMenuItem
+            onClick={() => setLanguage("fr-FR")}
+            className={
+              currentLang === "fr-FR" || currentLang.startsWith("fr")
+                ? "bg-accent"
+                : ""
+            }
+          >
+            <span>{t.common.french}</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

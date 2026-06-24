@@ -373,20 +373,37 @@ export function ChatPanel({
     })
   }, [])
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Detect platform for correct modifier key
     const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toUpperCase().indexOf('MAC') >= 0
     const isModifierPressed = isMac ? e.metaKey : e.ctrlKey
 
-    if (e.key === 'Enter' && isModifierPressed) {
-      e.preventDefault()
-      handleSend()
+    // Don't act while an IME composition is in progress (e.g. CJK input).
+    if (e.nativeEvent.isComposing || e.key !== 'Enter') return
+
+    // ChatGPT-style: plain Enter sends; Shift+Enter or Ctrl/⌘+Enter insert a
+    // newline instead.
+    if (e.shiftKey || isModifierPressed) {
+      if (isModifierPressed) {
+        // Textareas don't insert a newline on Ctrl/⌘+Enter by default, so do it
+        // manually at the caret. (Shift+Enter is handled natively.)
+        e.preventDefault()
+        const target = e.currentTarget
+        const start = target.selectionStart
+        const end = target.selectionEnd
+        setInput((prev) => prev.slice(0, start) + '\n' + prev.slice(end))
+        requestAnimationFrame(() => {
+          target.selectionStart = target.selectionEnd = start + 1
+        })
+      }
+      return
     }
+
+    e.preventDefault()
+    handleSend()
   }
 
-  // Detect platform for placeholder text
-  const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toUpperCase().indexOf('MAC') >= 0
-  const keyHint = isMac ? '⌘+Enter' : 'Ctrl+Enter'
+  const keyHint = 'Enter'
 
   const hasSessions = onSelectSession && onCreateSession && onDeleteSession
 

@@ -119,7 +119,8 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
               variant="sidebar"
               sessions={chat.sessions}
               currentSessionId={chat.currentSessionId}
-              onNewChat={() => chat.createSession()}
+              onNewChat={() => chat.newConversation()}
+              newChatDisabled={!chat.currentSessionId && chat.messages.length === 0}
               onCreateSession={(title) => chat.createSession(title)}
               onSelectSession={chat.switchSession}
               onUpdateSession={(sessionId, title) => chat.updateSession(sessionId, { title })}

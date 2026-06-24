@@ -7,7 +7,9 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { ModalProvider } from '@/components/providers/ModalProvider'
 import { CreateDialogsProvider } from '@/lib/hooks/use-create-dialogs'
-import { CommandPalette } from '@/components/common/CommandPalette'
+// CommandPalette (⌘K quick actions) is intentionally disabled for now — it
+// surfaced actions that don't match the current menus. The component is kept in
+// the codebase; re-add the import and <CommandPalette /> below to bring it back.
 import { AppShell } from '@/components/layout/AppShell'
 
 export default function DashboardLayout({
@@ -55,7 +57,6 @@ export default function DashboardLayout({
           {children}
         </AppShell>
         <ModalProvider />
-        <CommandPalette />
       </CreateDialogsProvider>
     </ErrorBoundary>
   )

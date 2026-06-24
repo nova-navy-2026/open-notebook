@@ -25,6 +25,10 @@ class ThreadState(TypedDict):
     context_config: Optional[dict]
     model_override: Optional[str]
     prompt_template: Optional[str]
+    # Human-readable name of the app's UI language (e.g. "English"). Used as a
+    # secondary preference for the reply language when the user's message
+    # language is ambiguous. See the LANGUAGE rule in the chat system prompts.
+    app_language: Optional[str]
 
 
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
@@ -93,6 +97,7 @@ async def astream_chat_response(
     context: Optional[Any] = None,
     model_override: Optional[str] = None,
     prompt_template: str = "chat/system",
+    app_language: Optional[str] = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream an LLM response token-by-token for the given chat session.
 
@@ -125,6 +130,7 @@ async def astream_chat_response(
             "context": context,
             "model_override": model_override,
             "prompt_template": prompt_template,
+            "app_language": app_language,
         }
 
         system_prompt = Prompter(prompt_template=prompt_template).render(

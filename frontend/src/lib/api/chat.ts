@@ -43,6 +43,14 @@ export const chatApi = {
     return response.data
   },
 
+  generateTitle: async (sessionId: string, message: string) => {
+    const response = await apiClient.post<NotebookChatSession>(
+      `/chat/sessions/${sessionId}/generate-title`,
+      { message }
+    )
+    return response.data
+  },
+
   deleteSession: async (sessionId: string) => {
     await apiClient.delete(`/chat/sessions/${sessionId}`)
   },

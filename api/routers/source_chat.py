@@ -9,6 +9,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from api.auth import assert_owns, get_current_user_id
+from api.chat_title import (
+    DEFAULT_SESSION_TITLE,
+    fallback_title,
+    generate_session_title,
+)
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Source
 from open_notebook.exceptions import (
@@ -33,6 +38,11 @@ class UpdateSourceChatSessionRequest(BaseModel):
     title: Optional[str] = Field(None, description="New session title")
     model_override: Optional[str] = Field(
         None, description="Model override for this session"
+    )
+
+class GenerateTitleRequest(BaseModel):
+    message: str = Field(
+        ..., description="First user message to base the generated title on"
     )
 
 class ChatMessage(BaseModel):
@@ -107,7 +117,7 @@ async def create_source_chat_session(
 
         # Create new session with model_override support
         session = ChatSession(
-            title=request.title or f"Source Chat {asyncio.get_running_loop().time():.0f}",
+            title=request.title or DEFAULT_SESSION_TITLE,
             model_override=request.model_override,
         )
         await session.save()
@@ -369,6 +379,81 @@ async def update_source_chat_session(
         logger.error(f"Error updating source chat session: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Error updating source chat session: {str(e)}"
+        )
+
+
+@router.post(
+    "/sources/{source_id}/chat/sessions/{session_id}/generate-title",
+    response_model=SourceChatSessionResponse,
+)
+async def generate_source_chat_session_title(
+    request: GenerateTitleRequest,
+    http_request: Request,
+    source_id: str = Path(..., description="Source ID"),
+    session_id: str = Path(..., description="Session ID"),
+    _user_id: str = Depends(get_current_user_id),
+):
+    """Generate and persist a concise title for a source chat session.
+
+    Called by the frontend right after the session is created on the first send,
+    so the sidebar shows a meaningful name instead of the raw user prompt.
+    """
+    try:
+        full_source_id = (
+            source_id if source_id.startswith("source:") else f"source:{source_id}"
+        )
+        source = await Source.get(full_source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+        assert_owns(getattr(source, "owner", None), http_request)
+
+        full_session_id = (
+            session_id
+            if session_id.startswith("chat_session:")
+            else f"chat_session:{session_id}"
+        )
+        session = await ChatSession.get(full_session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Verify session is related to this source.
+        relation_query = await repo_query(
+            "SELECT * FROM refers_to WHERE in = $session_id AND out = $source_id",
+            {
+                "session_id": ensure_record_id(full_session_id),
+                "source_id": ensure_record_id(full_source_id),
+            },
+        )
+        if not relation_query:
+            raise HTTPException(
+                status_code=404, detail="Session not found for this source"
+            )
+
+        title = await generate_session_title(request.message)
+        if not title:
+            title = fallback_title(request.message)
+
+        session.title = title
+        await session.save()
+
+        msg_count = await get_session_message_count(source_chat_graph, full_session_id)
+
+        return SourceChatSessionResponse(
+            id=session.id or "",
+            title=session.title or "Untitled Session",
+            source_id=source_id,
+            model_override=getattr(session, "model_override", None),
+            created=str(session.created),
+            updated=str(session.updated),
+            message_count=msg_count,
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Source or session not found")
+    except Exception as e:
+        logger.error(f"Error generating source chat session title: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating source chat session title: {str(e)}",
         )
 
 

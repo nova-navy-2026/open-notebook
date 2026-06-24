@@ -15,7 +15,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { searchApi } from '@/lib/api/search'
 import { sourcesApi } from '@/lib/api/sources'
@@ -44,11 +43,19 @@ export function AddExistingSourceDialog({
   const [filteredSources, setFilteredSources] = useState<SourceListResponse[]>([])
   const [isSearching, setIsSearching] = useState(false)
 
-  // Get sources already in this notebook
+  // Get sources already in this notebook so we can hide them — showing sources
+  // that are already linked here is the main thing that made this list feel
+  // "out of scope" / confusing.
   const { data: currentNotebookSources } = useSources(notebookId)
   const currentSourceIds = useMemo(
     () => new Set(currentNotebookSources?.map(s => s.id) || []),
     [currentNotebookSources]
+  )
+
+  // Only offer sources that are NOT already part of this notebook.
+  const selectableSources = useMemo(
+    () => filteredSources.filter(s => !currentSourceIds.has(s.id)),
+    [filteredSources, currentSourceIds]
   )
 
   const addSources = useAddSourcesToNotebook()
@@ -211,20 +218,19 @@ export function AddExistingSourceDialog({
 
           {/* Source List */}
           <ScrollArea className="h-[400px] border rounded-md">
-            {isSearching && filteredSources.length === 0 ? (
+            {isSearching && selectableSources.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
                 <LoaderIcon className="h-12 w-12 mb-2 animate-spin" />
                 <p>{t.common.loading}</p>
               </div>
-            ) : filteredSources.length === 0 ? (
+            ) : selectableSources.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[200px] text-muted-foreground">
                 <FileText className="h-12 w-12 mb-2 opacity-50" />
-                <p>{t.sources.noNotebooksFound}</p>
+                <p>{t.sources.noMatchingSources}</p>
               </div>
             ) : (
               <div className="space-y-2 p-4">
-                {filteredSources.map((source) => {
-                  const isAlreadyLinked = currentSourceIds.has(source.id)
+                {selectableSources.map((source) => {
                   const isSelected = selectedSourceIds.includes(source.id)
 
                   return (
@@ -237,7 +243,6 @@ export function AddExistingSourceDialog({
                       <Checkbox
                         checked={isSelected}
                         onCheckedChange={() => handleToggleSource(source.id)}
-                        disabled={isAlreadyLinked}
                         className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
@@ -248,11 +253,6 @@ export function AddExistingSourceDialog({
                           <h4 className="font-medium text-sm break-words line-clamp-2 flex-1 min-w-0">
                             {source.title}
                           </h4>
-                          {isAlreadyLinked && (
-                            <Badge variant="secondary" className="text-xs shrink-0">
-                              {t.common.linked}
-                            </Badge>
-                          )}
                         </div>
                         <p className="text-xs text-muted-foreground truncate">
                           {t.sources.added.replace('{date}', formatDate(source.created))}

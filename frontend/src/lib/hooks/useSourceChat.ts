@@ -128,14 +128,26 @@ export function useSourceChat(sourceId: string) {
   const sendMessage = useCallback(async (message: string, modelOverride?: string) => {
     let sessionId = currentSessionId
 
-    // Auto-create session if none exists
+    // Auto-create session if none exists. Use a neutral placeholder title and
+    // generate a concise, non-verbatim title from the first message in the
+    // background (don't block the send).
     if (!sessionId) {
       try {
-        const defaultTitle = message.length > 30 ? `${message.substring(0, 30)}...` : message
-        const newSession = await sourceChatApi.createSession(sourceId, { title: defaultTitle })
+        const newSession = await sourceChatApi.createSession(sourceId, {
+          title: t.chat.newChat ?? 'Nova conversa',
+        })
         sessionId = newSession.id
         setCurrentSessionId(sessionId)
         queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+        if (message.trim()) {
+          const createdSessionId = sessionId
+          void sourceChatApi
+            .generateTitle(sourceId, createdSessionId, message)
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+            })
+            .catch(() => undefined)
+        }
       } catch (err: unknown) {
         const error = err as { response?: { data?: { detail?: string } }, message?: string };
         console.error('Failed to create chat session:', error)
