@@ -213,7 +213,7 @@ const enUS: PageInfoMap = {
       'When Deep Research starts from chat, progress and the final report appear in chat and are also saved here.',
       'Use chat follow-ups to create revisions, executive summaries or changes to the report.',
       'Save results as notes in a notebook for reuse.',
-      'The job history is persisted — review past reports at any time.',
+      'Past research reports are saved automatically, review them at any time.',
     ],
   },
   visionImage: {
