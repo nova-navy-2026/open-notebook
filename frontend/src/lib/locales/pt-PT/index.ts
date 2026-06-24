@@ -1177,7 +1177,7 @@ export const ptPT = {
     queryDescription:
       "Insira a sua pergunta ou tópico de pesquisa. Seja específico para melhores resultados.",
     queryPlaceholder:
-      "ex.: Quais são os últimos desenvolvimentos em sistemas autónomos marítimos?",
+      "ex.: De que forma o cumprimento rigoroso das disposições de segurança pelo oficial de dia, durante a movimentação de mísseis, munições, torpedos e explosivos, garante a prevenção de acidentes e a proteção do material sob a sua responsabilidade?",
     transcriptAtaNotice:
       "Pré-preenchido a partir da última transcrição. Será gerada uma ATA (ata de reunião) diretamente a partir da transcrição, na língua da conversa — não é usado contexto do OpenSearch. Edite antes de gerar, se necessário.",
     reportType: "Tipo de Relatório",

@@ -1167,7 +1167,7 @@ export const enUS = {
     queryDescription:
       "Enter your research question or topic. Be specific for better results.",
     queryPlaceholder:
-      "e.g., What are the latest developments in maritime autonomous systems?",
+      "e.g., How does strict compliance with safety protocols by the duty officer during the handling of missiles, torpedoes, and explosives prevent accidents and protect the materials under their responsibility?",
     transcriptAtaNotice:
       "Pre-filled from the latest transcription. A meeting-minutes (ATA) document will be generated directly from the transcript in the conversation language — no OpenSearch context is used. Edit before generating if needed.",
     reportType: "Report Type",

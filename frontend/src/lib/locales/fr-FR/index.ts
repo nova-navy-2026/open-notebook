@@ -59,7 +59,7 @@ export const frFR = {
     queryDescription:
       "Saisissez votre question ou sujet de recherche. Soyez précis pour de meilleurs résultats.",
     queryPlaceholder:
-      "ex. Quelles sont les dernières avancées en matière de systèmes maritimes autonomes ?",
+      "ex. Comment le respect strict des procédures de sécurité par l'officier de permanence lors de la manutention de missiles, torpilles et explosifs garantit-il la prévention des accidents et la protection du matériel ?",
     transcriptAtaNotice:
       "Pré-rempli à partir de la dernière transcription. Un compte rendu de réunion (ATA) sera généré directement à partir de la transcription dans la langue de la conversation — aucun contexte OpenSearch n'est utilisé. Modifiez avant de générer si nécessaire.",
     reportType: "Type de rapport",

@@ -215,7 +215,7 @@ export function ResearchGeneratePanel({
             onChange={(e) => setQuery(e.target.value)}
             placeholder={
               t.research?.queryPlaceholder ??
-              "e.g., What are the latest developments in maritime autonomous systems?"
+              "e.g., How does strict compliance with safety protocols by the duty officer during the handling of missiles, torpedoes, and explosives prevent accidents and protect the materials under their responsibility?"
             }
             className="min-h-[100px] text-base"
             disabled={isSubmitting}
