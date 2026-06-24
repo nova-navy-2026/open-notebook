@@ -1191,6 +1191,7 @@ export const ptPT = {
     delete: "Eliminar",
     failedToDelete: "Falha ao Eliminar",
     copyReport: "Copiar Relatório",
+    editReport: "Editar Relatório",
     copied: "Copiado",
     copiedDesc: "Relatório copiado para a área de transferência",
     notebookResearchDesc:

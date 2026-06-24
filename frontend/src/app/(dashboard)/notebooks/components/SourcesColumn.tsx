@@ -88,6 +88,15 @@ export function SourcesColumn({
   const retrySource = useRetrySource();
   const removeFromNotebook = useRemoveSourceFromNotebook();
 
+  // A notebook's sources are the uploaded/app sources PLUS any selected
+  // OpenSearch (navy corpus) documents. The empty state must only show when
+  // BOTH are empty — otherwise selecting corpus documents wrongly still reads
+  // as "No sources yet".
+  const uploadedCount = sources?.length ?? 0;
+  const hasUploadedSources = uploadedCount > 0;
+  const selectedNavyCount = selectedNavyDocIds?.size ?? 0;
+  const totalSourcesCount = uploadedCount + selectedNavyCount;
+
   // Collapsible column state
   const { sourcesCollapsed, toggleSources } = useNotebookColumnsStore();
   const collapseButton = useMemo(
@@ -179,9 +188,9 @@ export function SourcesColumn({
                 <CardTitle className="text-lg truncate">
                   {t.navigation.sources}
                 </CardTitle>
-                {sources && sources.length > 0 && (
+                {totalSourcesCount > 0 && (
                   <Badge variant="secondary" className="text-xs">
-                    {sources.length}
+                    {totalSourcesCount}
                   </Badge>
                 )}
               </div>
@@ -233,15 +242,15 @@ export function SourcesColumn({
               <div className="flex items-center justify-center py-8">
                 <LoadingSpinner />
               </div>
-            ) : !sources || sources.length === 0 ? (
+            ) : !hasUploadedSources && selectedNavyCount === 0 ? (
               <EmptyState
                 icon={FileText}
                 title={t.sources.noSourcesYet}
                 description={t.sources.createFirstSource}
               />
-            ) : (
+            ) : hasUploadedSources ? (
               <div className="space-y-2">
-                {sources.map((source) => (
+                {sources!.map((source) => (
                   <SourceCard
                     key={source.id}
                     source={source}
@@ -269,7 +278,7 @@ export function SourcesColumn({
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
 
             {/* Navy Corpus Knowledge Base */}
             {selectedNavyDocIds &&

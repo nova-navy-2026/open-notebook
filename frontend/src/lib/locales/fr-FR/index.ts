@@ -86,6 +86,7 @@ export const frFR = {
     delete: "Supprimer",
     failedToDelete: "Échec de la suppression",
     copyReport: "Copier le rapport",
+    editReport: "Modifier le rapport",
     copied: "Copié",
     copiedDesc: "Rapport copié dans le presse-papiers",
     notebookResearchDesc:

@@ -1181,6 +1181,7 @@ export const enUS = {
     delete: "Delete",
     failedToDelete: "Failed to Delete",
     copyReport: "Copy Report",
+    editReport: "Edit Report",
     copied: "Copied",
     copiedDesc: "Report copied to clipboard",
     notebookResearchDesc:
