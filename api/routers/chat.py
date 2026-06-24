@@ -370,8 +370,7 @@ async def get_session(
             updated=str(session.updated),
             message_count=len(messages),
             messages=messages,
-            model_override=getattr(session, "model_override", None),
-        )
+            model_override=getattr(session, "model_override", None),        )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
@@ -414,8 +413,7 @@ async def update_session(
             created=str(session.created),
             updated=str(session.updated),
             message_count=msg_count,
-            model_override=session.model_override,
-        )
+            model_override=session.model_override,        )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
@@ -532,8 +530,7 @@ async def persist_chat_exchange(
             updated=str(session.updated),
             message_count=len(messages),
             messages=messages,
-            model_override=getattr(session, "model_override", None),
-        )
+            model_override=getattr(session, "model_override", None),        )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
     except HTTPException:

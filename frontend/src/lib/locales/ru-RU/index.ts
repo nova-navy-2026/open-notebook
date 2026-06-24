@@ -417,6 +417,9 @@ export const ruRU = {
     maxFilesAllowed: "Максимальное количество файлов в пакете: {count}",
   },
   chat: {
+    privateChat: "Приватный чат",
+    privateChatActive: "Приватный чат включён — не сохраняется в истории",
+    privateChatHint: "Это приватный чат. Он не появится в вашей истории.",
     sessions: "Сессии",
     sessionTitlePlaceholder: "Введите название...",
     noSessions: "Пока нет сессий чата",

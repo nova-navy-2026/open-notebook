@@ -71,6 +71,10 @@ class CreateGlobalSessionRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this session"
     )
+    private: bool = Field(
+        False,
+        description="Private/temporary session: hidden from the chat history list",
+    )
 
 
 class UpdateGlobalSessionRequest(BaseModel):
@@ -100,6 +104,7 @@ class GlobalChatSessionResponse(BaseModel):
     updated: str
     message_count: Optional[int] = None
     model_override: Optional[str] = None
+    private: bool = False
 
 
 class GlobalChatSessionWithMessagesResponse(GlobalChatSessionResponse):
@@ -415,9 +420,14 @@ async def _get_global_sessions(user_id: str) -> List[ChatSession]:
 
     Legacy sessions (owner IS NULL or the old shared 'global_chat' tag) are NOT
     returned to regular users, so global chat history never leaks across users.
+
+    Private/temporary sessions (private = true) are excluded so they never show
+    up in history. ``private != true`` keeps legacy rows where the field is
+    absent (NONE) visible.
     """
     rows = await repo_query(
         "SELECT * FROM chat_session WHERE owner = $tag "
+        "AND private != true "
         "ORDER BY updated DESC",
         {"tag": _owner_tag(user_id)},
     )
@@ -451,6 +461,7 @@ async def list_global_sessions(user_id: str = Depends(get_current_user_id)):
                     updated=str(session.updated),
                     message_count=msg_count,
                     model_override=getattr(session, "model_override", None),
+                    private=bool(getattr(session, "private", False)),
                 )
             )
         return results
@@ -470,6 +481,7 @@ async def create_global_session(
             title=request.title or DEFAULT_SESSION_TITLE,
             model_override=request.model_override,
             owner=_owner_tag(user_id),
+            private=bool(request.private),
         )
         await session.save()
 
@@ -480,6 +492,7 @@ async def create_global_session(
             updated=str(session.updated),
             message_count=0,
             model_override=session.model_override,
+            private=bool(session.private),
         )
     except Exception as e:
         logger.error(f"Error creating global chat session: {e}")
@@ -531,6 +544,7 @@ async def get_global_session(
             message_count=len(messages),
             messages=messages,
             model_override=getattr(session, "model_override", None),
+            private=bool(getattr(session, "private", False)),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -579,6 +593,7 @@ async def update_global_session(
             updated=str(session.updated),
             message_count=msg_count,
             model_override=session.model_override,
+            private=bool(getattr(session, "private", False)),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -707,6 +722,7 @@ async def persist_global_chat_exchange(
             message_count=len(messages),
             messages=messages,
             model_override=getattr(session, "model_override", None),
+            private=bool(getattr(session, "private", False)),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")

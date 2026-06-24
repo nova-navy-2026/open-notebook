@@ -529,6 +529,9 @@ export const ptPT = {
       "Os tópicos são inferidos do texto das notas por correspondência de palavras-chave — uma heurística aproximada, não uma classificação semântica.",
   },
   chat: {
+    privateChat: "Conversa privada",
+    privateChatActive: "Conversa privada ativa — não é guardada no histórico",
+    privateChatHint: "Esta é uma conversa privada. Não aparecerá no teu histórico.",
     sessions: "Sessões",
     newChat: "Nova conversa",
     searchSessions: "Procurar conversas...",

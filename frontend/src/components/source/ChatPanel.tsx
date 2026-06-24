@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square } from 'lucide-react'
+import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square, Ghost } from 'lucide-react'
 import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -105,6 +105,11 @@ interface ChatPanelProps {
   // Export all conversations (optional). When provided, an "Export all" item is shown.
   onExportAll?: () => void | Promise<void>
   exportingAll?: boolean
+  // Private/"temporary" chat. When onTogglePrivate is provided, a toggle button
+  // is shown in the header; while privateMode is on, a banner explains the chat
+  // won't be saved to history.
+  privateMode?: boolean
+  onTogglePrivate?: () => void
 }
 
 /** Inline "edit the report" control shown under a deep-research report message. */
@@ -211,6 +216,8 @@ export function ChatPanel({
   isDeepResearchSession = false,
   onExportAll,
   exportingAll = false,
+  privateMode = false,
+  onTogglePrivate,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
@@ -424,6 +431,20 @@ export function ChatPanel({
     toast.success(t.chat.conversationExported ?? 'Conversa exportada')
   }, [messages, resolvedTitle, t])
 
+  const privateToggle = onTogglePrivate ? (
+    <Button
+      variant={privateMode ? 'default' : 'ghost'}
+      size="icon"
+      className="h-8 w-8 flex-shrink-0"
+      title={privateMode ? t.chat.privateChatActive : t.chat.privateChat}
+      aria-label={t.chat.privateChat}
+      aria-pressed={privateMode}
+      onClick={onTogglePrivate}
+    >
+      <Ghost className="h-4 w-4" />
+    </Button>
+  ) : null
+
   const exportMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -470,6 +491,7 @@ export function ChatPanel({
                 </TabsTrigger>
               </TabsList>
             </Tabs>
+            {privateToggle}
             {exportMenu}
           </div>
         ) : (
@@ -478,6 +500,7 @@ export function ChatPanel({
               <Bot className="h-5 w-5 flex-shrink-0" />
               <span className="truncate">{resolvedTitle}</span>
             </CardTitle>
+            {privateToggle}
             {exportMenu}
           </div>
         )}
@@ -665,6 +688,14 @@ export function ChatPanel({
           <div className="border-t px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/30">
             <Search className="h-3.5 w-3.5 flex-shrink-0" />
             <span>Sessão de Deep Research — edita o relatório ou faz perguntas sobre ele.</span>
+          </div>
+        )}
+
+        {/* Private/temporary chat banner */}
+        {privateMode && (
+          <div className="border-t px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground bg-muted/30">
+            <Ghost className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>{t.chat.privateChatHint}</span>
           </div>
         )}
 

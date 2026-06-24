@@ -177,6 +177,8 @@ export interface BaseChatSession {
   updated: string
   message_count?: number
   model_override?: string | null
+  // Private/temporary conversation: persisted but hidden from the history list.
+  private?: boolean
 }
 
 export interface SourceChatSession extends BaseChatSession {
@@ -304,6 +306,7 @@ export interface GlobalChatSessionWithMessages extends GlobalChatSession {
 export interface CreateGlobalChatSessionRequest {
   title?: string
   model_override?: string
+  private?: boolean
 }
 
 export interface UpdateGlobalChatSessionRequest {

@@ -1,0 +1,4 @@
+-- Migration 21 Down: Remove private chat session support
+
+REMOVE INDEX IF EXISTS idx_chat_session_private ON chat_session;
+REMOVE FIELD IF EXISTS private ON TABLE chat_session;

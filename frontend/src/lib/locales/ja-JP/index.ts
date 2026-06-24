@@ -417,6 +417,9 @@ export const jaJP = {
     maxFilesAllowed: "一括処理は最大{count}件までです",
   },
   chat: {
+    privateChat: "プライベートチャット",
+    privateChatActive: "プライベートチャット中 — 履歴には保存されません",
+    privateChatHint: "これはプライベートチャットです。履歴には表示されません。",
     sessions: "セッション",
     sessionTitlePlaceholder: "タイトルを入力...",
     noSessions: "チャットセッションがまだありません",

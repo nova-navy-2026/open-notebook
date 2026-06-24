@@ -280,7 +280,7 @@ export function useSourceChat(sourceId: string) {
     isStreaming,
     contextIndicators,
     loadingSessions,
-    
+
     // Actions
     createSession,
     updateSession,

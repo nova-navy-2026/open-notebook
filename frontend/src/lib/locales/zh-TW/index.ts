@@ -417,6 +417,9 @@ export const zhTW = {
     maxFilesAllowed: "每批最多允許 {count} 個檔案",
   },
   chat: {
+    privateChat: "私密對話",
+    privateChatActive: "私密對話已開啟 — 不會儲存到歷史記錄",
+    privateChatHint: "這是一個私密對話，不會出現在您的歷史記錄中。",
     sessions: "對話",
     sessionTitlePlaceholder: "在此輸入標題...",
     noSessions: "暫無對話",

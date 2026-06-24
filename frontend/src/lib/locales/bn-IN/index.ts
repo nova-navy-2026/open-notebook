@@ -417,6 +417,9 @@
     maxFilesAllowed: "ব্যাচে সর্বোচ্চ {count}টি ফাইল অনুমোদিত",
   },
   chat: {
+    privateChat: "ব্যক্তিগত চ্যাট",
+    privateChatActive: "ব্যক্তিগত চ্যাট চালু — ইতিহাসে সংরক্ষিত হয় না",
+    privateChatHint: "এটি একটি ব্যক্তিগত চ্যাট। এটি আপনার ইতিহাসে দেখা যাবে না।",
     sessions: "সেশনগুলি",
     sessionTitlePlaceholder: "এখানে একটি শিরোনাম লিখুন...",
     noSessions: "এখনও কোন চ্যাট সেশন নেই",

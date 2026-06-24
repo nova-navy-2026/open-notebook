@@ -523,6 +523,9 @@ export const enUS = {
       "Topics are inferred from note text by keyword matching — a rough heuristic, not semantic classification.",
   },
   chat: {
+    privateChat: "Private chat",
+    privateChatActive: "Private chat on — not saved to history",
+    privateChatHint: "This is a private chat. It won't appear in your history.",
     sessions: "Sessions",
     newChat: "New chat",
     searchSessions: "Search chats...",

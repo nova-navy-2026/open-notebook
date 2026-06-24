@@ -417,6 +417,9 @@ export const zhCN = {
     maxFilesAllowed: "每批最多允许 {count} 个文件",
   },
   chat: {
+    privateChat: "私密对话",
+    privateChatActive: "私密对话已开启 — 不会保存到历史记录",
+    privateChatHint: "这是一个私密对话，不会出现在您的历史记录中。",
     sessions: "会话",
     sessionTitlePlaceholder: "在此输入标题...",
     noSessions: "暂无会话",

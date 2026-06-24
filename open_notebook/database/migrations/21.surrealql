@@ -1,0 +1,10 @@
+-- Migration 21: Private ("temporary") chat sessions
+-- Adds a `private` flag to chat_session. Private conversations are persisted
+-- like any other chat, but are excluded from the user's chat history listing
+-- (mirroring ChatGPT/Gemini temporary chats). Defaults to false so all existing
+-- sessions remain visible.
+
+DEFINE FIELD IF NOT EXISTS private ON TABLE chat_session TYPE bool DEFAULT false;
+
+-- Index to keep history listings (which filter on private = false) efficient.
+DEFINE INDEX IF NOT EXISTS idx_chat_session_private ON chat_session FIELDS private;

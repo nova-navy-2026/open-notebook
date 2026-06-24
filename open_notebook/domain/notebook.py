@@ -730,6 +730,9 @@ class ChatSession(ObjectModel):
     title: Optional[str] = None
     model_override: Optional[str] = None
     owner: Optional[str] = None
+    # Private ("temporary") conversation: persisted normally but hidden from the
+    # user's chat history listing (like ChatGPT/Gemini temporary chats).
+    private: bool = False
 
     async def relate_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:

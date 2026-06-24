@@ -159,6 +159,9 @@ export function useGlobalChat() {
   // across messages), not just those used for the most recent answer. Reset
   // whenever we switch to / start a different conversation.
   const [sessionDocuments, setSessionDocuments] = useState<GlobalChatDocument[]>([])
+  // Private/"temporary" chat: the next auto-created session is flagged private so
+  // it never shows up in the history sidebar.
+  const [privateMode, setPrivateMode] = useState(false)
   // Whether auto-select-most-recent has already run. After the user
   // explicitly deletes the active session we keep the conversation cleared
   // and do NOT pick another session for them.
@@ -259,7 +262,7 @@ export function useGlobalChat() {
 
   // Create session mutation
   const createSessionMutation = useMutation({
-    mutationFn: (data: { title?: string; model_override?: string }) =>
+    mutationFn: (data: { title?: string; model_override?: string; private?: boolean }) =>
       globalChatApi.createSession(data),
     onSuccess: (newSession) => {
       queryClient.invalidateQueries({
@@ -375,7 +378,8 @@ export function useGlobalChat() {
       try {
         const newSession = await globalChatApi.createSession({
           title: t.chat.newChat ?? 'Nova conversa',
-          model_override: pendingModelOverride ?? undefined
+          model_override: pendingModelOverride ?? undefined,
+          private: privateMode,
         })
         sessionId = newSession.id
         currentSessionIdRef.current = sessionId
@@ -957,9 +961,9 @@ export function useGlobalChat() {
         }
       }).catch(() => undefined)
     }
-  }, [currentSessionId, currentSession, pendingModelOverride, refetchCurrentSession, queryClient, t, messages])
+  }, [currentSessionId, currentSession, pendingModelOverride, privateMode, refetchCurrentSession, queryClient, t, messages])
 
-  // Switch session
+  // Switch session — opening a saved conversation always leaves private mode.
   const switchSession = useCallback((sessionId: string) => {
     hasLocalMultimodalMessagesRef.current = false
     localMessagesDirtyRef.current = false
@@ -967,12 +971,13 @@ export function useGlobalChat() {
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''
     setIsVisualModelLocked(false)
+    setPrivateMode(false)
     setCurrentSessionId(sessionId)
     setContextStats(null)
     setSessionDocuments([])
   }, [])
 
-  // Create session
+  // Create session — an explicit "New chat" is always a normal (listed) session.
   const createSession = useCallback((title?: string) => {
     hasLocalMultimodalMessagesRef.current = false
     localMessagesDirtyRef.current = false
@@ -980,7 +985,8 @@ export function useGlobalChat() {
     lastVisualQueryRef.current = ''
     lastVisualContextRef.current = ''
     setIsVisualModelLocked(false)
-    return createSessionMutation.mutate({ title })
+    setPrivateMode(false)
+    return createSessionMutation.mutate({ title, private: false })
   }, [createSessionMutation])
 
   // Start a brand-new, empty conversation WITHOUT persisting anything. The
@@ -1002,6 +1008,23 @@ export function useGlobalChat() {
     setMessages([])
     setContextStats(null)
     setSessionDocuments([])
+  }, [])
+
+  // Toggle private/"temporary" mode. Either direction starts a fresh, empty
+  // conversation; the private session itself is created lazily on first send.
+  const togglePrivateChat = useCallback(() => {
+    hasLocalMultimodalMessagesRef.current = false
+    localMessagesDirtyRef.current = false
+    lastVisualFileRef.current = null
+    lastVisualQueryRef.current = ''
+    lastVisualContextRef.current = ''
+    setIsVisualModelLocked(false)
+    setContextStats(null)
+    setCurrentSessionId(null)
+    setMessages([])
+    // Don't auto-jump back to the most recent history session afterwards.
+    autoSelectedRef.current = true
+    setPrivateMode(prev => !prev)
   }, [])
 
   // Update session
@@ -1084,6 +1107,7 @@ export function useGlobalChat() {
     pendingModelOverride,
     contextStats,
     sessionDocuments,
+    privateMode,
 
     createSession,
     newConversation,
@@ -1093,6 +1117,7 @@ export function useGlobalChat() {
     sendMessage,
     reviseReport,
     setModelOverride,
+    togglePrivateChat,
     refetchSessions
   }
 }

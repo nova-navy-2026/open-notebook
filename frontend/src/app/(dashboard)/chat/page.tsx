@@ -204,6 +204,8 @@ export default function GlobalChatPage() {
             isDeepResearchSession={chat.isDeepResearchSession}
             onExportAll={handleExportAll}
             exportingAll={exportingAll}
+            privateMode={chat.privateMode}
+            onTogglePrivate={chat.togglePrivateChat}
           />
         </div>
       </div>

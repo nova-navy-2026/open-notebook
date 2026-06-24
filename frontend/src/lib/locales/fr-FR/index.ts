@@ -592,6 +592,9 @@ export const frFR = {
     maxFilesAllowed: "Maximum {count} fichiers autorisés par lot",
   },
   chat: {
+    privateChat: "Conversation privée",
+    privateChatActive: "Conversation privée activée — non enregistrée dans l'historique",
+    privateChatHint: "Ceci est une conversation privée. Elle n'apparaîtra pas dans votre historique.",
     newChat: "Nouvelle discussion",
     searchSessions: "Rechercher des discussions...",
     groupToday: "Aujourd'hui",

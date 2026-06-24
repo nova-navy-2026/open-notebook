@@ -417,6 +417,9 @@ export const itIT = {
     maxFilesAllowed: "Massimo {count} file consentiti per batch",
   },
   chat: {
+    privateChat: "Chat privata",
+    privateChatActive: "Chat privata attiva — non salvata nella cronologia",
+    privateChatHint: "Questa è una chat privata. Non comparirà nella cronologia.",
     sessions: "Sessioni",
     sessionTitlePlaceholder: "Digita un titolo qui...",
     noSessions: "Ancora nessuna sessione chat",
