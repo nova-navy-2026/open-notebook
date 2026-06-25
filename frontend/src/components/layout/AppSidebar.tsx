@@ -8,6 +8,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/hooks/use-auth";
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { useSidebarStore } from "@/lib/stores/sidebar-store";
 import { useCreateDialogs } from "@/lib/hooks/use-create-dialogs";
 import { useRBAC } from "@/lib/contexts/rbac-context";
@@ -30,6 +31,7 @@ import { TranslationKeys } from "@/lib/locales";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { useTheme } from "@/components/providers/ThemeProvider";
 import { Separator } from "@/components/ui/separator";
+import { SettingsModal } from "@/components/layout/SettingsModal";
 import {
   Book,
   Search,
@@ -51,8 +53,19 @@ import {
   Captions,
 } from "lucide-react";
 
-const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
-  const baseNav = [
+type NavItem = {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+type NavSection = {
+  title: string;
+  items: NavItem[];
+};
+
+const getNavigation = (t: TranslationKeys): { main: NavSection[]; admin: NavSection[] } => ({
+  main: [
     {
       title: t.navigation.collect,
       items: [{ name: t.navigation.sources, href: "/sources", icon: FileText }],
@@ -60,86 +73,48 @@ const getNavigation = (t: TranslationKeys, isAdmin: boolean) => {
     {
       title: t.navigation.process,
       items: [
-        {
-          name: t.navigation.search ?? "Search",
-          href: "/search",
-          icon: Search,
-        },
-        {
-          name: t.navigation.chat ?? "Chat",
-          href: "/chat",
-          icon: MessageCircle,
-        },
+        { name: t.navigation.search ?? "Search", href: "/search", icon: Search },
+        { name: t.navigation.chat ?? "Chat", href: "/chat", icon: MessageCircle },
         { name: t.navigation.notebooks, href: "/notebooks", icon: Book },
       ],
     },
     {
       title: t.navigation.create,
       items: [
-        {
-          name: t.navigation.research ?? "Research",
-          href: "/research",
-          icon: FlaskConical,
-        },
-        {
-          name: t.navigation.imageAnalysis ?? "Image Analysis",
-          href: "/vision/image-analysis",
-          icon: ImageIcon,
-        },
-        {
-          name: t.navigation.videoAnalysis ?? "Video Analysis",
-          href: "/vision/video-tracking",
-          icon: Video,
-        },
+        { name: t.navigation.research ?? "Research", href: "/research", icon: FlaskConical },
+        { name: t.navigation.imageAnalysis ?? "Image Analysis", href: "/vision/image-analysis", icon: ImageIcon },
+        { name: t.navigation.videoAnalysis ?? "Video Analysis", href: "/vision/video-tracking", icon: Video },
       ],
     },
-    // Route Planner is intentionally NOT shown in the sidebar — it is available
-    // only inside chat (the route agent handles "from X to Y" requests).
     {
       title: t.navigation.audio ?? "Audio",
       items: [
-        {
-          name: t.navigation.transcription ?? "Transcription",
-          href: "/transcription",
-          icon: Captions,
-        },
+        { name: t.navigation.transcription ?? "Transcription", href: "/transcription", icon: Captions },
       ],
     },
-  ];
-
-  // Manage and Admin sections only visible for admins
-  if (isAdmin) {
-    baseNav.push({
+  ],
+  admin: [
+    {
       title: t.navigation.manage,
       items: [
         { name: t.navigation.models, href: "/settings/api-keys", icon: Bot },
-        {
-          name: t.navigation.transformations,
-          href: "/transformations",
-          icon: Shuffle,
-        },
+        { name: t.navigation.transformations, href: "/transformations", icon: Shuffle },
         { name: t.navigation.settings, href: "/settings", icon: Settings },
         { name: t.navigation.advanced, href: "/advanced", icon: Wrench },
       ],
-    });
-    baseNav.push({
+    },
+    {
       title: "Admin",
       items: [
-        {
-          name: "Dashboard",
-          href: "/admin?tab=overview",
-          icon: LayoutDashboard,
-        },
+        { name: "Dashboard", href: "/admin?tab=overview", icon: LayoutDashboard },
         { name: "Ask", href: "/admin?tab=ask", icon: MessageCircleQuestion },
         { name: t.navigation.podcasts, href: "/podcasts", icon: Mic },
         { name: "Users & Roles", href: "/admin?tab=users", icon: Settings },
         { name: "Audit Logs", href: "/admin?tab=audit", icon: FileText },
       ],
-    });
-  }
-
-  return baseNav;
-};
+    },
+  ],
+});
 
 type CreateTarget =
   | "chat"
@@ -154,20 +129,22 @@ export function AppSidebar() {
   const { t } = useTranslation();
   const { isAdmin } = useRBAC();
   const { resolvedTheme } = useTheme();
-  const navigation = getNavigation(t, isAdmin);
+  const { main: mainNavigation } = getNavigation(t);
   const logoSrc =
     resolvedTheme === "dark" ? "/logo_dark.png" : "/logo_light.png";
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const { logout } = useAuth();
+  const { user } = useAuthStore();
   const { isCollapsed, toggleCollapse } = useSidebarStore();
   const { openSourceDialog, openNotebookDialog, openPodcastDialog } =
     useCreateDialogs();
-  // Kept exposed through the sidebar context (other surfaces still call them).
+  void openSourceDialog;
   void openPodcastDialog;
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const handleCreateSelection = (target: CreateTarget) => {
     setCreateMenuOpen(false);
 
@@ -194,6 +171,72 @@ export function AppSidebar() {
         router.push("/vision/video-tracking");
         break;
     }
+  };
+
+  const getBasePath = (path: string) => path.split("?")[0];
+  const getQueryParams = (path: string) => {
+    const parts = path.split("?");
+    return parts.length > 1 ? new URLSearchParams(parts[1]) : null;
+  };
+
+  const renderNavItem = (item: NavItem, section: NavSection) => {
+    const itemBasePath = getBasePath(item.href);
+    const pathnameBase = getBasePath(pathname || "");
+    const itemParams = getQueryParams(item.href);
+
+    let isActive: boolean;
+
+    if (itemParams) {
+      const itemTab = itemParams.get("tab");
+      const currentTab = searchParams.get("tab");
+      isActive = itemBasePath === pathnameBase && itemTab === currentTab;
+    } else {
+      const matches = section.items.filter((i) => {
+        const iBasePath = getBasePath(i.href);
+        return (
+          iBasePath === pathnameBase ||
+          pathnameBase?.startsWith(iBasePath + "/")
+        );
+      });
+      const bestMatch =
+        matches.length > 0
+          ? matches.sort((a, b) => b.href.length - a.href.length)[0]
+          : null;
+      isActive = bestMatch ? getBasePath(bestMatch.href) === itemBasePath : false;
+    }
+
+    const button = (
+      <Button
+        variant={isActive ? "secondary" : "ghost"}
+        className={cn(
+          "w-full gap-3 text-sidebar-foreground sidebar-menu-item",
+          isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+          isCollapsed ? "justify-center px-2" : "justify-start",
+        )}
+      >
+        <item.icon className="h-4 w-4" />
+        {!isCollapsed && <span>{item.name}</span>}
+      </Button>
+    );
+
+    if (isCollapsed) {
+      return (
+        <Tooltip key={item.name}>
+          <TooltipTrigger asChild>
+            <Link href={item.href} scroll={false}>
+              {button}
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side="right">{item.name}</TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return (
+      <Link key={item.name} href={item.href} scroll={false}>
+        {button}
+      </Link>
+    );
   };
 
   return (
@@ -258,11 +301,12 @@ export function AppSidebar() {
 
         <nav
           className={cn(
-            "flex-1 space-y-1 py-4 overflow-y-auto",
+            "flex-1 flex flex-col pt-1 pb-2 overflow-hidden",
             isCollapsed ? "px-2" : "px-3",
           )}
         >
-          <div className={cn("mb-4", isCollapsed ? "px-0" : "px-3")}>
+          {/* Create button */}
+          <div className={cn("mb-2", isCollapsed ? "px-0" : "px-3")}>
             <DropdownMenu
               open={createMenuOpen}
               onOpenChange={setCreateMenuOpen}
@@ -379,186 +423,120 @@ export function AppSidebar() {
             </DropdownMenu>
           </div>
 
-          {navigation.map((section, index) => (
-            <div key={section.title}>
-              {index > 0 && <Separator className="my-3" />}
-              <div className="space-y-1">
-                {!isCollapsed && (
-                  <h3 className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/60">
-                    {section.title}
-                  </h3>
-                )}
-
-                {section.items.map((item) => {
-                  // Extract base path and query parameters
-                  const getBasePath = (path: string) => path.split("?")[0];
-                  const getQueryParams = (path: string) => {
-                    const parts = path.split("?");
-                    return parts.length > 1
-                      ? new URLSearchParams(parts[1])
-                      : null;
-                  };
-
-                  const itemBasePath = getBasePath(item.href);
-                  const pathnameBase = getBasePath(pathname || "");
-                  const itemParams = getQueryParams(item.href);
-
-                  // For exact match with query parameters (e.g., admin tabs)
-                  if (itemParams) {
-                    const itemTab = itemParams.get("tab");
-                    const currentTab = searchParams.get("tab");
-                    const isActive =
-                      itemBasePath === pathnameBase && itemTab === currentTab;
-
-                    const button = (
-                      <Button
-                        variant={isActive ? "secondary" : "ghost"}
-                        className={cn(
-                          "w-full gap-3 text-sidebar-foreground sidebar-menu-item",
-                          isActive &&
-                            "bg-sidebar-accent text-sidebar-accent-foreground",
-                          isCollapsed ? "justify-center px-2" : "justify-start",
-                        )}
-                      >
-                        <item.icon className="h-4 w-4" />
-                        {!isCollapsed && <span>{item.name}</span>}
-                      </Button>
-                    );
-
-                    if (isCollapsed) {
-                      return (
-                        <Tooltip key={item.name}>
-                          <TooltipTrigger asChild>
-                            <Link href={item.href} scroll={false}>
-                              {button}
-                            </Link>
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            {item.name}
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    }
-
-                    return (
-                      <Link key={item.name} href={item.href} scroll={false}>
-                        {button}
-                      </Link>
-                    );
-                  }
-
-                  // Original logic for non-parameterized routes
-                  const matches = section.items.filter((i) => {
-                    const iBasePath = getBasePath(i.href);
-                    return (
-                      iBasePath === pathnameBase ||
-                      pathnameBase?.startsWith(iBasePath + "/")
-                    );
-                  });
-                  const bestMatch =
-                    matches.length > 0
-                      ? matches.sort((a, b) => b.href.length - a.href.length)[0]
-                      : null;
-                  const isActive = bestMatch
-                    ? getBasePath(bestMatch.href) === itemBasePath
-                    : false;
-                  const button = (
-                    <Button
-                      variant={isActive ? "secondary" : "ghost"}
-                      className={cn(
-                        "w-full gap-3 text-sidebar-foreground sidebar-menu-item",
-                        isActive &&
-                          "bg-sidebar-accent text-sidebar-accent-foreground",
-                        isCollapsed ? "justify-center px-2" : "justify-start",
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {!isCollapsed && <span>{item.name}</span>}
-                    </Button>
-                  );
-
-                  if (isCollapsed) {
-                    return (
-                      <Tooltip key={item.name}>
-                        <TooltipTrigger asChild>
-                          <Link href={item.href} scroll={false}>
-                            {button}
-                          </Link>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          {item.name}
-                        </TooltipContent>
-                      </Tooltip>
-                    );
-                  }
-
-                  return (
-                    <Link key={item.name} href={item.href} scroll={false}>
-                      {button}
-                    </Link>
-                  );
-                })}
+          {/* Main navigation — spread evenly to fill available height */}
+          <div className="flex-1 min-h-0 flex flex-col justify-evenly">
+            {mainNavigation.map((section, index) => (
+              <div key={section.title}>
+                {index > 0 && <Separator className="my-2" />}
+                <div className="space-y-1">
+                  {!isCollapsed && (
+                    <h3 className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/60">
+                      {section.title}
+                    </h3>
+                  )}
+                  {section.items.map((item) => renderNavItem(item, section))}
+                </div>
               </div>
+            ))}
+          </div>
+
+          {/* Settings button — bottom of nav, admins only */}
+          {isAdmin && (
+            <div className="pt-2">
+              <Separator className="mb-2" />
+              {isCollapsed ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-center px-2 text-sidebar-foreground sidebar-menu-item"
+                      onClick={() => setSettingsOpen(true)}
+                      aria-label="Settings"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Settings</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start gap-3 text-sidebar-foreground sidebar-menu-item"
+                  onClick={() => setSettingsOpen(true)}
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </Button>
+              )}
             </div>
-          ))}
+          )}
         </nav>
 
         <div
           className={cn(
-            "border-t border-sidebar-border p-3 space-y-2",
-            isCollapsed && "px-2",
+            "border-t border-sidebar-border py-2 px-3",
+            isCollapsed ? "px-2" : "",
           )}
         >
-          <div
-            className={cn(
-              "flex flex-col gap-2",
-              isCollapsed ? "items-center" : "items-stretch",
-            )}
-          >
-            {isCollapsed ? (
-              <>
+          {isCollapsed ? (
+            <div className="flex flex-col items-center">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="w-full flex justify-center">
+                    <UserProfileMenu />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="right">{t.common.account}</TooltipContent>
+              </Tooltip>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <UserProfileMenu />
+              {user && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div>
+                    <div className="flex min-w-0 flex-1 flex-col leading-tight cursor-default select-none pointer-events-auto">
+                      <span className="truncate text-sm font-medium text-sidebar-foreground">
+                        {user.name || user.email}
+                      </span>
+                      {user.name && (
+                        <span className="truncate text-xs text-sidebar-foreground/60">
+                          {user.email}
+                        </span>
+                      )}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <div className="flex flex-col gap-0.5">
+                      {user.name && <span className="font-medium">{user.name}</span>}
+                      <span className="text-xs">{user.email}</span>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              <div className="flex gap-1 shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="w-9">
                       <ThemeToggle iconOnly />
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="right">{t.common.theme}</TooltipContent>
+                  <TooltipContent side="top">{t.common.theme}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div>
+                    <div className="w-9">
                       <LanguageToggle iconOnly />
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {t.common.language}
-                  </TooltipContent>
+                  <TooltipContent side="top">{t.common.language}</TooltipContent>
                 </Tooltip>
-              </>
-            ) : (
-              <>
-                <ThemeToggle />
-                <LanguageToggle />
-              </>
-            )}
-          </div>
-
-          {isCollapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="w-full flex justify-center">
-                  <UserProfileMenu />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="right">{t.common.account}</TooltipContent>
-            </Tooltip>
-          ) : (
-            <div className="w-full">
-              <UserProfileMenu />
+              </div>
             </div>
           )}
         </div>
+
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
     </TooltipProvider>
   );
