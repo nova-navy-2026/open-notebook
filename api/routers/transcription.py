@@ -15,6 +15,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from loguru import logger
+from pydantic import BaseModel
 
 from api.auth import get_current_user_id
 from api.chat_agent_log_service import build_chat_agent_event, write_chat_agent_event
@@ -406,3 +407,71 @@ async def transcribe(
                 os.remove(_cleanup_path)
             except OSError:
                 pass
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    target_language: str  # e.g. "English", "Portuguese"
+
+
+@router.post("/transcription/translate")
+async def translate_transcript(
+    request: TranslateRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Translate text using the configured language model."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty.")
+    if not request.target_language.strip():
+        raise HTTPException(status_code=400, detail="Target language cannot be empty.")
+
+    started_at = perf_counter()
+    logger.info(
+        "ChatAgent tool start | agent=translation tool=transcription.translate "
+        "target_language={!r} text_chars={}",
+        request.target_language,
+        len(request.text),
+    )
+
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from open_notebook.ai.provision import provision_langchain_model
+
+        model = await provision_langchain_model(
+            content=request.text,
+            model_id=None,
+            default_type="chat",
+        )
+
+        messages = [
+            SystemMessage(content=(
+                f"You are a professional translator. "
+                f"Translate the following text into {request.target_language}. "
+                "Preserve the original structure, formatting, and technical terminology exactly. "
+                "Return only the translated text with no additional commentary."
+            )),
+            HumanMessage(content=request.text),
+        ]
+
+        response = await model.ainvoke(messages)
+        translated = response.content if hasattr(response, "content") else str(response)
+
+        logger.success(
+            "ChatAgent tool success | agent=translation tool=transcription.translate "
+            "duration_ms={} target_language={!r} translated_chars={}",
+            round((perf_counter() - started_at) * 1000),
+            request.target_language,
+            len(translated),
+        )
+        return {"translated_text": translated, "target_language": request.target_language}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "ChatAgent tool failure | agent=translation tool=transcription.translate "
+            "duration_ms={} error={}",
+            round((perf_counter() - started_at) * 1000),
+            e,
+        )
+        raise HTTPException(status_code=500, detail=f"Translation failed: {e}")

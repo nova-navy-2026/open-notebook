@@ -7,6 +7,7 @@ import {
   Captions,
   Copy,
   Download,
+  Languages,
   Loader2,
   Sparkles,
   Upload,
@@ -32,6 +33,7 @@ import { useTranscriptionStore } from "@/lib/stores/transcription-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 import { SaveTranscriptToNotebook } from "@/components/transcription/SaveTranscriptToNotebook";
+import { transcriptionApi } from "@/lib/api/transcription";
 
 // Stable colour palette for speaker badges (Tailwind classes).
 const SPEAKER_PALETTE = [
@@ -91,6 +93,12 @@ export default function TranscriptionPage() {
   >("ata");
   const router = useRouter();
 
+  // Translation state
+  const [translateTarget, setTranslateTarget] = useState("en");
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+
   // Send the current transcript to the Research page so the user can
   // produce a Deep Research report from it (and then save the report
   // into a notebook just like any other research job).
@@ -123,6 +131,31 @@ export default function TranscriptionPage() {
     }
     router.push("/research?fromTranscript=1");
   }, [result, router, reportTitle, reportType, appLanguage]);
+
+  const handleTranslate = useCallback(async () => {
+    if (!result) return;
+    const textToTranslate = (
+      result.dialog && result.dialog.trim().length > 0
+        ? result.dialog
+        : result.text || ""
+    ).trim();
+    if (!textToTranslate) return;
+
+    const languageName = translateTarget === "pt" ? "European Portuguese (pt-PT)" : "English";
+    setIsTranslating(true);
+    setTranslateError(null);
+    setTranslatedText(null);
+    try {
+      const res = await transcriptionApi.translate(textToTranslate, languageName);
+      setTranslatedText(res.translated_text);
+    } catch (e) {
+      setTranslateError(
+        e instanceof Error ? e.message : (tp.translateError ?? "Translation failed."),
+      );
+    } finally {
+      setIsTranslating(false);
+    }
+  }, [result, translateTarget, tp.translateError]);
 
   useEffect(() => {
     fetchCapabilities();
@@ -181,6 +214,8 @@ export default function TranscriptionPage() {
   const clearAll = () => {
     clear();
     if (fileInputRef.current) fileInputRef.current.value = "";
+    setTranslatedText(null);
+    setTranslateError(null);
   };
 
   const copyText = async (text: string | null | undefined) => {
@@ -446,19 +481,19 @@ export default function TranscriptionPage() {
               <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={() => copyText(result.text)}
+                  title={tp.copy}
                 >
-                  <Copy className="h-4 w-4 mr-1" />
-                  {tp.copy}
+                  <Copy className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={() => downloadText(result.text, "")}
+                  title={tp.download}
                 >
-                  <Download className="h-4 w-4 mr-1" />
-                  {tp.download}
+                  <Download className="h-4 w-4" />
                 </Button>
                 <SaveTranscriptToNotebook
                   content={result.text || ""}
@@ -467,10 +502,71 @@ export default function TranscriptionPage() {
                 />
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <p className="whitespace-pre-wrap text-sm leading-relaxed">
                 {result.text || tp.emptyTranscript}
               </p>
+
+              {/* Translate — inline below the transcript */}
+              <div className="border-t pt-4 flex flex-col gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Languages className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <Select value={translateTarget} onValueChange={setTranslateTarget}>
+                    <SelectTrigger className="w-36 h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="en">{tp.languageEnglish}</SelectItem>
+                      <SelectItem value="pt">{tp.languagePortuguese}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTranslate}
+                    disabled={isTranslating || (!result.text && !result.dialog)}
+                  >
+                    {isTranslating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {isTranslating ? (tp.translating ?? "Translating…") : (tp.translate ?? "Translate")}
+                  </Button>
+                </div>
+                {translateError && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{translateError}</AlertDescription>
+                  </Alert>
+                )}
+                {translatedText && (
+                  <div className="border rounded-lg p-3 bg-muted/30">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-xs text-muted-foreground font-medium">
+                        {tp.translationResult ?? "Translation"}
+                      </span>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => copyText(translatedText)}
+                          title={tp.copy}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => downloadText(translatedText, "_translated")}
+                          title={tp.download}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                      {translatedText}
+                    </p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -484,19 +580,19 @@ export default function TranscriptionPage() {
                 <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon"
                     onClick={() => copyText(result.dialog ?? "")}
+                    title={tp.copy}
                   >
-                    <Copy className="h-4 w-4 mr-1" />
-                    {tp.copy}
+                    <Copy className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon"
                     onClick={() => downloadText(result.dialog ?? "", "_dialog")}
+                    title={tp.download}
                   >
-                    <Download className="h-4 w-4 mr-1" />
-                    {tp.download}
+                    <Download className="h-4 w-4" />
                   </Button>
                 </div>
               </CardHeader>

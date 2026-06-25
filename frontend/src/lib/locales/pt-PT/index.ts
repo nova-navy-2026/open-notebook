@@ -1355,6 +1355,12 @@ export const ptPT = {
     saveToNotebookDescription:
       "Escolha um bloco de notas para guardar a transcrição como nota.",
     defaultNoteTitle: "Transcrição",
+    translateLabel: "Traduzir transcrição",
+    translateTargetLabel: "Idioma de destino",
+    translate: "Traduzir",
+    translating: "A traduzir…",
+    translationResult: "Tradução",
+    translateError: "A tradução falhou. Por favor tente novamente.",
   },
   collaboration: {
     share: "Partilhar",
