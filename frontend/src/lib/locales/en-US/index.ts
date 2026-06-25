@@ -1352,6 +1352,12 @@ export const enUS = {
     saveToNotebookDescription:
       "Choose a notebook to save the transcript as a note.",
     defaultNoteTitle: "Transcript",
+    translateLabel: "Translate transcript",
+    translateTargetLabel: "Target language",
+    translate: "Translate",
+    translating: "Translating…",
+    translationResult: "Translation",
+    translateError: "Translation failed. Please try again.",
   },
   collaboration: {
     share: "Share",

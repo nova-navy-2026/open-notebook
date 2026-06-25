@@ -18,6 +18,11 @@ export interface TranscriptionResult {
   model?: string
 }
 
+export interface TranslationResult {
+  translated_text: string
+  target_language: string
+}
+
 export const transcriptionApi = {
   transcribe: async (
     file: File,
@@ -48,6 +53,14 @@ export const transcriptionApi = {
       '/transcription/transcribe',
       form,
     )
+    return response.data
+  },
+
+  translate: async (text: string, targetLanguage: string): Promise<TranslationResult> => {
+    const response = await apiClient.post<TranslationResult>('/transcription/translate', {
+      text,
+      target_language: targetLanguage,
+    })
     return response.data
   },
 }

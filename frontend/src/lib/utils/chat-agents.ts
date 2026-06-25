@@ -293,6 +293,10 @@ export function detectTextAgentInstruction(message: string): string | undefined 
     return '[Modo agente: Auditoria de qualidade de fontes]\nAudita a resposta/relatório/contexto disponível. Organiza por: claims principais, evidência disponível, claims sem suporte, fontes fracas ou desatualizadas, contradições, lacunas de informação, nível de confiança e recomendações de validação. Não inventes fontes. Se falta evidência, diz explicitamente.'
   }
 
+  if (/\b(traduz|traduzir|translate|translation|traducao|tradução|traduzido|em ingles|em inglês|em portugues|em português|para ingles|para inglês|para portugues|para português|in english|in portuguese)\b/.test(text)) {
+    return '[Modo agente: Tradução]\nTraduz o texto ou o conteúdo relevante dos documentos para o idioma indicado pelo utilizador. Se o utilizador não especificar o idioma alvo, traduz para inglês. Preserva a estrutura, formatação e terminologia técnica original. Não adiciones comentários ou explicações fora do texto traduzido.'
+  }
+
   return undefined
 }
 
