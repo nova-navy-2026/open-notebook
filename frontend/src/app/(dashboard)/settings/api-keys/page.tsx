@@ -1158,7 +1158,7 @@ function DefaultModelSelectors({
         )}
 
         {/* Primary models: Chat, Embedding, TTS, STT */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {primaryConfigs.map(config => {
             const available = getModelsForType(config.modelType)
             const currentValue = watch(config.key) || undefined
@@ -1166,7 +1166,7 @@ function DefaultModelSelectors({
 
             return (
               <div key={config.key} className="space-y-1 min-w-0">
-                <Label htmlFor={config.id} className="text-xs">
+                <Label htmlFor={config.id} className="text-sm">
                   {config.label}
                   {config.required && <span className="text-destructive ml-0.5">*</span>}
                 </Label>
@@ -1177,7 +1177,7 @@ function DefaultModelSelectors({
                   >
                     <SelectTrigger
                       id={config.id}
-                      className={`h-8 text-xs w-full min-w-0 ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
+                      className={`h-9 text-sm w-full min-w-0 [&>span]:truncate ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
                     >
                       <SelectValue placeholder={
                         config.required && !isValid && available.length > 0
@@ -1210,7 +1210,7 @@ function DefaultModelSelectors({
         {/* Advanced models: Transformation, Tools, Large Context */}
         <div className="border-t pt-3">
           <p className="text-xs text-muted-foreground mb-3">{t.navigation.advanced}</p>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {advancedConfigs.map(config => {
                 const available = getModelsForType(config.modelType)
                 const currentValue = watch(config.key) || undefined
@@ -1218,7 +1218,7 @@ function DefaultModelSelectors({
 
                 return (
                   <div key={config.key} className="space-y-1 min-w-0">
-                    <Label htmlFor={config.id} className="text-xs">
+                    <Label htmlFor={config.id} className="text-sm">
                       {config.label}
                       {config.required && <span className="text-destructive ml-0.5">*</span>}
                     </Label>
@@ -1229,7 +1229,7 @@ function DefaultModelSelectors({
                       >
                         <SelectTrigger
                           id={config.id}
-                          className={`h-8 text-xs w-full min-w-0 ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
+                          className={`h-9 text-sm w-full min-w-0 [&>span]:truncate ${config.required && !isValid && available.length > 0 ? 'border-destructive' : ''}`}
                         >
                           <SelectValue placeholder={
                             config.required && !isValid && available.length > 0
@@ -1254,7 +1254,7 @@ function DefaultModelSelectors({
                         </Button>
                       )}
                     </div>
-                    <p className="text-[10px] text-muted-foreground leading-tight">{config.description}</p>
+                    <p className="text-xs text-muted-foreground leading-tight">{config.description}</p>
                   </div>
                 )
               })}
