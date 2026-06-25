@@ -218,7 +218,7 @@ export function ResearchGeneratePanel({
                 t.research?.queryPlaceholder ??
                 "e.g., How does strict compliance with safety protocols by the duty officer during the handling of missiles, torpedoes, and explosives prevent accidents and protect the materials under their responsibility?"
               }
-              className="min-h-[140px] flex-1 resize-none text-sm"
+              className="min-h-[140px] max-h-[55vh] flex-1 resize-none overflow-auto text-sm [field-sizing:fixed]"
               disabled={isSubmitting}
             />
             <div className="space-y-1.5">
