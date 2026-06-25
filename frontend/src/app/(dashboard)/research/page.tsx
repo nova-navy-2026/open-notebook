@@ -12,7 +12,7 @@ export default function ResearchPage() {
   const [activeTab, setActiveTab] = useState("generate");
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex flex-col">
       <div className="app-page space-y-6">
       <div className="space-y-2">
         <div className="flex items-center gap-2">
@@ -29,10 +29,10 @@ export default function ResearchPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="generate">
+          <TabsTrigger value="generate" className="whitespace-nowrap">
             {t.research?.newResearch ?? "New Research"}
           </TabsTrigger>
-          <TabsTrigger value="jobs">
+          <TabsTrigger value="jobs" className="whitespace-nowrap">
             {t.research?.history ?? "History"}
           </TabsTrigger>
         </TabsList>

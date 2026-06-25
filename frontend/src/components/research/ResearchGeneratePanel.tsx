@@ -17,7 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Loader2, Search, Sparkles } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import {
   useReportTypes,
   useResearchTones,
@@ -190,143 +190,128 @@ export function ResearchGeneratePanel({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="app-form space-y-6">
-      {/* Research Query */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-5 w-5" />
-            {t.research?.queryTitle ?? "Research Query"}
-          </CardTitle>
-          <CardDescription>
-            {t.research?.queryDescription ??
-              "Enter your research question or topic. Be specific for better results."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {fromTranscript && (
-            <div className="mb-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
-              {t.research?.transcriptAtaNotice ??
-                "Pre-filled from the latest transcription. A meeting-minutes (ATA) document will be generated directly from the transcript in the conversation language — no OpenSearch context is used. Edit before generating if needed."}
-            </div>
-          )}
-          <Textarea
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              t.research?.queryPlaceholder ??
-              "e.g., How does strict compliance with safety protocols by the duty officer during the handling of missiles, torpedoes, and explosives prevent accidents and protect the materials under their responsibility?"
-            }
-            className="min-h-[100px] text-base"
-            disabled={isSubmitting}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Report Configuration */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Report Type */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              {t.research?.reportType ?? "Report Type"}
+    <form onSubmit={handleSubmit} className="w-full space-y-5">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
+        {/* Left column: Query + Model */}
+        <Card className="flex flex-col lg:col-span-3">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              {t.research?.queryTitle ?? "Research Query"}
             </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Select
-              value={reportType}
-              onValueChange={handleReportTypeChange}
-              disabled={isSubmitting || availableReportTypes.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t.research?.reportType ?? "Report Type"} />
-              </SelectTrigger>
-              <SelectContent>
-                {availableReportTypes.map((rt) => (
-                  <SelectItem
-                    key={rt.value}
-                    value={rt.value}
-                    title={rt.description}
-                  >
-                    {rt.label}
-                    {rt.speed ? ` (${rt.speed})` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {selectedReportTypeInfo?.description ?? ""}
-              {" - "}
-              {selectedReportTypeInfo?.speed ?? ""}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Tone */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              {t.research?.toneLabel ?? "Writing Tone"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Select
-              value={tone}
-              onValueChange={handleToneChange}
-              disabled={isSubmitting || availableTones.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t.research?.toneLabel ?? "Writing Tone"} />
-              </SelectTrigger>
-              <SelectContent>
-                {availableTones.map((tn) => (
-                  <SelectItem key={tn.value} value={tn.value}>
-                    {tn.label} — {tn.description}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-
-        {/* Model Selection */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Sparkles className="h-4 w-4" />
-              {t.research?.modelLabel ?? "AI Model"}
-            </CardTitle>
-            <CardDescription>
-              {t.research?.modelLabelDesc ??
-                "Select the language model to use for generating the report."}
+            <CardDescription className="text-xs">
+              {t.research?.queryDescription ??
+                "Enter your research question or topic. Be specific for better results."}
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ModelSelector
-              modelType="language"
-              value={modelId}
-              onChange={handleModelChange}
+          <CardContent className="flex flex-col gap-4 flex-1">
+            {fromTranscript && (
+              <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                {t.research?.transcriptAtaNotice ??
+                  "Pre-filled from the latest transcription. A meeting-minutes (ATA) document will be generated directly from the transcript in the conversation language — no OpenSearch context is used. Edit before generating if needed."}
+              </div>
+            )}
+            <Textarea
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder={
-                t.research?.selectModelPlaceholder ?? "Select a model..."
+                t.research?.queryPlaceholder ??
+                "e.g., How does strict compliance with safety protocols by the duty officer during the handling of missiles, torpedoes, and explosives prevent accidents and protect the materials under their responsibility?"
               }
+              className="min-h-[140px] flex-1 resize-none text-sm"
               disabled={isSubmitting}
             />
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {t.research?.modelLabel ?? "AI Model"}
+              </label>
+              <ModelSelector
+                modelType="language"
+                value={modelId}
+                onChange={handleModelChange}
+                placeholder={t.research?.selectModelPlaceholder ?? "Select a model..."}
+                disabled={isSubmitting}
+              />
+            </div>
           </CardContent>
         </Card>
+
+        {/* Right column: Report Type + Tone */}
+        <div className="flex flex-col gap-5 lg:col-span-2">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">
+                {t.research?.reportType ?? "Report Type"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Select
+                value={reportType}
+                onValueChange={handleReportTypeChange}
+                disabled={isSubmitting || availableReportTypes.length === 0}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={t.research?.reportType ?? "Report Type"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableReportTypes.map((rt) => (
+                    <SelectItem key={rt.value} value={rt.value} title={rt.description}>
+                      {rt.label}
+                      {rt.speed ? ` (${rt.speed})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedReportTypeInfo?.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {selectedReportTypeInfo.description}
+                  {selectedReportTypeInfo.speed && (
+                    <span className="ml-1 font-medium">— {selectedReportTypeInfo.speed}</span>
+                  )}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">
+                {t.research?.toneLabel ?? "Writing Tone"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Select
+                value={tone}
+                onValueChange={handleToneChange}
+                disabled={isSubmitting || availableTones.length === 0}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={t.research?.toneLabel ?? "Writing Tone"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTones.map((tn) => (
+                    <SelectItem key={tn.value} value={tn.value}>
+                      {tn.label} — {tn.description}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedToneInfo?.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {selectedToneInfo.description}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Submit */}
-      <div className="flex justify-end">
+      <div className="flex justify-end pt-1">
         <Button
           type="submit"
           size="lg"
-          disabled={
-            !query.trim() ||
-            isSubmitting ||
-            isLoading ||
-            !reportType ||
-            !tone
-          }
+          disabled={!query.trim() || isSubmitting || isLoading || !reportType || !tone}
           className="min-w-[200px]"
         >
           {isSubmitting ? (
