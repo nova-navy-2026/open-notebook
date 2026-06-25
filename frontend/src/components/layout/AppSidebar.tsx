@@ -479,23 +479,7 @@ export function AppSidebar() {
           )}
         >
           {isCollapsed ? (
-            <div className="flex flex-col items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="w-full">
-                    <ThemeToggle iconOnly />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="right">{t.common.theme}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="w-full">
-                    <LanguageToggle iconOnly />
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="right">{t.common.language}</TooltipContent>
-              </Tooltip>
+            <div className="flex flex-col items-center">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className="w-full flex justify-center">
