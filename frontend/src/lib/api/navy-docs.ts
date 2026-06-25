@@ -19,6 +19,19 @@ export interface NavyDocumentListResponse {
   total: number
 }
 
+export interface NavyDocumentContent {
+  doc_id: string
+  title: string
+  content: string
+  chunk_count: number
+  document_type?: string
+  document_status?: string
+  access_scope?: string
+  classification_level?: number | null
+  creator_department?: string
+  source?: string
+}
+
 export interface NavySearchRequest {
   query: string
   doc_ids?: string[]
@@ -91,6 +104,34 @@ export interface DocumentGraphResponse {
 // API functions
 export const navyDocsApi = {
   /** List all unique documents in the navy corpus */
+  getContent: async (docId: string): Promise<NavyDocumentContent> => {
+    const response = await apiClient.get<NavyDocumentContent>('/navy-docs/content', {
+      params: { doc_id: docId },
+    })
+    return response.data
+  },
+
+  getInsights: async (docId: string): Promise<{ doc_id: string; insights: string }> => {
+    const response = await apiClient.get<{ doc_id: string; insights: string }>(
+      '/navy-docs/insights',
+      { params: { doc_id: docId } },
+    )
+    return response.data
+  },
+
+  chat: async (data: {
+    doc_id: string
+    message: string
+    history?: { role: 'human' | 'ai'; content: string }[]
+    model_id?: string
+  }): Promise<{ answer: string; used_chunks: number }> => {
+    const response = await apiClient.post<{ answer: string; used_chunks: number }>(
+      '/navy-docs/chat',
+      data,
+    )
+    return response.data
+  },
+
   list: async (): Promise<NavyDocumentListResponse> => {
     const response = await apiClient.get<NavyDocumentListResponse>('/navy-docs')
     return response.data

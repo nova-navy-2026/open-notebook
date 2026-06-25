@@ -16,6 +16,7 @@ from api.auth import get_navy_acl_user_id, is_admin
 from fastapi import Request
 from open_notebook.search.navy_docs import (
     build_document_graph,
+    get_navy_document_content,
     list_navy_documents,
     search_navy_documents,
 )
@@ -44,6 +45,43 @@ class NavyDocument(BaseModel):
 class NavyDocumentListResponse(BaseModel):
     documents: List[NavyDocument]
     total: int
+
+
+class NavyDocumentContentResponse(BaseModel):
+    """Full text + metadata of a single navy document (ACL-checked)."""
+
+    doc_id: str
+    title: str
+    content: str
+    chunk_count: int = 0
+    document_type: str = ""
+    document_status: str = ""
+    access_scope: str = ""
+    classification_level: Optional[int] = None
+    creator_department: str = ""
+    source: str = ""
+
+
+class NavyDocChatMessage(BaseModel):
+    role: str = "human"  # "human" | "ai"
+    content: str = ""
+
+
+class NavyDocChatRequest(BaseModel):
+    doc_id: str
+    message: str = Field(..., min_length=1)
+    history: Optional[List[NavyDocChatMessage]] = None
+    model_id: Optional[str] = None
+
+
+class NavyDocChatResponse(BaseModel):
+    answer: str
+    used_chunks: int = 0
+
+
+class NavyDocInsightsResponse(BaseModel):
+    doc_id: str
+    insights: str = ""
 
 
 class NavySearchRequest(BaseModel):
@@ -158,6 +196,152 @@ async def get_navy_documents(
     except Exception as e:
         logger.error(f"Error listing navy documents: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing navy documents: {e}")
+
+
+@router.get("/navy-docs/content", response_model=NavyDocumentContentResponse)
+async def get_navy_doc_content(
+    doc_id: str,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
+    """Return one navy document's full text + metadata, ACL-checked.
+
+    404 when the document doesn't exist OR the caller may not read it
+    (fail-closed for users with no navy identity).
+    """
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        doc = await get_navy_document_content(doc_id=doc_id, user_id=user_id)
+    except Exception as e:
+        logger.error(f"Error fetching navy document content for {doc_id!r}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching document: {e}")
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return NavyDocumentContentResponse(**doc)
+
+
+@router.post("/navy-docs/chat", response_model=NavyDocChatResponse)
+async def navy_doc_chat(
+    request: NavyDocChatRequest,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
+    """Answer a question about a SINGLE navy document (RAG over that doc only).
+
+    ACL-enforced: retrieval is scoped to ``doc_id`` AND the user's clearance +
+    departments (``search_navy_documents`` applies ``build_opensearch_filter``),
+    so a user who may not read the document gets no excerpts → the model can't
+    surface its content. Fail-closed for users with no navy identity.
+    """
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        # Retrieve the most relevant chunks, restricted to this document and the
+        # caller's access profile (clearance + department).
+        results = await search_navy_documents(
+            query=request.message,
+            doc_ids=[request.doc_id],
+            k=8,
+            user_id=user_id,
+        )
+
+        context = "\n\n".join(
+            f"[{r.get('section_title') or 'excerpt'}]\n{r.get('content', '')}"
+            for r in results
+            if r.get("content")
+        )
+
+        from langchain_core.messages import (
+            AIMessage,
+            HumanMessage,
+            SystemMessage,
+        )
+        from open_notebook.ai.provision import provision_langchain_model
+        from open_notebook.utils.text_utils import extract_text_content
+
+        system = (
+            "You are answering questions about ONE specific document. Use ONLY "
+            "the excerpts below — do not use outside knowledge. If the answer is "
+            "not in them, say you could not find it in this document. Reply in "
+            "the same language as the user's question.\n\n"
+            "Document excerpts:\n"
+            f"{context if context else '(no relevant excerpts found)'}"
+        )
+        messages = [SystemMessage(content=system)]
+        for m in (request.history or [])[-10:]:
+            text = (m.content or "").strip()
+            if not text:
+                continue
+            if (m.role or "").lower() in ("ai", "assistant"):
+                messages.append(AIMessage(content=text))
+            else:
+                messages.append(HumanMessage(content=text))
+        messages.append(HumanMessage(content=request.message))
+
+        model = await provision_langchain_model(
+            system + request.message, request.model_id, "chat", max_tokens=2048
+        )
+        ai = await model.ainvoke(messages)
+        answer = extract_text_content(getattr(ai, "content", "")) or ""
+        return NavyDocChatResponse(answer=answer, used_chunks=len(results))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Navy doc chat failed for {request.doc_id!r}: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
+
+
+@router.get("/navy-docs/insights", response_model=NavyDocInsightsResponse)
+async def navy_doc_insights(
+    doc_id: str,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+):
+    """Generate concise AI insights for one navy document (ACL-checked).
+
+    Generated on demand from the document's text (no copy/Source is created).
+    404 when the caller may not read the document.
+    """
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        doc = await get_navy_document_content(doc_id=doc_id, user_id=user_id)
+    except Exception as e:
+        logger.error(f"Error fetching navy document for insights {doc_id!r}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching document: {e}")
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    content = (doc.get("content") or "").strip()
+    if not content:
+        return NavyDocInsightsResponse(doc_id=doc_id, insights="")
+
+    # Cap the prompt size; the model auto-upgrades to large-context above 105k
+    # tokens, but capping keeps insights fast/cheap.
+    excerpt = content[:30000]
+    prompt = (
+        "Analyse the following document and produce concise, useful insights "
+        "in the same language as the document. Use Markdown with these parts:\n"
+        "1. A 2-3 sentence summary.\n"
+        "2. 4-7 key points as bullets.\n"
+        "3. Notable entities / dates / references, if any.\n\n"
+        f"Document:\n{excerpt}"
+    )
+
+    try:
+        from langchain_core.messages import HumanMessage
+        from open_notebook.ai.provision import provision_langchain_model
+        from open_notebook.utils.text_utils import extract_text_content
+
+        model = await provision_langchain_model(
+            excerpt, None, "transformation", max_tokens=1500
+        )
+        ai = await model.ainvoke([HumanMessage(content=prompt)])
+        insights = extract_text_content(getattr(ai, "content", "")) or ""
+        return NavyDocInsightsResponse(doc_id=doc_id, insights=insights)
+    except Exception as e:
+        logger.error(f"Navy doc insights failed for {doc_id!r}: {e}")
+        raise HTTPException(status_code=500, detail=f"Insights failed: {e}")
 
 
 @router.post("/navy-docs/search", response_model=NavySearchResponse)

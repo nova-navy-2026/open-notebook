@@ -233,13 +233,14 @@ export function SourcesColumn({
               <div className="flex items-center justify-center py-8">
                 <LoadingSpinner />
               </div>
-            ) : !sources || sources.length === 0 ? (
+            ) : (!sources || sources.length === 0) &&
+              (selectedNavyDocIds?.size ?? 0) === 0 ? (
               <EmptyState
                 icon={FileText}
                 title={t.sources.noSourcesYet}
                 description={t.sources.createFirstSource}
               />
-            ) : (
+            ) : sources && sources.length > 0 ? (
               <div className="space-y-2">
                 {sources.map((source) => (
                   <SourceCard
@@ -269,7 +270,7 @@ export function SourcesColumn({
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
 
             {/* Navy Corpus Knowledge Base */}
             {selectedNavyDocIds &&

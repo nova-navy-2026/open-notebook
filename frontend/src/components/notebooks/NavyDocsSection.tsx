@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NavyDocViewerDialog } from "@/components/notebooks/NavyDocViewerDialog";
 import {
   Select,
   SelectContent,
@@ -77,6 +78,8 @@ export function NavyDocsSection({
   const [groupBy, setGroupBy] = useState<GroupByKey>("department");
   // Track which groups the user has explicitly OPENED (empty = all collapsed).
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // Doc whose read-only content viewer is open (null = closed).
+  const [viewDocId, setViewDocId] = useState<string | null>(null);
 
   // Collapse all groups whenever the grouping dimension changes.
   useEffect(() => {
@@ -215,8 +218,20 @@ export function NavyDocsSection({
           />
         )}
         <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate" title={doc.doc_id}>
+        <div
+          className="flex-1 min-w-0 cursor-pointer"
+          role="button"
+          tabIndex={0}
+          onClick={() => setViewDocId(doc.doc_id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setViewDocId(doc.doc_id);
+            }
+          }}
+          title={doc.doc_id}
+        >
+          <div className="text-sm font-medium truncate hover:underline">
             {label}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-1">
@@ -485,6 +500,15 @@ export function NavyDocsSection({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      <NavyDocViewerDialog
+        docId={viewDocId}
+        open={viewDocId !== null}
+        onOpenChange={(o) => {
+          if (!o) setViewDocId(null);
+        }}
+        classificationLabel={classificationLabel}
+      />
     </div>
   );
 }

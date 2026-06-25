@@ -213,6 +213,117 @@ async def _list_navy_documents_uncached(
         raise
 
 
+async def get_navy_document_content(
+    doc_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Fetch one navy document's full text + metadata from OpenSearch.
+
+    ACL-enforced: returns ``None`` when the document does not exist OR the user
+    is not allowed to read it (fail-closed for missing/unknown identities). The
+    text is taken from the stored ``parent_content`` when present, otherwise it
+    is stitched together from the document's de-duplicated chunks, ordered by
+    page.
+    """
+    from open_notebook.access_control import access_enabled, build_opensearch_filter
+
+    if not doc_id:
+        return None
+    if user_id is None and access_enabled():
+        logger.debug("Skipping anonymous navy document content fetch (ACL enabled)")
+        return None
+
+    client = await get_client()
+
+    query: Dict[str, Any] = {"bool": {"must": [{"term": {"doc_id": doc_id}}]}}
+    # acl_filter is itself a bool clause (or None for admin / disabled ACL);
+    # require it IN ADDITION to the doc_id so a user can only read documents at
+    # or below their clearance.
+    acl_filter = build_opensearch_filter(user_id)
+    if acl_filter is not None:
+        query["bool"]["filter"] = [acl_filter]
+
+    body: Dict[str, Any] = {
+        "size": 2000,  # generous upper bound on chunks per document
+        "query": query,
+        "_source": [
+            "doc_id", "content", "parent_content", "section_title",
+            "page_start", "page_end", "chunk_id",
+            "document_name", "source", "document_type", "document_status",
+            "access_scope", "classification_level", "creator_department",
+            "document_path",
+        ],
+        "sort": [{"page_start": {"order": "asc", "missing": "_last"}}],
+    }
+
+    response = await _search_with_retry(client, body)
+    hits = response.get("hits", {}).get("hits", [])
+    if not hits:
+        # Document doesn't exist, or the user can't access it (fail-closed).
+        return None
+
+    first = hits[0].get("_source", {})
+
+    # Reassemble the WHOLE document. Each hit is one chunk; the index stores the
+    # surrounding page/section text in ``parent_content``. Collect the DISTINCT
+    # parent_content blocks (one per page/section) in page order — this rebuilds
+    # the full document without the chunk-overlap repetition you'd get from
+    # joining the small ``content`` chunks. Earlier this used only the FIRST
+    # hit's parent_content, so only the cover page showed. Fall back to stitching
+    # ``content`` chunks when no parent_content is present.
+    ordered_parents: List[str] = []
+    seen_parents: set = set()
+    for h in hits:
+        pc = (h.get("_source", {}).get("parent_content") or "").strip()
+        if pc and pc not in seen_parents:
+            seen_parents.add(pc)
+            ordered_parents.append(pc)
+
+    if ordered_parents:
+        content = "\n\n".join(ordered_parents)
+    else:
+        parts: List[str] = []
+        seen_chunks: set = set()
+        for h in hits:
+            src = h.get("_source", {})
+            chunk = (src.get("content") or "").strip()
+            if not chunk or chunk in seen_chunks:
+                continue
+            seen_chunks.add(chunk)
+            section = (src.get("section_title") or "").strip()
+            parts.append(f"## {section}\n\n{chunk}" if section else chunk)
+        content = "\n\n".join(parts)
+
+    logger.info(
+        "Navy doc content {!r}: {} chunk hit(s), {} parent block(s), {} chars "
+        "(user_id={!r})",
+        doc_id,
+        len(hits),
+        len(ordered_parents),
+        len(content),
+        user_id,
+    )
+
+    title = (
+        first.get("document_name")
+        or first.get("source")
+        or _pretty_doc_label(doc_id, first)
+    )
+
+    return {
+        "doc_id": doc_id,
+        "title": title,
+        "content": content,
+        "chunk_count": len(hits),
+        "document_type": first.get("document_type") or "",
+        "document_status": first.get("document_status") or "",
+        "access_scope": first.get("access_scope") or "",
+        "classification_level": first.get("classification_level"),
+        "creator_department": first.get("creator_department") or "",
+        "source": first.get("document_name") or first.get("source") or "",
+    }
+
+
 def _pretty_doc_label(doc_id: str, sample: Dict[str, Any]) -> str:
     """Human-readable label for a document node."""
     name = sample.get("document_name") or sample.get("source")
