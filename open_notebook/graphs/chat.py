@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from loguru import logger
 from typing_extensions import TypedDict
 
 from open_notebook.ai.provision import provision_langchain_model
@@ -91,6 +92,23 @@ agent_state.add_edge("agent", END)
 graph = agent_state.compile(checkpointer=checkpointer)
 
 
+def _chunk_for_stream(text: str, target_chunks: int = 48, min_size: int = 12):
+    """Split an already-computed reply into a bounded number of small pieces.
+
+    Used when a model can't stream tokens (``astream`` raises
+    ``NotImplementedError``) so its reply is still delivered as incremental SSE
+    deltas instead of one big lump. Character-based, so concatenating all pieces
+    reproduces ``text`` exactly; the piece count is capped (pieces grow for long
+    replies) to keep the animation short regardless of length.
+    """
+    n = len(text)
+    if n == 0:
+        return
+    size = max(min_size, -(-n // target_chunks))  # ceil(n / target_chunks)
+    for i in range(0, n, size):
+        yield text[i : i + size]
+
+
 async def astream_chat_response(
     session_id: str,
     user_message: str,
@@ -150,10 +168,22 @@ async def astream_chat_response(
                     full_text_parts.append(content)
                     yield {"type": "delta", "content": content}
         except NotImplementedError:
+            # The model/provider doesn't support token streaming. Fall back to a
+            # single blocking call, then emit the result in small chunks so the
+            # UI still animates instead of dumping the whole reply at once
+            # (this is the cause of "sometimes the full message appears at once":
+            # it depends on which chat model is selected).
+            logger.info(
+                "chat stream: model (override={!r}) does not support astream; "
+                "using invoke + simulated chunk streaming",
+                model_override,
+            )
             ai = await asyncio.to_thread(model.invoke, payload)
             content = extract_text_content(getattr(ai, "content", ""))
             full_text_parts.append(content)
-            yield {"type": "delta", "content": content}
+            for piece in _chunk_for_stream(content):
+                yield {"type": "delta", "content": piece}
+                await asyncio.sleep(0.015)
 
         full_text = "".join(full_text_parts)
         cleaned = clean_thinking_content(full_text)

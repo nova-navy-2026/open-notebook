@@ -93,14 +93,16 @@ export const globalChatApi = {
         }
       }
     }
-    // Hit the FastAPI backend directly, bypassing the Next.js rewrite proxy
-    // which buffers SSE responses (the whole reply would otherwise appear at
-    // once instead of streaming token-by-token). Same approach as search/ask.
-    let apiUrl = await getApiUrl()
-    if (!apiUrl && typeof window !== 'undefined') {
-      apiUrl = `${window.location.protocol}//${window.location.hostname}:5055`
-    }
-    const response = await fetch(`${apiUrl}/api/global-chat/execute/stream`, {
+    // Prefer hitting the FastAPI backend directly (bypasses the Next.js rewrite
+    // proxy that can buffer SSE). But ONLY when a reachable absolute API URL is
+    // configured — in relative-path deployments (API bound to 127.0.0.1:5055,
+    // reachable only via the Next.js proxy) we MUST use the relative path, or
+    // the browser fetch fails with "Failed to fetch".
+    const apiBase = await getApiUrl()
+    const streamUrl = apiBase
+      ? `${apiBase}/api/global-chat/execute/stream`
+      : `/api/global-chat/execute/stream`
+    const response = await fetch(streamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

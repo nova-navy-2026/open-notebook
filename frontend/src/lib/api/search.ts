@@ -28,15 +28,13 @@ export const searchApi = {
       }
     }
 
-    // Resolve the API base URL so we hit the FastAPI backend directly,
-    // bypassing the Next.js rewrite proxy that buffers SSE streams.
-    // When apiUrl is empty (relative-path mode), derive the backend URL
-    // from the current page origin on port 5055.
-    let apiUrl = await getApiUrl();
-    if (!apiUrl && typeof window !== "undefined") {
-      apiUrl = `${window.location.protocol}//${window.location.hostname}:5055`;
-    }
-    const url = `${apiUrl}/api/search/ask`;
+    // Prefer hitting the FastAPI backend directly (avoids the Next.js rewrite
+    // proxy that can buffer SSE). But ONLY when a reachable absolute API URL is
+    // configured. In relative-path deployments (API bound to 127.0.0.1:5055,
+    // reachable only via the Next.js proxy) getApiUrl() is empty and we MUST
+    // use the relative path, or the browser fetch fails with "Failed to fetch".
+    const apiBase = await getApiUrl();
+    const url = apiBase ? `${apiBase}/api/search/ask` : `/api/search/ask`;
 
     // Use fetch with ReadableStream for SSE
     const response = await fetch(url, {
