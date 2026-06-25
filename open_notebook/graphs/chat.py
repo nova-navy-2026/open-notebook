@@ -161,12 +161,24 @@ async def astream_chat_response(
         )
 
         full_text_parts: list[str] = []
+        delta_count = 0
         try:
             async for chunk in model.astream(payload):
                 content = extract_text_content(getattr(chunk, "content", ""))
                 if content:
                     full_text_parts.append(content)
+                    delta_count += 1
                     yield {"type": "delta", "content": content}
+            # Diagnostic: if this number is large, the backend IS streaming
+            # token-by-token — so any "all at once" symptom is downstream
+            # buffering (the reverse proxy in front of the frontend). If the
+            # fallback path below runs instead, the selected model can't stream.
+            logger.info(
+                "chat stream: model streamed {} native delta(s) "
+                "(override={!r})",
+                delta_count,
+                model_override,
+            )
         except NotImplementedError:
             # The model/provider doesn't support token streaming. Fall back to a
             # single blocking call, then emit the result in small chunks so the

@@ -36,7 +36,7 @@ export function PageInfoButton({ pageKey, className }: PageInfoButtonProps) {
           <Info className="h-6 w-6" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] w-full max-w-md sm:max-w-md p-0">
+      <DialogContent className="max-h-[85vh] w-full max-w-xl sm:max-w-xl p-0">
         <div className="flex max-h-[85vh] flex-col">
           <DialogHeader className="border-b px-6 py-5 pr-12">
             <DialogTitle>{content.title}</DialogTitle>
