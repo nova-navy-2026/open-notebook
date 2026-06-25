@@ -7,7 +7,7 @@ import { SourceListResponse } from '@/lib/types/api'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
-import { FileText, Link as LinkIcon, Upload, AlignLeft, Trash2, ArrowUpDown, Search, LayoutGrid, List as ListIcon, Sparkles, Loader2 } from 'lucide-react'
+import { FileText, Link as LinkIcon, Upload, AlignLeft, Trash2, ArrowUpDown, Search, LayoutGrid, List as ListIcon, Sparkles, Loader2, Plus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -34,6 +35,7 @@ type SourceStatusKey = 'ready' | 'processing' | 'not_embedded'
 
 export default function SourcesPage() {
   const { t, language } = useTranslation()
+  const { openSourceDialog } = useCreateDialogs()
   const [sources, setSources] = useState<SourceListResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -331,11 +333,15 @@ export default function SourcesPage() {
   return (
     <>
       <div className="app-page-wide flex h-full flex-col">
-        <div className="mb-4 flex-shrink-0">
+        <div className="mb-4 flex flex-shrink-0 items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h1 className="text-3xl font-bold">{t.sources.allSources}</h1>
             <PageInfoButton pageKey="sources" />
           </div>
+          <Button onClick={() => openSourceDialog()} className="flex-shrink-0">
+            <Plus className="mr-2 h-4 w-4" />
+            {t.common.newSource ?? 'New Source'}
+          </Button>
         </div>
 
         {/* Knowledge Base (OpenSearch corpus) — shown on top. */}
@@ -382,7 +388,7 @@ export default function SourcesPage() {
                   />
                 </div>
                 <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as 'all' | SourceTypeKey)}>
-                  <SelectTrigger className="w-[140px]">
+                  <SelectTrigger className="w-auto min-w-[150px]">
                     <SelectValue placeholder={t.sources.filterByType} />
                   </SelectTrigger>
                   <SelectContent>
@@ -393,7 +399,7 @@ export default function SourcesPage() {
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | SourceStatusKey)}>
-                  <SelectTrigger className="w-[150px]">
+                  <SelectTrigger className="w-auto min-w-[170px]">
                     <SelectValue placeholder={t.sources.filterByStatus} />
                   </SelectTrigger>
                   <SelectContent>
@@ -454,7 +460,10 @@ export default function SourcesPage() {
                     onMouseEnter={() => setSelectedIndex(index)}
                     className={cn(
                       'group flex cursor-pointer flex-col gap-3 p-4 transition-colors',
-                      selectedIndex === index ? 'ring-2 ring-primary' : 'hover:bg-muted/50'
+                      // Highlight only on hover (a border stays inside the card,
+                      // so it never pokes out of the scroll container the way a
+                      // persistent ring did).
+                      'hover:border-primary hover:bg-muted/50',
                     )}
                   >
                     <div className="flex items-start justify-between gap-2">

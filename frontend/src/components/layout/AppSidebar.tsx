@@ -423,19 +423,16 @@ export function AppSidebar() {
             </DropdownMenu>
           </div>
 
-          {/* Main navigation — spread evenly to fill available height */}
-          <div className="flex-1 min-h-0 flex flex-col justify-evenly">
-            {mainNavigation.map((section, index) => (
-              <div key={section.title}>
-                {index > 0 && <Separator className="my-2" />}
-                <div className="space-y-1">
-                  {!isCollapsed && (
-                    <h3 className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/60">
-                      {section.title}
-                    </h3>
-                  )}
-                  {section.items.map((item) => renderNavItem(item, section))}
-                </div>
+          {/* Main navigation — grouped at the top with consistent spacing */}
+          <div className="flex-1 min-h-0 flex flex-col gap-5 overflow-y-auto overflow-x-hidden pt-1">
+            {mainNavigation.map((section) => (
+              <div key={section.title} className="space-y-1">
+                {!isCollapsed && (
+                  <h3 className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+                    {section.title}
+                  </h3>
+                )}
+                {section.items.map((item) => renderNavItem(item, section))}
               </div>
             ))}
           </div>
