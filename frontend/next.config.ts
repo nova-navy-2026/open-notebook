@@ -4,6 +4,14 @@ const nextConfig: NextConfig = {
   // Enable standalone output for optimized Docker deployment
   output: "standalone",
 
+  // Disable Next.js gzip compression. Compressing a `text/event-stream`
+  // response forces it to be buffered (the compressor accumulates bytes before
+  // flushing), so SSE chat replies arrive all at once instead of streaming
+  // token-by-token through the /api/* rewrite proxy. This only turns off Next's
+  // own compression — static assets are still served fine and the upstream
+  // reverse proxy can compress non-streaming responses if desired.
+  compress: false,
+
   // Hosts allowed to load Next.js dev resources (HMR / webpack) when running
   // `next dev` behind a domain/reverse proxy. Without this, Next.js blocks the
   // dev assets cross-origin and the app renders a blank page. Only relevant in
