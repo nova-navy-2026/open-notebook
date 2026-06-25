@@ -139,13 +139,20 @@ export function GraphCanvas({
   const applyForces = useCallback((): boolean => {
     const fg = fgRef.current;
     if (!fg) return false;
+    // The ref can attach a frame before react-force-graph has built its
+    // internal simulation, and the lazily code-split chunk may take many frames
+    // to download on a cold first open. If the named forces aren't there yet,
+    // report "not ready" so the caller keeps retrying — otherwise the custom
+    // clustering/collision forces never apply and every node piles onto its
+    // topic hub until a remount (e.g. switching tabs) reapplies them.
+    const charge = fg.d3Force("charge");
+    if (!charge) return false;
     // Stretch the cluster anchors horizontally on wide canvases so the layout
     // fills the window instead of settling into a circle with empty corners.
     const { w, h } = sizeRef.current;
     const xSpread = Math.min(1.7, Math.max(1, h > 0 ? w / h : 1));
-    const charge = fg.d3Force("charge");
-    charge?.strength?.(-260);
-    charge?.distanceMax?.(1200);
+    charge.strength?.(-260);
+    charge.distanceMax?.(1200);
     const link = fg.d3Force("link");
     link?.distance?.(linkDistance);
     link?.strength?.(0.05);
@@ -169,20 +176,28 @@ export function GraphCanvas({
         .strength(0.9)
         .iterations(2),
     );
+    // Arm the one-shot re-frame for the settle this reheat kicks off. Done here
+    // (rather than when the retry was scheduled) so a premature engine stop
+    // during a slow cold load can't consume the zoom before our forces land.
+    shouldZoom.current = true;
     fg.d3ReheatSimulation();
     return true;
   }, [linkDistance]);
 
   // Re-tune forces and re-frame only when `reheatKey` changes — NOT when the
-  // similarity threshold moves (that just adds/removes links). The dynamic
-  // graph instance can attach a frame or two after data arrives, so retry on
-  // animation frames until the ref is live (then stop).
+  // similarity threshold moves (that just adds/removes links).
   useEffect(() => {
-    shouldZoom.current = true;
-    let tries = 0;
+    // `reheatKey` re-runs this effect (data/mode change). Retry until the
+    // lazily-loaded force-graph instance has attached AND built its simulation,
+    // bounded by a wall-clock deadline rather than a fixed frame budget: a cold
+    // first open (chunk still downloading) used to blow past the old 30-frame
+    // cap before the ref went live, leaving the layout un-forced — every node
+    // stacked on its topic hub until a remount.
+    void reheatKey;
     let raf = 0;
+    const start = performance.now();
     const tick = () => {
-      if (applyForces() || tries++ > 30) return;
+      if (applyForces() || performance.now() - start > 15000) return;
       raf = requestAnimationFrame(tick);
     };
     tick();

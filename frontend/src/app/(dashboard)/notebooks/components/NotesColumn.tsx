@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from 'react'
 import { NoteResponse } from '@/lib/types/api'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   DropdownMenu,
@@ -14,6 +15,7 @@ import { Plus, StickyNote, Bot, User, MoreVertical, Trash2, Image as ImageIcon, 
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { NoteEditorDialog } from './NoteEditorDialog'
 import {
   MediaNoteViewerDialog,
@@ -178,22 +180,35 @@ export function NotesColumn({
                 {t.notebooks.agentNotes}
               </CardTitle>
               <div className="flex items-center gap-1 flex-shrink-0">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-9 w-9"
-                  onClick={openVisualization}
-                  disabled={!canVisualize}
-                  title={
-                    canVisualize
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {/* Use aria-disabled (not the native `disabled` attribute)
+                        so the button stays hoverable/focusable and the tooltip
+                        still fires in the disabled state — native disabled
+                        buttons swallow pointer events, so the hint would never
+                        appear exactly when it's needed. The click is guarded
+                        below so nothing runs while disabled. */}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className={cn(
+                        'h-9 w-9',
+                        !canVisualize && 'opacity-50 cursor-not-allowed'
+                      )}
+                      aria-disabled={!canVisualize}
+                      onClick={canVisualize ? openVisualization : undefined}
+                      aria-label={t.navyDocs?.visualizeButton ?? 'Open visualizations'}
+                    >
+                      <Network className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {canVisualize
                       ? (t.navyDocs?.visualizeButton ?? 'Open visualizations')
                       : (t.navyDocs?.visualizeNeedsData ??
-                        'Add notes or select knowledge base documents to visualize relationships.')
-                  }
-                  aria-label={t.navyDocs?.visualizeButton ?? 'Open visualizations'}
-                >
-                  <Network className="h-4 w-4" />
-                </Button>
+                        'Add notes or select knowledge base documents to visualize relationships.')}
+                  </TooltipContent>
+                </Tooltip>
                 <Button
                   size="icon"
                   className="h-9 w-9"
