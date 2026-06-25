@@ -295,7 +295,6 @@ export default function TranscriptionPage() {
               <SelectItem value="auto">{tp.languageAuto}</SelectItem>
               <SelectItem value="pt">{tp.languagePortuguese}</SelectItem>
               <SelectItem value="en">{tp.languageEnglish}</SelectItem>
-              <SelectItem value="fr">{tp.languageFrench}</SelectItem>
             </SelectContent>
           </Select>
         </div>

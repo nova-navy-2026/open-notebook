@@ -331,15 +331,46 @@ export default function SourcesPage() {
   return (
     <>
       <div className="app-page-wide flex h-full flex-col">
-        <div className="mb-4 flex-shrink-0 space-y-3">
+        <div className="mb-4 flex-shrink-0">
           <div className="flex items-center gap-2">
             <h1 className="text-3xl font-bold">{t.sources.allSources}</h1>
             <PageInfoButton pageKey="sources" />
           </div>
+        </div>
 
+        {/* Knowledge Base (OpenSearch corpus) — shown on top. */}
+        {hasNavyDocs && (
+          <div className="mb-4 flex-shrink-0">
+            <NavyDocsSection readOnly />
+          </div>
+        )}
+
+        {/* Uploaded sources — always visible (even when empty), beneath the
+            OpenSearch / Knowledge Base sources. */}
+        <div className="mb-2 flex flex-shrink-0 items-center gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            {t.sources.uploadedSources}
+          </h2>
           {sources.length > 0 && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-1 flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="text-xs">
+              {sources.length}
+            </Badge>
+          )}
+        </div>
+
+        {sources.length === 0 && (
+          <div className="flex flex-1 items-center justify-center rounded-md border">
+            <EmptyState
+              icon={FileText}
+              title={t.sources.noSourcesYet}
+              description={t.sources.allSourcesDescShort}
+            />
+          </div>
+        )}
+
+        {sources.length > 0 && (
+          <div className="mb-3 flex flex-shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-1 flex-wrap items-center gap-2">
                 <div className="relative w-full sm:max-w-xs">
                   <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -404,7 +435,6 @@ export default function SourcesPage() {
               </div>
             </div>
           )}
-        </div>
 
         {sources.length > 0 && filteredSources.length === 0 && (
           <div className="flex flex-1 items-center justify-center rounded-md border text-sm text-muted-foreground">
@@ -618,12 +648,6 @@ export default function SourcesPage() {
         </div>
         )}
 
-        {/* Navy Corpus Knowledge Base Documents */}
-        {hasNavyDocs && (
-          <div className="mt-4 flex-shrink-0">
-            <NavyDocsSection readOnly />
-          </div>
-        )}
       </div>
 
       <ConfirmDialog

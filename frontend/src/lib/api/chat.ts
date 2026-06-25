@@ -1,4 +1,5 @@
 import apiClient from './client'
+import { getApiUrl } from '@/lib/config'
 import {
   NotebookChatSession,
   NotebookChatSessionWithMessages,
@@ -83,8 +84,8 @@ export const chatApi = {
     return response.data
   },
 
-  // Streaming variant — returns the raw response body for SSE consumption
-  sendMessageStream: (data: SendNotebookChatMessageRequest) => {
+  // Streaming variant — returns the raw response body for SSE consumption.
+  sendMessageStream: async (data: SendNotebookChatMessageRequest) => {
     let token: string | null = null
     if (typeof window !== 'undefined') {
       const authStorage = localStorage.getItem('auth-storage')
@@ -97,19 +98,25 @@ export const chatApi = {
         }
       }
     }
-    return fetch(`/api/chat/execute/stream`, {
+    // Hit the FastAPI backend directly, bypassing the Next.js rewrite proxy
+    // which buffers SSE responses (causing the whole reply to appear at once
+    // instead of streaming token-by-token). Same approach as search/ask.
+    let apiUrl = await getApiUrl()
+    if (!apiUrl && typeof window !== 'undefined') {
+      apiUrl = `${window.location.protocol}//${window.location.hostname}:5055`
+    }
+    const response = await fetch(`${apiUrl}/api/chat/execute/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token && { Authorization: `Bearer ${token}` }),
       },
       body: JSON.stringify(data),
-    }).then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      return response.body
     })
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    return response.body
   },
 
   buildContext: async (data: BuildContextRequest) => {

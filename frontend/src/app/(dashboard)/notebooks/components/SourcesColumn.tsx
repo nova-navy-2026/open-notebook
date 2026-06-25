@@ -32,7 +32,6 @@ import {
 import { NavyDocsSection } from "@/components/notebooks/NavyDocsSection";
 import { useNotebookColumnsStore } from "@/lib/stores/notebook-columns-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
-import { cn } from "@/lib/utils";
 
 interface SourcesColumnProps {
   sources?: SourceListResponse[];
@@ -88,23 +87,6 @@ export function SourcesColumn({
   const deleteSource = useDeleteSource();
   const retrySource = useRetrySource();
   const removeFromNotebook = useRemoveSourceFromNotebook();
-
-  // A notebook's sources are the uploaded/app sources PLUS any selected
-  // OpenSearch (navy corpus) documents. The empty state must only show when
-  // BOTH are empty — otherwise selecting corpus documents wrongly still reads
-  // as "No sources yet".
-  const uploadedCount = sources?.length ?? 0;
-  const hasUploadedSources = uploadedCount > 0;
-  const selectedNavyCount = selectedNavyDocIds?.size ?? 0;
-  const totalSourcesCount = uploadedCount + selectedNavyCount;
-  // The OpenSearch (navy corpus) selector is only available when the parent
-  // wires its props (notebook chat context). When present it is shown on top,
-  // with the uploaded sources beneath it.
-  const hasNavySection = !!(
-    selectedNavyDocIds &&
-    onNavyDocSelectionChange &&
-    onNavyDocSelectAll
-  );
 
   // Collapsible column state
   const { sourcesCollapsed, toggleSources } = useNotebookColumnsStore();
@@ -197,9 +179,9 @@ export function SourcesColumn({
                 <CardTitle className="text-lg truncate">
                   {t.navigation.sources}
                 </CardTitle>
-                {totalSourcesCount > 0 && (
+                {sources && sources.length > 0 && (
                   <Badge variant="secondary" className="text-xs">
-                    {totalSourcesCount}
+                    {sources.length}
                   </Badge>
                 )}
               </div>
@@ -243,85 +225,64 @@ export function SourcesColumn({
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {/* OpenSearch / Knowledge Base (navy corpus) sources — shown on top. */}
-            {hasNavySection && (
-              <div className="flex-1 min-h-0 flex flex-col">
-                <NavyDocsSection
-                  selectedDocIds={selectedNavyDocIds!}
-                  onSelectionChange={onNavyDocSelectionChange!}
-                  onSelectAll={onNavyDocSelectAll!}
-                />
+          <CardContent
+            ref={scrollContainerRef}
+            className="flex-1 overflow-y-auto min-h-0"
+          >
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <LoadingSpinner />
+              </div>
+            ) : !sources || sources.length === 0 ? (
+              <EmptyState
+                icon={FileText}
+                title={t.sources.noSourcesYet}
+                description={t.sources.createFirstSource}
+              />
+            ) : (
+              <div className="space-y-2">
+                {sources.map((source) => (
+                  <SourceCard
+                    key={source.id}
+                    source={source}
+                    onClick={handleSourceClick}
+                    onDelete={isNotebookOwner ? handleDeleteClick : undefined}
+                    onRetry={handleRetry}
+                    onRemoveFromNotebook={
+                      isNotebookOwner ? handleRemoveFromNotebook : undefined
+                    }
+                    onRefresh={onRefresh}
+                    showRemoveFromNotebook={isNotebookOwner}
+                    canManage={isNotebookOwner}
+                    contextMode={contextSelections?.[source.id]}
+                    onContextModeChange={
+                      onContextModeChange
+                        ? (mode) => onContextModeChange(source.id, mode)
+                        : undefined
+                    }
+                  />
+                ))}
+                {/* Loading indicator for infinite scroll */}
+                {isFetchingNextPage && (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Uploaded sources — always visible (even when empty), beneath the
-                OpenSearch sources. */}
-            <div
-              className={cn(
-                "flex flex-col min-h-0",
-                hasNavySection ? "mt-4 flex-shrink-0" : "flex-1",
-              )}
-            >
-              <div className="mb-2 flex flex-shrink-0 items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t.sources.uploadedSources ?? "Uploaded Sources"}
-                </span>
-                {uploadedCount > 0 && (
-                  <Badge variant="secondary" className="text-[10px]">
-                    {uploadedCount}
-                  </Badge>
-                )}
-              </div>
-
-              {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <LoadingSpinner />
+            {/* Navy Corpus Knowledge Base */}
+            {selectedNavyDocIds &&
+              onNavyDocSelectionChange &&
+              onNavyDocSelectAll && (
+                <div className="mt-4">
+                  <NavyDocsSection
+                    selectedDocIds={selectedNavyDocIds}
+                    onSelectionChange={onNavyDocSelectionChange}
+                    onSelectAll={onNavyDocSelectAll}
+                  />
                 </div>
-              ) : hasUploadedSources ? (
-                <div
-                  ref={scrollContainerRef}
-                  className={cn(
-                    "space-y-2 overflow-y-auto",
-                    hasNavySection ? "max-h-[35vh]" : "flex-1",
-                  )}
-                >
-                  {sources!.map((source) => (
-                    <SourceCard
-                      key={source.id}
-                      source={source}
-                      onClick={handleSourceClick}
-                      onDelete={isNotebookOwner ? handleDeleteClick : undefined}
-                      onRetry={handleRetry}
-                      onRemoveFromNotebook={
-                        isNotebookOwner ? handleRemoveFromNotebook : undefined
-                      }
-                      onRefresh={onRefresh}
-                      showRemoveFromNotebook={isNotebookOwner}
-                      canManage={isNotebookOwner}
-                      contextMode={contextSelections?.[source.id]}
-                      onContextModeChange={
-                        onContextModeChange
-                          ? (mode) => onContextModeChange(source.id, mode)
-                          : undefined
-                      }
-                    />
-                  ))}
-                  {/* Loading indicator for infinite scroll */}
-                  {isFetchingNextPage && (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={FileText}
-                  title={t.sources.noSourcesYet}
-                  description={t.sources.createFirstSource}
-                />
               )}
-            </div>
           </CardContent>
         </Card>
   );

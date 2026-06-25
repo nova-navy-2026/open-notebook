@@ -1,4 +1,5 @@
 import apiClient from './client'
+import { getApiUrl } from '@/lib/config'
 import {
   GlobalChatSession,
   GlobalChatSessionWithMessages,
@@ -79,7 +80,7 @@ export const globalChatApi = {
     return response.data
   },
 
-  sendMessageStream: (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
+  sendMessageStream: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
     let token: string | null = null
     if (typeof window !== 'undefined') {
       const authStorage = localStorage.getItem('auth-storage')
@@ -92,19 +93,25 @@ export const globalChatApi = {
         }
       }
     }
-    return fetch(`/api/global-chat/execute/stream`, {
+    // Hit the FastAPI backend directly, bypassing the Next.js rewrite proxy
+    // which buffers SSE responses (the whole reply would otherwise appear at
+    // once instead of streaming token-by-token). Same approach as search/ask.
+    let apiUrl = await getApiUrl()
+    if (!apiUrl && typeof window !== 'undefined') {
+      apiUrl = `${window.location.protocol}//${window.location.hostname}:5055`
+    }
+    const response = await fetch(`${apiUrl}/api/global-chat/execute/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token && { Authorization: `Bearer ${token}` }),
       },
       body: JSON.stringify(data),
-    }).then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      return response.body
     })
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    return response.body
   },
 }
 
