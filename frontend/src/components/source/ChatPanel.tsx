@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square, Ghost } from 'lucide-react'
+import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square, Ghost, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -28,12 +28,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useAuthStore } from '@/lib/stores/auth-store'
 import { conversationToDocx, downloadDocx } from '@/lib/utils/export-docx'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
-  BaseChatSession
+  BaseChatSession,
+  GlobalChatDocument
 } from '@/lib/types/api'
 import { ModelSelector as ChatModelSelector } from './ModelSelector'
 import { ModelSelector as InlineModelSelector } from '@/components/common/ModelSelector'
@@ -110,6 +121,9 @@ interface ChatPanelProps {
   // won't be saved to history.
   privateMode?: boolean
   onTogglePrivate?: () => void
+  // Delete a single message. When provided, each message shows a delete control.
+  // Deleting a user message also removes the assistant reply that follows it.
+  onDeleteMessage?: (messageId: string) => void | Promise<void>
 }
 
 /** Inline "edit the report" control shown under a deep-research report message. */
@@ -190,6 +204,48 @@ function ReportEditAffordance({
   )
 }
 
+/** Per-message "sources used" control: lists the documents that were used as
+ * context to produce a given assistant answer. */
+function MessageSourcesAffordance({
+  documents,
+  label,
+}: {
+  documents: GlobalChatDocument[]
+  label: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="w-fit">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <FileText className="h-3.5 w-3.5" />
+        {label} ({documents.length})
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </Button>
+      {open && (
+        <div className="mt-1 max-w-md rounded-md border p-2 text-xs">
+          <ul className="space-y-0.5">
+            {documents.map((doc, i) => (
+              <li key={`${doc.name}-${i}`} className="text-foreground">
+                {doc.name}
+                {doc.pages?.length > 0 && (
+                  <span className="ml-1 text-muted-foreground">
+                    (p. {doc.pages.join(', ')})
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ChatPanel({
   messages,
   isStreaming,
@@ -218,9 +274,11 @@ export function ChatPanel({
   exportingAll = false,
   privateMode = false,
   onTogglePrivate,
+  onDeleteMessage,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
+  const [deleteMessageId, setDeleteMessageId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
@@ -542,7 +600,7 @@ export function ChatPanel({
               messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex gap-3 ${
+                  className={`group flex gap-3 ${
                     message.type === 'human' ? 'justify-end' : 'justify-start'
                   }`}
                 >
@@ -604,9 +662,41 @@ export function ChatPanel({
                       )}
                     </div>
                     {message.type === 'ai' && (
-                      <MessageActions
-                        content={message.content}
-                        notebookId={notebookId}
+                      <div className="flex items-center gap-1">
+                        <MessageActions
+                          content={message.content}
+                          notebookId={notebookId}
+                        />
+                        {onDeleteMessage && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                            onClick={() => setDeleteMessageId(message.id)}
+                            title={t.common.delete}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {message.type === 'human' && onDeleteMessage && (
+                      <div className="flex justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                          onClick={() => setDeleteMessageId(message.id)}
+                          title={t.common.delete}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                    {message.type === 'ai' && message.documents && message.documents.length > 0 && (
+                      <MessageSourcesAffordance
+                        documents={message.documents}
+                        label={t.chat.messageSources}
                       />
                     )}
                     {message.type === 'ai' && onReviseReport && isDeepResearchReportMessage(message) && (
@@ -992,6 +1082,30 @@ export function ChatPanel({
       )}
     </Card>
 
+    <AlertDialog
+      open={!!deleteMessageId}
+      onOpenChange={(open) => { if (!open) setDeleteMessageId(null) }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t.chat.deleteMessageTitle}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t.chat.deleteMessageDesc}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              if (deleteMessageId) void onDeleteMessage?.(deleteMessageId)
+              setDeleteMessageId(null)
+            }}
+          >
+            {t.common.delete}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   )
 }

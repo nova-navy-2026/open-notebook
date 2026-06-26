@@ -308,6 +308,9 @@ export const enUS = {
     loadingMore: "Loading more...",
     noSourcesYet: "No sources yet",
     uploadedSources: "Uploaded Sources",
+    uploadedSourcesDesc: "Files, links and text you added yourself — separate from the Knowledge Base above.",
+    noUploadedSourcesYet: "No uploaded sources yet",
+    uploadedSourcesEmptyDesc: "Use “New Source” to add your own files, links or text.",
     allSourcesDescShort: "View all your sources here.",
     searchSources: "Search sources...",
     filterByType: "Type",
@@ -440,6 +443,7 @@ export const enUS = {
     showingFirst100:
       "Showing first 100 sources. Use search to find specific ones.",
     selectedCount: "{count} sources selected",
+    confirmAddToNotebook: "Add {count} to this notebook",
     added: "Added on {date}",
     addUrl: "Add URL",
     uploadFile: "Upload File",
@@ -551,6 +555,10 @@ export const enUS = {
     deleteSession: "Delete Session",
     deleteSessionDesc:
       "Are you sure you want to delete this chat session? This action cannot be undone.",
+    deleteMessageTitle: "Delete message",
+    messageSources: "Sources used",
+    deleteMessageDesc:
+      "Delete this message? Deleting your message also removes the assistant's reply. This action cannot be undone.",
     sendPlaceholder: "Ask anything about your sources...",
     sessionsTitle: "Chat Sessions",
     chatWith: "Chat with {name}",
@@ -1245,15 +1253,18 @@ export const enUS = {
     optional: "(optional)",
     queryPlaceholderSam3:
       "e.g. red boat, person wearing a helmet, license plate...",
-    queryPlaceholderRfdetr:
-      "e.g. boat, person, car — separate classes with commas, or leave empty to detect everything",
+    classesLabel: "Classes to detect",
+    classesPlaceholder: "All classes (leave empty to detect everything)",
+    classesSearch: "Search classes...",
+    classesEmpty: "No matching class.",
+    classesSelected: "{count} class(es) selected",
     engineLabel: "Detection Engine",
     engineSam3: "SAM3 (open-vocabulary, high-quality)",
     engineRfdetr: "RF-DETR (COCO classes, real-time)",
     engineHintSam3:
       "Describe anything in natural language. Slower but more flexible.",
     engineHintRfdetr:
-      "Detects 80 common object classes (person, car, boat, dog...). Leave the query blank to detect everything, or list one or more classes separated by commas to filter — for example: boat, person, truck.",
+      "Detects 80 common object classes (person, car, boat, dog...). Pick one or more classes to filter, or leave the selection empty to detect everything.",
     analyze: "Analyze Image",
     analyzing: "Analyzing...",
     clear: "Clear",
@@ -1320,7 +1331,7 @@ export const enUS = {
     reportTypeLabel: "Document type",
     reportTypeAta: "Meeting minutes (ATA)",
     reportTypeConversation: "Conversation / Dialogue",
-    reportTypeSummary: "Summary",
+    reportTypeSummary: "Meeting summary (recommended)",
     reportTypeLiteral: "Verbatim transcript",
     generateDocument: "Generate document",
     generateDocumentHint: "Generate a document from the transcript",

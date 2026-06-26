@@ -847,6 +847,10 @@ export function useGlobalChat() {
       let buffer = ''
       let aiMessageId: string | null = null
       let aiContent = ''
+      // context_stats (with the documents used to build this answer) is streamed
+      // before any token, so stash the documents and attach them to the AI
+      // message when it is created — surfaced as per-message "sources used".
+      let pendingDocuments: GlobalChatDocument[] | undefined
 
       const ensureAiMessage = () => {
         if (!aiMessageId) {
@@ -855,7 +859,8 @@ export function useGlobalChat() {
             id: aiMessageId,
             type: 'ai',
             content: '',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            documents: pendingDocuments,
           }
           setMessages(prev => [...prev, initial])
         }
@@ -887,7 +892,15 @@ export function useGlobalChat() {
             } else if (data.type === 'context_stats') {
               if (data.data) {
                 setContextStats(data.data)
+                pendingDocuments = data.data.documents
                 setSessionDocuments(prev => mergeSessionDocuments(prev, data.data.documents))
+                // If the AI bubble already exists (context_stats can arrive late
+                // on some models), back-fill its documents.
+                if (aiMessageId) {
+                  setMessages(prev =>
+                    prev.map(m => m.id === aiMessageId ? { ...m, documents: pendingDocuments } : m)
+                  )
+                }
               }
             } else if (data.type === 'error') {
               throw new Error(data.message || 'Stream error')
@@ -1043,6 +1056,43 @@ export function useGlobalChat() {
     return deleteSessionMutation.mutate(sessionId)
   }, [deleteSessionMutation])
 
+  // Delete a single message. Deleting a user (human) message also removes the
+  // assistant reply that immediately follows it, so a question and its answer
+  // disappear together. Optimistic: the bubble is removed instantly and rolled
+  // back if the server rejects the delete.
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const index = messages.findIndex(m => m.id === messageId)
+    if (index < 0) return
+
+    const idsToRemove = new Set<string>([messageId])
+    const target = messages[index]
+    if (target.type === 'human') {
+      const next = messages[index + 1]
+      if (next && next.type === 'ai') idsToRemove.add(next.id)
+    }
+
+    const previous = messages
+    // Make local state authoritative so a stale session refetch can't restore
+    // the message before the server delete lands.
+    hasLocalMultimodalMessagesRef.current = true
+    setMessages(prev => prev.filter(m => !idsToRemove.has(m.id)))
+
+    const sessionId = currentSessionId
+    // Unsaved session (nothing persisted yet) — the optimistic removal is enough.
+    if (!sessionId) return
+
+    try {
+      const updated = await globalChatApi.deleteMessage(sessionId, messageId)
+      setMessages(updated.messages)
+      queryClient.setQueryData(QUERY_KEYS.globalChatSession(sessionId), updated)
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.globalChatSessions })
+    } catch (err) {
+      setMessages(previous)
+      const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
+    }
+  }, [messages, currentSessionId, queryClient, t])
+
   // Set model override
   const setModelOverride = useCallback((model: string | null) => {
     if (currentSessionId) {
@@ -1119,6 +1169,7 @@ export function useGlobalChat() {
     newConversation,
     updateSession,
     deleteSession,
+    deleteMessage,
     switchSession,
     sendMessage,
     reviseReport,

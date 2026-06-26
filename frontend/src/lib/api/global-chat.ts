@@ -68,6 +68,13 @@ export const globalChatApi = {
     await apiClient.delete(`/global-chat/sessions/${sessionId}`)
   },
 
+  deleteMessage: async (sessionId: string, messageId: string) => {
+    const response = await apiClient.delete<GlobalChatSessionWithMessages>(
+      `/global-chat/sessions/${sessionId}/messages/${encodeURIComponent(messageId)}`
+    )
+    return response.data
+  },
+
   sendMessage: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
     const response = await apiClient.post<{
       session_id: string

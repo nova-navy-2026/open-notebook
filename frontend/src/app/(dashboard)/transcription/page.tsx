@@ -90,7 +90,7 @@ export default function TranscriptionPage() {
   const [reportTitle, setReportTitle] = useState("");
   const [reportType, setReportType] = useState<
     "ata" | "conversation" | "summary" | "literal"
-  >("ata");
+  >("summary");
   const router = useRouter();
 
   // Translation state
@@ -452,9 +452,9 @@ export default function TranscriptionPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="summary">{tp.reportTypeSummary ?? "Resumo de reunião"}</SelectItem>
                     <SelectItem value="ata">{tp.reportTypeAta ?? "ATA de reunião"}</SelectItem>
                     <SelectItem value="conversation">{tp.reportTypeConversation ?? "Conversa / Diálogo"}</SelectItem>
-                    <SelectItem value="summary">{tp.reportTypeSummary ?? "Resumo"}</SelectItem>
                     <SelectItem value="literal">{tp.reportTypeLiteral ?? "Transcrição literal"}</SelectItem>
                   </SelectContent>
                 </Select>

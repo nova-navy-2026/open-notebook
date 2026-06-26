@@ -297,6 +297,8 @@ export function AddExistingSourceDialog({
                 <LoaderIcon className="mr-2 h-4 w-4 animate-spin" />
                 {t.common.adding}
               </>
+            ) : selectedSourceIds.length > 0 ? (
+              <>{t.sources.confirmAddToNotebook.replace('{count}', String(selectedSourceIds.length))}</>
             ) : (
               <>{t.common.addSelected}</>
             )}

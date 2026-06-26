@@ -192,6 +192,7 @@ export default function GlobalChatPage() {
             isStreaming={chat.isSending}
             contextIndicators={null}
             onSendMessage={chat.sendMessage}
+            onDeleteMessage={chat.deleteMessage}
             onReviseReport={chat.reviseReport}
             modelOverride={activeModelOverride}
             onModelChange={(model) => chat.setModelOverride(model ?? null)}

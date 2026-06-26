@@ -441,6 +441,9 @@ export const frFR = {
     loadingMore: "Chargement...",
     noSourcesYet: "Aucune source pour le moment",
     uploadedSources: "Sources importées",
+    uploadedSourcesDesc: "Fichiers, liens et textes que vous avez ajoutés — distincts de la Base de connaissances ci-dessus.",
+    noUploadedSourcesYet: "Aucune source importée pour le moment",
+    uploadedSourcesEmptyDesc: "Utilisez « Nouvelle source » pour ajouter vos propres fichiers, liens ou textes.",
     allSourcesDescShort: "Affichez toutes vos sources ici.",
     cannotSaveNoteNoNotebook:
       "Impossible d'enregistrer la note : ID du carnet non disponible",
@@ -566,6 +569,7 @@ export const frFR = {
     showingFirst100:
       "Affichage des 100 premières sources. Utilisez la recherche pour en trouver des spécifiques.",
     selectedCount: "{count} sources sélectionnées",
+    confirmAddToNotebook: "Ajouter {count} à ce notebook",
     added: "Ajouté le {date}",
     addUrl: "Ajouter une URL",
     uploadFile: "Télécharger un fichier",
@@ -626,6 +630,10 @@ export const frFR = {
     deleteSession: "Supprimer la session",
     deleteSessionDesc:
       "Êtes-vous sûr de vouloir supprimer cette session de chat ? Cette action est irréversible.",
+    deleteMessageTitle: "Supprimer le message",
+    messageSources: "Sources utilisées",
+    deleteMessageDesc:
+      "Supprimer ce message ? Supprimer votre message retire aussi la réponse de l'assistant. Cette action est irréversible.",
     sendPlaceholder: "Posez n'importe quelle question sur vos sources...",
     sessionsTitle: "Sessions de Chat",
     chatWith: "Discuter avec {name}",
@@ -1268,15 +1276,18 @@ export const frFR = {
     optional: "(facultatif)",
     queryPlaceholderSam3:
       "ex. bateau rouge, personne portant un casque, plaque...",
-    queryPlaceholderRfdetr:
-      "Laissez vide pour tout détecter, ou tapez une classe COCO (personne, voiture, bateau...) pour filtrer",
+    classesLabel: "Classes à détecter",
+    classesPlaceholder: "Toutes les classes (laissez vide pour tout détecter)",
+    classesSearch: "Rechercher des classes...",
+    classesEmpty: "Aucune classe correspondante.",
+    classesSelected: "{count} classe(s) sélectionnée(s)",
     engineLabel: "Moteur de détection",
     engineSam3: "SAM3 (vocabulaire ouvert, haute qualité)",
     engineRfdetr: "RF-DETR (classes COCO, temps réel)",
     engineHintSam3:
       "Décrivez n'importe quoi en langage naturel. Plus lent mais plus flexible.",
     engineHintRfdetr:
-      "Détecte les 80 classes COCO. Laissez vide pour tout détecter ; tapez un nom de classe pour filtrer.",
+      "Détecte les 80 classes COCO. Choisissez une ou plusieurs classes pour filtrer, ou laissez la sélection vide pour tout détecter.",
     analyze: "Analyser l'image",
     analyzing: "Analyse en cours...",
     clear: "Effacer",
@@ -1343,7 +1354,7 @@ export const frFR = {
     reportTypeLabel: "Type de document",
     reportTypeAta: "Compte rendu de réunion (ATA)",
     reportTypeConversation: "Conversation / Dialogue",
-    reportTypeSummary: "Résumé",
+    reportTypeSummary: "Résumé de réunion (recommandé)",
     reportTypeLiteral: "Transcription verbatim",
     generateDocument: "Générer le document",
     generateDocumentHint: "Générer un document à partir de la transcription",

@@ -192,6 +192,9 @@ export interface SourceChatMessage {
   content: string
   timestamp?: string
   attachments?: ChatAttachment[]
+  // Documents used as context to produce this (assistant) message, surfaced as
+  // a per-message "sources used" affordance.
+  documents?: GlobalChatDocument[]
 }
 
 export interface SourceChatContextIndicator {
@@ -240,6 +243,9 @@ export interface NotebookChatMessage {
   content: string
   timestamp?: string
   attachments?: ChatAttachment[]
+  // Documents used as context to produce this (assistant) message, surfaced as
+  // a per-message "sources used" affordance.
+  documents?: GlobalChatDocument[]
 }
 
 export interface ChatAttachment {

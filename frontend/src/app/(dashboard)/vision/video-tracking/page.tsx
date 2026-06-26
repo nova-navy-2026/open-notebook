@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import { useVideoTrackingStore } from "@/lib/stores/vision-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { AddToNotebookDropdown } from "@/components/vision/AddToNotebookDropdown";
+import { RfDetrClassPicker } from "@/components/vision/RfDetrClassPicker";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 
 export default function VideoTrackingPage() {
@@ -154,25 +155,34 @@ export default function VideoTrackingPage() {
         {/* Target Input */}
         <div className="space-y-2">
           <Label htmlFor="target">
-            {tp.targetLabel}{" "}
+            {engine === "rfdetr"
+              ? t.imageAnalysisPage.classesLabel
+              : tp.targetLabel}{" "}
             {engine === "sam3" ? (
               <span className="text-destructive">*</span>
             ) : (
               <span className="text-muted-foreground text-xs">{t.imageAnalysisPage.optional}</span>
             )}
           </Label>
-          <Input
-            id="target"
-            type="text"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder={
-              engine === "sam3"
-                ? tp.targetPlaceholder
-                : t.imageAnalysisPage.queryPlaceholderRfdetr
-            }
-            required={engine === "sam3"}
-          />
+          {engine === "rfdetr" ? (
+            <RfDetrClassPicker
+              value={target}
+              onChange={setTarget}
+              placeholder={t.imageAnalysisPage.classesPlaceholder}
+              searchPlaceholder={t.imageAnalysisPage.classesSearch}
+              emptyText={t.imageAnalysisPage.classesEmpty}
+              selectedLabel={t.imageAnalysisPage.classesSelected}
+            />
+          ) : (
+            <Input
+              id="target"
+              type="text"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder={tp.targetPlaceholder}
+              required
+            />
+          )}
         </div>
 
         {/* Engine Selector */}

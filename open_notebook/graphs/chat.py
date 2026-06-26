@@ -116,6 +116,7 @@ async def astream_chat_response(
     model_override: Optional[str] = None,
     prompt_template: str = "chat/system",
     app_language: Optional[str] = None,
+    documents: Optional[list] = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream an LLM response token-by-token for the given chat session.
 
@@ -200,8 +201,13 @@ async def astream_chat_response(
         full_text = "".join(full_text_parts)
         cleaned = clean_thinking_content(full_text)
 
-        # Persist to checkpoint (add_messages reducer appends).
-        ai_message = AIMessage(content=cleaned)
+        # Persist to checkpoint (add_messages reducer appends). Record the
+        # documents used as context on the assistant message so the UI can show
+        # the sources for this specific answer (per-message "sources used").
+        ai_message = AIMessage(
+            content=cleaned,
+            additional_kwargs={"documents": documents} if documents else {},
+        )
         await asyncio.to_thread(
             graph.update_state,
             config,

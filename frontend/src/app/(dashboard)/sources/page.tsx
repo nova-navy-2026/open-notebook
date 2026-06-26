@@ -353,24 +353,29 @@ export default function SourcesPage() {
 
         {/* Uploaded sources — always visible (even when empty), beneath the
             OpenSearch / Knowledge Base sources. */}
-        <div className="mb-2 flex flex-shrink-0 items-center gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            {t.sources.uploadedSources}
-          </h2>
-          {sources.length > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              {sources.length}
-            </Badge>
-          )}
+        <div className="mb-2 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              {t.sources.uploadedSources}
+            </h2>
+            {sources.length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                {sources.length}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {t.sources.uploadedSourcesDesc}
+          </p>
         </div>
 
         {sources.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-md border">
-            <EmptyState
-              icon={FileText}
-              title={t.sources.noSourcesYet}
-              description={t.sources.allSourcesDescShort}
-            />
+          <div className="flex-shrink-0 rounded-md border border-dashed px-4 py-6 text-center">
+            <FileText className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
+            <p className="text-sm font-medium">{t.sources.noUploadedSourcesYet}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t.sources.uploadedSourcesEmptyDesc}
+            </p>
           </div>
         )}
 

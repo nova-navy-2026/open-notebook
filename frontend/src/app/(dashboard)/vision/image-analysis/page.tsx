@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import { useImageAnalysisStore } from "@/lib/stores/vision-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { AddToNotebookDropdown } from "@/components/vision/AddToNotebookDropdown";
+import { RfDetrClassPicker } from "@/components/vision/RfDetrClassPicker";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 
 export default function ImageAnalysisPage() {
@@ -146,25 +147,32 @@ export default function ImageAnalysisPage() {
         {/* Query Input */}
         <div className="space-y-2">
           <Label htmlFor="query">
-            {tp.queryLabel}{" "}
+            {engine === "rfdetr" ? tp.classesLabel : tp.queryLabel}{" "}
             {engine === "sam3" ? (
               <span className="text-destructive">*</span>
             ) : (
               <span className="text-muted-foreground text-xs">{tp.optional}</span>
             )}
           </Label>
-          <Input
-            id="query"
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              engine === "sam3"
-                ? tp.queryPlaceholderSam3
-                : tp.queryPlaceholderRfdetr
-            }
-            required={engine === "sam3"}
-          />
+          {engine === "rfdetr" ? (
+            <RfDetrClassPicker
+              value={query}
+              onChange={setQuery}
+              placeholder={tp.classesPlaceholder}
+              searchPlaceholder={tp.classesSearch}
+              emptyText={tp.classesEmpty}
+              selectedLabel={tp.classesSelected}
+            />
+          ) : (
+            <Input
+              id="query"
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={tp.queryPlaceholderSam3}
+              required
+            />
+          )}
         </div>
 
         {/* Engine Selector */}

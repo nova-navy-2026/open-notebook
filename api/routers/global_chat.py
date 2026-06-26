@@ -95,6 +95,28 @@ class ChatMessage(BaseModel):
     type: str
     content: str
     timestamp: Optional[str] = None
+    # Documents that were used as context to produce this (assistant) message,
+    # so the UI can show "sources used" per message. Stored on the checkpoint
+    # message's additional_kwargs at generation time.
+    documents: Optional[List[Dict[str, Any]]] = None
+
+
+def _serialize_chat_messages(raw_messages: Any) -> List["ChatMessage"]:
+    """Convert LangGraph checkpoint messages into API ChatMessage objects,
+    surfacing any per-message ``documents`` stored in ``additional_kwargs``."""
+    messages: List[ChatMessage] = []
+    for msg in raw_messages or []:
+        extra = getattr(msg, "additional_kwargs", None) or {}
+        docs = extra.get("documents")
+        messages.append(
+            ChatMessage(
+                id=getattr(msg, "id", f"msg_{len(messages)}"),
+                type=msg.type if hasattr(msg, "type") else "unknown",
+                content=msg.content if hasattr(msg, "content") else str(msg),
+                documents=docs if docs else None,
+            )
+        )
+    return messages
 
 
 class GlobalChatSessionResponse(BaseModel):
@@ -525,16 +547,12 @@ async def get_global_session(
             config=RunnableConfig(configurable={"thread_id": full_id}),
         )
 
-        messages: List[ChatMessage] = []
-        if thread_state and thread_state.values and "messages" in thread_state.values:
-            for msg in thread_state.values["messages"]:
-                messages.append(
-                    ChatMessage(
-                        id=getattr(msg, "id", f"msg_{len(messages)}"),
-                        type=msg.type if hasattr(msg, "type") else "unknown",
-                        content=msg.content if hasattr(msg, "content") else str(msg),
-                    )
-                )
+        raw = (
+            thread_state.values["messages"]
+            if thread_state and thread_state.values and "messages" in thread_state.values
+            else []
+        )
+        messages = _serialize_chat_messages(raw)
 
         return GlobalChatSessionWithMessagesResponse(
             id=session.id or "",
@@ -703,16 +721,12 @@ async def persist_global_chat_exchange(
             config=RunnableConfig(configurable={"thread_id": full_id}),
         )
 
-        messages: List[ChatMessage] = []
-        if thread_state and thread_state.values and "messages" in thread_state.values:
-            for msg in thread_state.values["messages"]:
-                messages.append(
-                    ChatMessage(
-                        id=getattr(msg, "id", f"msg_{len(messages)}"),
-                        type=msg.type if hasattr(msg, "type") else "unknown",
-                        content=msg.content if hasattr(msg, "content") else str(msg),
-                    )
-                )
+        raw = (
+            thread_state.values["messages"]
+            if thread_state and thread_state.values and "messages" in thread_state.values
+            else []
+        )
+        messages = _serialize_chat_messages(raw)
 
         return GlobalChatSessionWithMessagesResponse(
             id=session.id or "",
@@ -762,6 +776,92 @@ async def delete_global_session(
         raise
     except Exception as e:
         logger.error(f"Error deleting global session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete(
+    "/global-chat/sessions/{session_id}/messages/{message_id}",
+    response_model=GlobalChatSessionWithMessagesResponse,
+)
+async def delete_global_chat_message(
+    session_id: str,
+    message_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Delete a single message from a global chat session.
+
+    When the deleted message is a user (human) message, the assistant reply that
+    immediately follows it is removed too, so a question and its answer are
+    deleted as a pair.
+    """
+    try:
+        full_id = (
+            session_id
+            if session_id.startswith("chat_session:")
+            else f"chat_session:{session_id}"
+        )
+        session = await ChatSession.get(full_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        config = RunnableConfig(configurable={"thread_id": full_id})
+        thread_state = await asyncio.to_thread(chat_graph.get_state, config=config)
+
+        existing = []
+        if thread_state and thread_state.values and "messages" in thread_state.values:
+            existing = thread_state.values["messages"]
+
+        # Locate the target message and decide what to remove. Deleting a human
+        # message also removes the assistant reply that immediately follows it.
+        ids_to_remove: List[str] = []
+        for idx, msg in enumerate(existing):
+            if getattr(msg, "id", None) == message_id:
+                ids_to_remove.append(message_id)
+                if getattr(msg, "type", None) == "human":
+                    nxt = existing[idx + 1] if idx + 1 < len(existing) else None
+                    nxt_id = getattr(nxt, "id", None) if nxt is not None else None
+                    if nxt_id and getattr(nxt, "type", None) == "ai":
+                        ids_to_remove.append(nxt_id)
+                break
+
+        if not ids_to_remove:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        from langchain_core.messages import RemoveMessage
+
+        await asyncio.to_thread(
+            chat_graph.update_state,
+            config,
+            {"messages": [RemoveMessage(id=mid) for mid in ids_to_remove]},
+        )
+        await session.save()
+
+        thread_state = await asyncio.to_thread(chat_graph.get_state, config=config)
+        raw = (
+            thread_state.values["messages"]
+            if thread_state and thread_state.values and "messages" in thread_state.values
+            else []
+        )
+        messages = _serialize_chat_messages(raw)
+
+        return GlobalChatSessionWithMessagesResponse(
+            id=session.id or "",
+            title=session.title or "Untitled Session",
+            created=str(session.created),
+            updated=str(session.updated),
+            message_count=len(messages),
+            messages=messages,
+            model_override=getattr(session, "model_override", None),
+            private=bool(getattr(session, "private", False)),
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting global chat message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -841,15 +941,7 @@ async def execute_global_chat(
 
         await session.save()
 
-        messages: List[ChatMessage] = []
-        for msg in result.get("messages", []):
-            messages.append(
-                ChatMessage(
-                    id=getattr(msg, "id", f"msg_{len(messages)}"),
-                    type=msg.type if hasattr(msg, "type") else "unknown",
-                    content=msg.content if hasattr(msg, "content") else str(msg),
-                )
-            )
+        messages = _serialize_chat_messages(result.get("messages", []))
 
         context_stats = {
             "sources_count": len(context.get("sources", [])),
@@ -896,6 +988,7 @@ async def _stream_global_chat_sse(
             model_override=model_override,
             prompt_template="global_chat/system",
             app_language=app_language,
+            documents=context_stats.get("documents"),
         ):
             yield f"data: {json.dumps(event)}\n\n"
     except Exception as e:
