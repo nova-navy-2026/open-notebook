@@ -257,7 +257,7 @@ export function AppSidebar() {
             <div className="relative flex items-center justify-center w-full">
               <Image
                 src={logoSrc}
-                alt="NNBook"
+                alt="Marinheiro de Silício"
                 width={32}
                 height={32}
                 style={{ width: "auto", height: "auto" }}
@@ -349,6 +349,18 @@ export function AppSidebar() {
                 side={isCollapsed ? "right" : "bottom"}
                 className="w-48"
               >
+                {/* Order mirrors the sidebar menu: Sources, Chat, Workspaces,
+                    Research, Image, Video, Transcription. */}
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleCreateSelection("source");
+                  }}
+                  className="gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  {t.common.newSource ?? "New Source"}
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={(event) => {
                     event.preventDefault();
@@ -368,26 +380,6 @@ export function AppSidebar() {
                 >
                   <Book className="h-4 w-4" />
                   {t.common.notebook}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    handleCreateSelection("source");
-                  }}
-                  className="gap-2"
-                >
-                  <FileText className="h-4 w-4" />
-                  {t.common.newSource ?? "New Source"}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    handleCreateSelection("transcription");
-                  }}
-                  className="gap-2"
-                >
-                  <Captions className="h-4 w-4" />
-                  {t.navigation.transcription ?? "Transcription"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={(event) => {
@@ -418,6 +410,16 @@ export function AppSidebar() {
                 >
                   <Video className="h-4 w-4" />
                   {t.navigation.videoAnalysis ?? "Video Analysis"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    handleCreateSelection("transcription");
+                  }}
+                  className="gap-2"
+                >
+                  <Captions className="h-4 w-4" />
+                  {t.navigation.transcription ?? "Transcription"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

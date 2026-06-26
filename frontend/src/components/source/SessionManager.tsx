@@ -300,6 +300,8 @@ export function SessionManager({
                               variant="ghost"
                               className="h-7 w-7 p-0"
                               onClick={() => handleStartEdit(session)}
+                              title={t.common.edit ?? 'Edit'}
+                              aria-label={t.common.edit ?? 'Edit'}
                             >
                               <Edit2 className="h-3 w-3" />
                             </Button>
@@ -308,6 +310,8 @@ export function SessionManager({
                               variant="ghost"
                               className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                               onClick={() => setDeleteConfirmId(session.id)}
+                              title={t.common.delete ?? 'Delete'}
+                              aria-label={t.common.delete ?? 'Delete'}
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>

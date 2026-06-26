@@ -70,7 +70,7 @@ export const frFR = {
     queryPlaceholder:
       "ex. Comment le respect strict des procédures de sécurité par l'officier de permanence lors de la manutention de missiles, torpilles et explosifs garantit-il la prévention des accidents et la protection du matériel ?",
     transcriptAtaNotice:
-      "Pré-rempli à partir de la dernière transcription. Un compte rendu de réunion (ATA) sera généré directement à partir de la transcription dans la langue de la conversation — aucun contexte OpenSearch n'est utilisé. Modifiez avant de générer si nécessaire.",
+      "Pré-rempli à partir de la dernière transcription. Le document est généré directement à partir de la transcription (sans OpenSearch/web), en utilisant le type de rapport, le ton et le style de document que vous choisissez. Modifiez avant de générer si nécessaire.",
     reportType: "Type de rapport",
     toneLabel: "Ton de rédaction",
     modelLabel: "Modèle d'IA",
@@ -80,7 +80,7 @@ export const frFR = {
     generationStartedDesc:
       "Votre recherche est en cours de génération. Consultez l'onglet Historique pour suivre la progression.",
     failedToStart: "Échec du lancement de la recherche",
-    noJobs: "Aucune tâche de recherche pour l'instant",
+    noJobs: "Aucune recherche pour l'instant",
     noJobsDesc:
       "Générez votre premier rapport de recherche pour le voir ici.",
     activeJobs: "Recherche en cours — actualisation automatique...",
@@ -150,7 +150,7 @@ export const frFR = {
     podcast: "Podcast",
     quickActions: "Actions rapides",
     quickActionsDesc: "Navigation, recherche, poser une question, thème",
-    appName: "NNBook",
+    appName: "Marinheiro de Silício",
     add: "Ajouter",
     remove: "Retirer",
     confirm: "Confirmer",
@@ -286,7 +286,7 @@ export const frFR = {
   },
   connectionErrors: {
     apiTitle: "Impossible de se connecter au serveur API",
-    apiDesc: "Le serveur API de NNBook est injoignable",
+    apiDesc: "Le serveur API de Marinheiro de Silício est injoignable",
     dbTitle: "Échec de la connexion à la base de données",
     dbDesc:
       "Le serveur API fonctionne, mais la base de données n'est pas accessible",
@@ -303,7 +303,7 @@ export const frFR = {
     checkSurreal: "Vérifiez si SurrealDB est lancé :",
     seeDocumentation:
       "Pour des instructions de configuration détaillées, consultez :",
-    docLink: "Documentation de NNBook",
+    docLink: "Documentation de Marinheiro de Silício",
     showTechnical: "Afficher les détails techniques",
     attemptedUrl: "URL tentée",
     message: "Message",
@@ -315,7 +315,7 @@ export const frFR = {
     localDevLabel: "Pour le développement local",
   },
   auth: {
-    loginTitle: "NNBook",
+    loginTitle: "Marinheiro de Silício",
     loginDesc: "Entrez votre mot de passe pour accéder à l'application",
     passwordPlaceholder: "Mot de passe",
     signingIn: "Connexion...",
@@ -1042,7 +1042,7 @@ export const frFR = {
     autoDeleteFiles: "Suppression automatique des fichiers",
     autoDeletePlaceholder: "Sélectionnez une option de suppression automatique",
     filesHelp:
-      "Une fois vos fichiers téléchargés et traités, ils ne sont plus nécessaires. La plupart des utilisateurs devraient autoriser NNBook à supprimer automatiquement les fichiers du dossier de téléchargement.",
+      "Une fois vos fichiers téléchargés et traités, ils ne sont plus nécessaires. La plupart des utilisateurs devraient autoriser Marinheiro de Silício à supprimer automatiquement les fichiers du dossier de téléchargement.",
     loadFailed: "Échec du chargement des paramètres",
   },
   advanced: {
@@ -1056,7 +1056,7 @@ export const frFR = {
     latestVersion: "Dernière version",
     status: "État",
     updateAvailable: "Version {version} disponible",
-    updateAvailableDesc: "Une nouvelle version de NNBook est disponible.",
+    updateAvailableDesc: "Une nouvelle version de Marinheiro de Silício est disponible.",
     upToDate: "À jour",
     unknown: "Inconnu",
     viewOnGithub: "Voir sur GitHub",
@@ -1154,9 +1154,9 @@ export const frFR = {
     deleteModel: "Supprimer le modèle",
     defaultAssignments: "Attributions des modèles par défaut",
     defaultAssignmentsDesc:
-      "Configurez quels modèles utiliser pour les différents usages d'NNBook",
+      "Configurez quels modèles utiliser pour les différents usages d'Marinheiro de Silício",
     missingRequiredModels:
-      "Modèles requis manquants : {models}. NNBook pourrait ne pas fonctionner correctement sans eux.",
+      "Modèles requis manquants : {models}. Marinheiro de Silício pourrait ne pas fonctionner correctement sans eux.",
     selectModelPlaceholder: "Sélectionnez un modèle",
     requiredModelPlaceholder: "⚠️ Requis - Sélectionnez un modèle",
     chatModelLabel: "Modèle de Chat",
@@ -1211,7 +1211,7 @@ export const frFR = {
   apiKeys: {
     title: "Configurez votre IA avec vos propres clés API",
     description:
-      "Stockez les clés API de manière sécurisée dans la base de données pour activer les fournisseurs d'IA dans NNBook.",
+      "Stockez les clés API de manière sécurisée dans la base de données pour activer les fournisseurs d'IA dans Marinheiro de Silício.",
     encryptionRequired: "Clé de chiffrement non configurée",
     encryptionRequiredDescription:
       "Définissez la variable d'environnement OPEN_NOTEBOOK_ENCRYPTION_KEY avec une chaîne secrète pour activer le stockage des clés API dans la base de données.",
@@ -1350,7 +1350,7 @@ export const frFR = {
   },
   transcriptionPage: {
     reportTitleLabel: "Titre du document",
-    reportTitlePlaceholder: "ex. Réunion SI-DAGI 19/06",
+    reportTitlePlaceholder: "ex. Réunion d'équipe 19/06",
     reportTypeLabel: "Type de document",
     reportTypeAta: "Compte rendu de réunion (ATA)",
     reportTypeConversation: "Conversation / Dialogue",
@@ -1398,7 +1398,7 @@ export const frFR = {
   },
   collaboration: {
     share: "Partager",
-    shareNotebook: "Partager le notebook",
+    shareNotebook: "Partager le workspace",
     members: "Membres",
     member: "Membre",
     owner: "Propriétaire",
@@ -1417,8 +1417,8 @@ export const frFR = {
     invitedYou: "vous a invité à collaborer",
     accept: "Accepter",
     decline: "Refuser",
-    joinedNotebook: "Vous avez rejoint le notebook",
-    joining: "Connexion au notebook…",
+    joinedNotebook: "Vous avez rejoint le workspace",
+    joining: "Connexion au workspace…",
     inviteSent: "Invitation envoyée",
     memberRemoved: "Membre retiré",
   },

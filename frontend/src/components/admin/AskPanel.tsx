@@ -180,7 +180,7 @@ export function AskPanel() {
                   className="flex-1 min-w-0"
                 >
                   <Save className="h-4 w-4 mr-2 flex-shrink-0" />
-                  <span className="truncate">Save to Notebooks</span>
+                  <span className="truncate">Save to Workspaces</span>
                 </Button>
               )}
             </div>

@@ -92,7 +92,7 @@ const getNavigationItems = (t: TranslationKeys) => [
 
 const getCreateItems = (t: TranslationKeys) => [
   { name: t.common.newSource ?? "New Source", action: "source", icon: FileText },
-  { name: t.common.newNotebook ?? "New Notebook", action: "notebook", icon: Book },
+  { name: t.common.newNotebook ?? "New Workspace", action: "notebook", icon: Book },
   { name: t.common.newPodcast ?? "New Podcast", action: "podcast", icon: Mic },
   { name: t.navigation.research ?? "Deep Research", action: "research", icon: FlaskConical },
   { name: t.navigation.transcription ?? "Transcription", action: "transcription", icon: Bot },

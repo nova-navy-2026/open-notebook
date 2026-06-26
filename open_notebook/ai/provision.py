@@ -13,8 +13,8 @@ def _amalia_from_env(**kwargs) -> LanguageModel:
 
     base_url = os.environ.get("AMALIA_BASE_URL", "https://api.novasearch.org/amalia-llm/v1")
     api_key = os.environ.get("AMALIA_API_KEY", "dummy")
-    # AMALIA_SMART_LLM is "openai:carminho/AMALIA-9B-50-DPO" — strip the prefix
-    smart_llm = os.environ.get("AMALIA_SMART_LLM", "openai:carminho/AMALIA-9B-50-DPO")
+    # AMALIA_SMART_LLM is "openai:amalia-llm/AMALIA-9B-50-DPO" — strip the prefix
+    smart_llm = os.environ.get("AMALIA_SMART_LLM", "openai:amalia-llm/AMALIA-9B-50-DPO")
     model_name = smart_llm.split(":", 1)[-1]
 
     return AIFactory.create_language(

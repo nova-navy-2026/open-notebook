@@ -109,6 +109,10 @@ class GenerateResearchRequest(BaseModel):
     report_style: Optional[str] = None
     # Optional user-supplied document title.
     title: Optional[str] = None
+    # Audio-report flow: force the retrieval-free transcript path for ANY
+    # report_type (so the transcription screen can offer all report types +
+    # tones while staying transcript-only). report_type + tone shape the prompt.
+    transcript_only: bool = False
 
 class ResearchJobResponse(BaseModel):
     """Response for a submitted research job."""
@@ -197,6 +201,7 @@ async def generate_research(
             language=request.language,
             report_style=request.report_style,
             title=request.title,
+            transcript_only=request.transcript_only,
             # Navy identity filters the OpenSearch corpus. The platform auth
             # user loads private SurrealDB uploads and scopes job visibility.
             user_id=user_id,

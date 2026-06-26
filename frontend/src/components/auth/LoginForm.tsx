@@ -184,14 +184,14 @@ export function LoginForm() {
           <div className="flex justify-center">
             <Image
               src={heroSrc}
-              alt="NNBook"
+              alt="Marinheiro de Silício"
               width={192}
               height={192}
               style={{ width: "auto", height: "auto" }}
               priority
             />
           </div>
-          <CardTitle className="text-2xl">NNBook</CardTitle>
+          <CardTitle className="text-2xl">Marinheiro de Silício</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6">

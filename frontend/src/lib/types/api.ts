@@ -307,6 +307,8 @@ export type GlobalChatSession = BaseChatSession
 
 export interface GlobalChatSessionWithMessages extends GlobalChatSession {
   messages: NotebookChatMessage[]
+  // Accumulated "documents used" across the conversation, persisted server-side.
+  documents?: GlobalChatDocument[]
 }
 
 export interface CreateGlobalChatSessionRequest {

@@ -14,6 +14,7 @@ import { ShareNotebookDialog } from '@/components/notebooks/ShareNotebookDialog'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import { InlineEdit } from '@/components/common/InlineEdit'
+import { PageInfoButton } from '@/components/common/PageInfoButton'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 interface NotebookHeaderProps {
@@ -77,7 +78,7 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
               >
                 <Image
                   src={logoSrc}
-                  alt="NNBook"
+                  alt="Marinheiro de Silício"
                   width={32}
                   height={32}
                   style={{ width: 'auto', height: 'auto' }}
@@ -104,7 +105,8 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
                 </Badge>
               )}
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex gap-2 shrink-0 items-center">
+              <PageInfoButton pageKey="notebooks" />
               <Button
                 variant="outline"
                 size="sm"

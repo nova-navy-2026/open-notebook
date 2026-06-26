@@ -723,8 +723,13 @@ export function SourceDetailContent({
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold">{t.sources.uploadedFile}</h3>
                       <div className="flex flex-wrap items-center gap-2">
-                        <code className="rounded bg-muted px-2 py-1 text-sm">
-                          {source.asset.file_path}
+                        {/* Show only the file name — never the internal server
+                            path (which leaks the upload directory / username). */}
+                        <code
+                          className="rounded bg-muted px-2 py-1 text-sm"
+                          title={extractFilename(source.asset.file_path, source.title || 'file')}
+                        >
+                          {extractFilename(source.asset.file_path, source.title || 'file')}
                         </code>
                         <Button
                           size="sm"
