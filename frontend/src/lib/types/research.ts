@@ -38,6 +38,9 @@ export interface ResearchGenerateRequest {
   report_style?: string;
   // Optional user-supplied document title.
   title?: string;
+  // Audio-report flow: force the retrieval-free transcript path for ANY report
+  // type (no OpenSearch/web). report_type + tone shape the prompt instead.
+  transcript_only?: boolean;
 }
 
 export interface ResearchJobSubmitResponse {

@@ -31,6 +31,16 @@ import type { ReportTypeInfo, ToneInfo } from "@/lib/types/research";
 const EMPTY_REPORT_TYPES: ReportTypeInfo[] = [];
 const EMPTY_TONES: ToneInfo[] = [];
 
+// Retrieval-only report types (multi-agent deep research). They only make sense
+// when there's a corpus/web to search, so they're hidden in transcript mode —
+// a transcript report is always retrieval-free.
+const TRANSCRIPT_HIDDEN_REPORT_TYPES = new Set([
+  "deep",
+  "ttd_dr",
+  "react_deep",
+  "plan_and_execute_dr",
+]);
+
 // Map an i18n locale code to a human-readable language name the backend
 // prompt can embed (e.g. "Write the minutes in {language}").
 function toLanguageName(locale: string): string {
@@ -71,7 +81,19 @@ export function ResearchGeneratePanel({
   const [transcriptTitle, setTranscriptTitle] = useState<string | null>(null);
   const [transcriptAppLanguage, setTranscriptAppLanguage] = useState<string | null>(null);
 
-  const availableReportTypes = reportTypes ?? EMPTY_REPORT_TYPES;
+  const allReportTypes = reportTypes ?? EMPTY_REPORT_TYPES;
+  // In transcript mode, hide the retrieval-only deep-research types (they never
+  // retrieve here, so they'd be misleading). The reconcile effect below resets
+  // the selection if the current type becomes unavailable.
+  const availableReportTypes = useMemo(
+    () =>
+      fromTranscript
+        ? allReportTypes.filter(
+            (rt) => !TRANSCRIPT_HIDDEN_REPORT_TYPES.has(rt.value),
+          )
+        : allReportTypes,
+    [allReportTypes, fromTranscript],
+  );
   const availableTones = tones ?? EMPTY_TONES;
 
   // For display only (description text beneath the select)
@@ -164,12 +186,14 @@ export function ResearchGeneratePanel({
 
     await generateMutation.mutateAsync({
       query: query.trim(),
-      // A meeting transcript is turned into a document via the dedicated,
-      // retrieval-free meeting-minutes path. The chosen style (ATA / conversa /
-      // resumo / literal) is passed as report_style so the backend can vary the
-      // prompt. Otherwise honour the selected research report type.
-      report_type: fromTranscript ? "meeting_minutes" : reportType,
+      // Always honour the user's chosen report type + tone. For a transcript
+      // (audio report) we also set transcript_only so the backend runs the
+      // retrieval-free path (no OpenSearch/web): the report type + tone shape
+      // the prompt, and the 4-style + title chosen on the Transcription page are
+      // carried through as report_style/title.
+      report_type: reportType,
       report_style: fromTranscript ? transcriptStyle ?? "ata" : undefined,
+      transcript_only: fromTranscript || undefined,
       title: fromTranscript ? transcriptTitle ?? undefined : undefined,
       report_source: "local",
       tone: tone,

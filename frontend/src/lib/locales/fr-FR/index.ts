@@ -70,7 +70,7 @@ export const frFR = {
     queryPlaceholder:
       "ex. Comment le respect strict des procédures de sécurité par l'officier de permanence lors de la manutention de missiles, torpilles et explosifs garantit-il la prévention des accidents et la protection du matériel ?",
     transcriptAtaNotice:
-      "Pré-rempli à partir de la dernière transcription. Un compte rendu de réunion (ATA) sera généré directement à partir de la transcription dans la langue de la conversation — aucun contexte OpenSearch n'est utilisé. Modifiez avant de générer si nécessaire.",
+      "Pré-rempli à partir de la dernière transcription. Le document est généré directement à partir de la transcription (sans OpenSearch/web), en utilisant le type de rapport, le ton et le style de document que vous choisissez. Modifiez avant de générer si nécessaire.",
     reportType: "Type de rapport",
     toneLabel: "Ton de rédaction",
     modelLabel: "Modèle d'IA",

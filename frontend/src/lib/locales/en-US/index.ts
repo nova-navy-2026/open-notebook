@@ -1179,7 +1179,7 @@ export const enUS = {
     queryPlaceholder:
       "e.g., How does strict compliance with safety protocols by the duty officer during the handling of missiles, torpedoes, and explosives prevent accidents and protect the materials under their responsibility?",
     transcriptAtaNotice:
-      "Pre-filled from the latest transcription. A meeting-minutes (ATA) document will be generated directly from the transcript in the conversation language — no OpenSearch context is used. Edit before generating if needed.",
+      "Pre-filled from the latest transcription. The document is generated directly from the transcript (no OpenSearch/web) using the report type, tone and document style you choose. Edit before generating if needed.",
     reportType: "Report Type",
     toneLabel: "Writing Tone",
     modelLabel: "AI Model",

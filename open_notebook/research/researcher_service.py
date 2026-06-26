@@ -105,6 +105,11 @@ class ResearchRequest(BaseModel):
     report_style: Optional[str] = None
     # Optional user-supplied document title.
     title: Optional[str] = None
+    # When True, force the retrieval-free transcript path REGARDLESS of
+    # report_type. This lets the audio-report flow offer the full set of
+    # research report types + tones while staying transcript-only (no OpenSearch
+    # / web): the chosen report_type + tone shape the prompt, not retrieval.
+    transcript_only: bool = False
 
 
 class RetrievedDocument(BaseModel):
@@ -1157,6 +1162,10 @@ async def _run_meeting_minutes(
         # report_style lets NOVA-Researcher vary the prompt (ATA / conversa /
         # resumo / literal). Older NOVA versions ignore it and produce an ATA.
         style = (request.report_style or "ata").strip().lower()
+        # Pass the chosen research report type + tone so NOVA can shape the
+        # transcript prompt (depth/structure + voice) — still retrieval-free.
+        # Legacy meeting_minutes requests send report_type=meeting_minutes,
+        # which has no extra guidance, so behaviour is unchanged for them.
         resp = await _http_client.post(
             f"{NOVA_RESEARCHER_URL}/meeting-minutes",
             json={
@@ -1164,6 +1173,8 @@ async def _run_meeting_minutes(
                 "language": language,
                 "style": style,
                 "title": request.title or None,
+                "report_type": request.report_type.value,
+                "tone": request.tone.value,
             },
             params={"provider": provider} if provider else {},
         )
@@ -1181,7 +1192,7 @@ async def _run_meeting_minutes(
         return ResearchResult(
             id=job_id,
             query=request.query,
-            report_type=ResearchReportType.MEETING_MINUTES.value,
+            report_type=request.report_type.value,
             report=report,
             source_urls=[],
             research_costs=data.get("costs", 0.0),
@@ -1198,7 +1209,7 @@ async def _run_meeting_minutes(
         return ResearchResult(
             id=job_id,
             query=request.query,
-            report_type=ResearchReportType.MEETING_MINUTES.value,
+            report_type=request.report_type.value,
             report="",
             status="failed",
             error=str(e),
@@ -1225,8 +1236,10 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
     if request.report_type == ResearchReportType.REACT_DEEP:
         return await _run_react_dr(request, job_id, progress_callback=progress_callback)
 
-    # ── Meeting minutes (ATA): retrieval-free, transcript-only ────────
-    if request.report_type == ResearchReportType.MEETING_MINUTES:
+    # ── Transcript-only (audio report): retrieval-free regardless of the
+    # chosen report_type. The legacy meeting_minutes report_type also lands
+    # here. report_type + tone shape the prompt; no OpenSearch / web. ────
+    if request.transcript_only or request.report_type == ResearchReportType.MEETING_MINUTES:
         return await _run_meeting_minutes(request, job_id, progress_callback=progress_callback)
 
     if request.report_type == ResearchReportType.PLAN_AND_EXECUTE_DR:

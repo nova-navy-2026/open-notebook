@@ -1189,7 +1189,7 @@ export const ptPT = {
     queryPlaceholder:
       "ex.: De que forma o cumprimento rigoroso das disposições de segurança pelo oficial de dia, durante a movimentação de mísseis, munições, torpedos e explosivos, garante a prevenção de acidentes e a proteção do material sob a sua responsabilidade?",
     transcriptAtaNotice:
-      "Pré-preenchido a partir da última transcrição. Será gerada uma ATA (ata de reunião) diretamente a partir da transcrição, na língua da conversa — não é usado contexto do OpenSearch. Edite antes de gerar, se necessário.",
+      "Pré-preenchido a partir da última transcrição. O documento é gerado diretamente a partir da transcrição (sem OpenSearch/web), usando o tipo de relatório, o tom e o estilo de documento que escolher. Edite antes de gerar, se necessário.",
     reportType: "Tipo de Relatório",
     toneLabel: "Tom de Escrita",
     modelLabel: "Modelo de IA",
