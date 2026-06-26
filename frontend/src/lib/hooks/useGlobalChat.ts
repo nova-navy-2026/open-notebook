@@ -940,6 +940,16 @@ export function useGlobalChat() {
             } else if (data.type === 'context_stats') {
               if (data.data) {
                 setContextStats(data.data)
+                // Attach the documents used for THIS answer to the AI message so
+                // it can show a per-message "sources used" affordance. context_stats
+                // normally arrives before any token; if the bubble already exists
+                // (late arrival on some models), back-fill it.
+                pendingDocuments = data.data.documents
+                if (aiMessageId) {
+                  setMessages(prev =>
+                    prev.map(m => m.id === aiMessageId ? { ...m, documents: pendingDocuments } : m)
+                  )
+                }
                 setSessionDocuments(prev => {
                   const merged = mergeSessionDocuments(prev, data.data.documents)
                   const sid = currentSessionIdRef.current
