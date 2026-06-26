@@ -435,7 +435,7 @@ export default function TranscriptionPage() {
                   id="report-title"
                   value={reportTitle}
                   onChange={(e) => setReportTitle(e.target.value)}
-                  placeholder={tp.reportTitlePlaceholder ?? "Ex.: Reunião SI-DAGI 19/06"}
+                  placeholder={tp.reportTitlePlaceholder ?? "Ex.: Reunião de equipa 19/06"}
                 />
               </div>
               <div className="space-y-1 sm:w-56">

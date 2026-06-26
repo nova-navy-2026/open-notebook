@@ -268,7 +268,9 @@ export function GraphCanvas({
           onRenderFramePre={drawClusterBubbles}
           onEngineStop={() => {
             if (shouldZoom.current) {
-              fgRef.current?.zoomToFit(500, 30);
+              // Larger padding = zoom out a bit on open, so the whole graph has
+              // breathing room instead of filling the canvas edge-to-edge.
+              fgRef.current?.zoomToFit(500, 90);
               shouldZoom.current = false;
             }
           }}

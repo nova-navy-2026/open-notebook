@@ -713,11 +713,11 @@ export function ChatPanel({
                 currentModel={modelOverride}
                 onModelChange={onModelChange}
                 disabled={isStreaming || isVisualModelLocked}
-                displayNameOverride={isVisualModelLocked ? 'Gemma' : undefined}
+                displayNameOverride={isVisualModelLocked ? 'Modelo de visão' : undefined}
                 locked={isVisualModelLocked}
                 lockedReason={
                   isVisualModelLocked
-                    ? 'Os pedidos com imagem ou vídeo usam automaticamente a Gemma multimodal.'
+                    ? 'As imagens e vídeos são analisados automaticamente por um modelo de visão dedicado, por isso o modelo fica fixo nestes pedidos. Remova o anexo para voltar a escolher o modelo.'
                     : undefined
                 }
               />

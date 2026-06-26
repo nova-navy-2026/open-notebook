@@ -147,6 +147,35 @@ function mergeSessionDocuments(
   return Array.from(byName.values())
 }
 
+// The "documents used in this conversation" list is accumulated client-side
+// from streaming context_stats and is NOT stored on the message records
+// server-side. Cache it per session in localStorage so switching conversations
+// (or reloading) restores each conversation's own list instead of losing it.
+const sessionDocsKey = (sessionId: string) => `globalChat:${sessionId}:documents`
+
+function loadSessionDocs(sessionId: string | null | undefined): GlobalChatDocument[] {
+  if (!sessionId || typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(sessionDocsKey(sessionId))
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveSessionDocs(
+  sessionId: string | null | undefined,
+  docs: GlobalChatDocument[],
+): void {
+  if (!sessionId || typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(sessionDocsKey(sessionId), JSON.stringify(docs))
+  } catch {
+    /* ignore quota / serialization errors */
+  }
+}
+
 export function useGlobalChat() {
   const { t, language } = useTranslation()
   const queryClient = useQueryClient()
@@ -174,6 +203,10 @@ export function useGlobalChat() {
   const lastVisualContextRef = useRef('')
   const lastDataFileRef = useRef<File | null>(null)
   const currentSessionIdRef = useRef<string | null>(currentSessionId)
+  // Tracks the session whose server-persisted documents we've already loaded,
+  // so we restore from the server once per session switch (authoritative,
+  // cross-device) without clobbering the list while it accumulates live.
+  const loadedDocsSessionRef = useRef<string | null>(null)
   // Deep research jobs already being polled by this hook instance (inline or
   // reconciled), so the reconciler never double-polls the same job.
   const polledResearchJobsRef = useRef<Set<string>>(new Set())
@@ -215,6 +248,19 @@ export function useGlobalChat() {
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId
   }, [currentSessionId])
+
+  // Restore the conversation's "documents used" from the server, once per
+  // session. The server is authoritative (cross-device); we only override when
+  // it actually has docs, so pre-feature sessions keep any localStorage list.
+  useEffect(() => {
+    const sid = currentSession?.id
+    if (!sid || loadedDocsSessionRef.current === sid) return
+    loadedDocsSessionRef.current = sid
+    const serverDocs = currentSession?.documents
+    if (serverDocs && serverDocs.length > 0) {
+      setSessionDocuments(serverDocs)
+    }
+  }, [currentSession])
 
   // Resume any deep research jobs whose "em curso" message was loaded from the
   // server (e.g. after a reload or navigating away and back). Without this the
@@ -258,6 +304,8 @@ export function useGlobalChat() {
     if (!autoSelectedRef.current && sessions.length > 0 && !currentSessionId) {
       autoSelectedRef.current = true
       setCurrentSessionId(sessions[0].id)
+      // Restore that conversation's previously-used documents on first load.
+      setSessionDocuments(loadSessionDocs(sessions[0].id))
     }
   }, [sessions, currentSessionId])
 
@@ -887,7 +935,22 @@ export function useGlobalChat() {
             } else if (data.type === 'context_stats') {
               if (data.data) {
                 setContextStats(data.data)
-                setSessionDocuments(prev => mergeSessionDocuments(prev, data.data.documents))
+                setSessionDocuments(prev => {
+                  const merged = mergeSessionDocuments(prev, data.data.documents)
+                  const sid = currentSessionIdRef.current
+                  // Fast local cache for instant restore on switch...
+                  saveSessionDocs(sid, merged)
+                  // ...and persist server-side so it survives across devices and
+                  // long-term (fire-and-forget; mark loaded so the restore effect
+                  // doesn't clobber this fresher list on the next session refetch).
+                  if (sid) {
+                    loadedDocsSessionRef.current = sid
+                    void globalChatApi
+                      .updateSessionDocuments(sid, merged)
+                      .catch(() => {})
+                  }
+                  return merged
+                })
               }
             } else if (data.type === 'error') {
               throw new Error(data.message || 'Stream error')
@@ -980,7 +1043,8 @@ export function useGlobalChat() {
     setPrivateMode(false)
     setCurrentSessionId(sessionId)
     setContextStats(null)
-    setSessionDocuments([])
+    // Restore THIS conversation's previously-used documents instead of clearing.
+    setSessionDocuments(loadSessionDocs(sessionId))
   }, [])
 
   // Create session — an explicit "New chat" is always a normal (listed) session.

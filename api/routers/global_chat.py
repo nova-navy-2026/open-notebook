@@ -109,6 +109,14 @@ class GlobalChatSessionResponse(BaseModel):
 
 class GlobalChatSessionWithMessagesResponse(GlobalChatSessionResponse):
     messages: List[ChatMessage] = Field(default_factory=list)
+    # Accumulated "documents used" across the conversation, persisted server-side.
+    documents: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class UpdateGlobalChatDocumentsRequest(BaseModel):
+    """Replace the persisted 'documents used' list for a conversation."""
+
+    documents: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ExecuteGlobalChatRequest(BaseModel):
@@ -545,6 +553,7 @@ async def get_global_session(
             messages=messages,
             model_override=getattr(session, "model_override", None),
             private=bool(getattr(session, "private", False)),
+            documents=getattr(session, "documents", None) or [],
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -723,6 +732,7 @@ async def persist_global_chat_exchange(
             messages=messages,
             model_override=getattr(session, "model_override", None),
             private=bool(getattr(session, "private", False)),
+            documents=getattr(session, "documents", None) or [],
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -730,6 +740,54 @@ async def persist_global_chat_exchange(
         raise
     except Exception as e:
         logger.error(f"Error persisting global chat exchange: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put(
+    "/global-chat/sessions/{session_id}/documents",
+    response_model=GlobalChatSessionResponse,
+)
+async def update_global_session_documents(
+    session_id: str,
+    request: UpdateGlobalChatDocumentsRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Persist the accumulated 'documents used' list for a conversation.
+
+    The list is built client-side from streaming context stats (it is not part
+    of the stored messages), so the client PUTs the full merged list here after
+    each answer. Stored on the session record so it survives conversation
+    switches, reloads AND different devices.
+    """
+    try:
+        full_id = (
+            session_id
+            if session_id.startswith("chat_session:")
+            else f"chat_session:{session_id}"
+        )
+        session = await ChatSession.get(full_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not _session_belongs_to_user(session, user_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session.documents = request.documents or []
+        await session.save()
+
+        return GlobalChatSessionResponse(
+            id=session.id or "",
+            title=session.title or "Untitled Session",
+            created=str(session.created),
+            updated=str(session.updated),
+            model_override=getattr(session, "model_override", None),
+            private=bool(getattr(session, "private", False)),
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating global session documents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

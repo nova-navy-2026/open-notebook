@@ -733,6 +733,11 @@ class ChatSession(ObjectModel):
     # Private ("temporary") conversation: persisted normally but hidden from the
     # user's chat history listing (like ChatGPT/Gemini temporary chats).
     private: bool = False
+    # Accumulated "documents used" across the conversation (RAG sources / navy
+    # corpus docs referenced in the answers). Persisted server-side so the list
+    # survives conversation switches, reloads AND different devices. Each item is
+    # a dict: {name, type, pages, chunks}.
+    documents: List[dict] = Field(default_factory=list)
 
     async def relate_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:

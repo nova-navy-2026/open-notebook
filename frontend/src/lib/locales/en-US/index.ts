@@ -1189,7 +1189,7 @@ export const enUS = {
     generationStartedDesc:
       "Your research is being generated. Check the History tab for progress.",
     failedToStart: "Failed to Start Research",
-    noJobs: "No research jobs yet",
+    noJobs: "No research reports yet",
     noJobsDesc: "Generate your first research report to see it here.",
     activeJobs: "Research in progress — auto-refreshing...",
     viewReport: "View Report",
@@ -1316,7 +1316,7 @@ export const enUS = {
   },
   transcriptionPage: {
     reportTitleLabel: "Document title",
-    reportTitlePlaceholder: "e.g. SI-DAGI meeting 19/06",
+    reportTitlePlaceholder: "e.g. Team meeting 19/06",
     reportTypeLabel: "Document type",
     reportTypeAta: "Meeting minutes (ATA)",
     reportTypeConversation: "Conversation / Dialogue",

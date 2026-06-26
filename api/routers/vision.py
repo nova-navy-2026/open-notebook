@@ -103,23 +103,25 @@ def _gemma_model() -> str:
 def _language_instruction(language: Optional[str]) -> str:
     """Instruction telling the vision LLM which language to answer in.
 
-    ``language`` is the app's current locale (e.g. "pt-PT", "fr-FR", "en-US"),
-    forwarded by the frontend. When absent we keep the previous default of
-    European Portuguese so behaviour is unchanged for older callers.
+    Priority: (1) the language the USER WROTE the request in, (2) the app's
+    current language (``language``, e.g. "pt-PT", "fr-FR", "en-US"), (3)
+    European Portuguese as the final fallback.
     """
     from open_notebook.ai.vision import caption_language_name
 
     name = caption_language_name(language)
-    if name == "European Portuguese (pt-PT)":
-        return (
-            "Responde em português europeu (pt-PT). Não uses português do Brasil "
-            "(evita 'você', 'usuário', 'arquivo', 'tela', 'celular')."
-        )
-    if name:
-        return f"Responde sempre em {name}, exceto citações textuais."
+    secondary = (
+        name if (name and name != "European Portuguese (pt-PT)")
+        else "português europeu (pt-PT)"
+    )
     return (
-        "Responde em português europeu (pt-PT), exceto se o pedido do utilizador "
-        "estiver claramente noutra língua."
+        "Responde SEMPRE na mesma língua em que o utilizador escreveu o pedido. "
+        f"Se a língua do pedido não for clara, responde em {secondary}. "
+        "Em último caso, usa português europeu (pt-PT) — nunca português do "
+        "Brasil (evita 'você', 'usuário', 'arquivo', 'tela', 'celular'). "
+        "Usa essa mesma língua em TODO o texto, incluindo títulos e notas; "
+        "apenas as citações textuais (p. ex. texto extraído por OCR) mantêm o "
+        "idioma original."
     )
 
 
@@ -1762,7 +1764,7 @@ async def multimodal_chat(
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
-                "Não consegui usar a análise multimodal da Gemma.",
+                "Não consegui analisar a imagem.",
             )
         raise HTTPException(status_code=503, detail=str(e))
     except httpx.TimeoutException as e:
@@ -1774,7 +1776,7 @@ async def multimodal_chat(
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
-                "A análise multimodal da Gemma demorou demasiado tempo.",
+                "A análise da imagem demorou demasiado tempo.",
             )
         raise HTTPException(status_code=504, detail="Gemma multimodal request timed out")
     except httpx.HTTPStatusError as e:
@@ -1786,7 +1788,7 @@ async def multimodal_chat(
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
-                f"A análise multimodal da Gemma falhou com HTTP {e.response.status_code}.",
+                f"A análise da imagem falhou (HTTP {e.response.status_code}).",
             )
         raise HTTPException(status_code=502, detail=f"Gemma API returned {e.response.status_code}")
     except httpx.RequestError as e:
@@ -1796,7 +1798,7 @@ async def multimodal_chat(
         if saved_path and uploaded_ext in ALLOWED_IMAGE_EXTENSIONS:
             return await _image_analysis_fallback_response(
                 saved_path,
-                f"Não consegui contactar a Gemma multimodal ({type(e).__name__}).",
+                f"Não consegui contactar o serviço de análise de imagem ({type(e).__name__}).",
             )
         raise HTTPException(status_code=502, detail=f"Gemma request failed: {detail}")
     except Exception as e:

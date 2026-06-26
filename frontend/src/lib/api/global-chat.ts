@@ -7,6 +7,7 @@ import {
   UpdateGlobalChatSessionRequest,
   NotebookChatMessage,
   GlobalChatContextStats,
+  GlobalChatDocument,
 } from '@/lib/types/api'
 
 export const globalChatApi = {
@@ -36,6 +37,19 @@ export const globalChatApi = {
     const response = await apiClient.put<GlobalChatSession>(
       `/global-chat/sessions/${sessionId}`,
       data
+    )
+    return response.data
+  },
+
+  // Persist the accumulated "documents used" list for a conversation so it
+  // survives switches / reloads / other devices.
+  updateSessionDocuments: async (
+    sessionId: string,
+    documents: GlobalChatDocument[],
+  ) => {
+    const response = await apiClient.put<GlobalChatSession>(
+      `/global-chat/sessions/${sessionId}/documents`,
+      { documents }
     )
     return response.data
   },

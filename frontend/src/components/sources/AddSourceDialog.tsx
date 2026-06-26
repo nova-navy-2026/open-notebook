@@ -132,6 +132,7 @@ export function AddSourceDialog({
   } = useForm<CreateSourceFormData>({
     resolver: zodResolver(createSourceSchema),
     defaultValues: {
+      type: 'upload',
       notebooks: defaultNotebookId ? [defaultNotebookId] : [],
       embed: settings?.default_embedding_option === 'always' || settings?.default_embedding_option === 'ask',
       async_processing: true,
@@ -155,6 +156,7 @@ export function AddSourceDialog({
                          (settings.default_embedding_option === 'ask')
 
       reset({
+        type: 'upload',
         notebooks: defaultNotebookId ? [defaultNotebookId] : [],
         embed: embedValue,
         async_processing: true,

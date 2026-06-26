@@ -1319,7 +1319,7 @@ export const ptPT = {
   },
   transcriptionPage: {
     reportTitleLabel: "Título do documento",
-    reportTitlePlaceholder: "Ex.: Reunião SI-DAGI 19/06",
+    reportTitlePlaceholder: "Ex.: Reunião de equipa 19/06",
     reportTypeLabel: "Tipo de documento",
     reportTypeAta: "ATA de reunião",
     reportTypeConversation: "Conversa / Diálogo",

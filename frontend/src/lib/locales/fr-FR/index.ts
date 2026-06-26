@@ -80,7 +80,7 @@ export const frFR = {
     generationStartedDesc:
       "Votre recherche est en cours de génération. Consultez l'onglet Historique pour suivre la progression.",
     failedToStart: "Échec du lancement de la recherche",
-    noJobs: "Aucune tâche de recherche pour l'instant",
+    noJobs: "Aucune recherche pour l'instant",
     noJobsDesc:
       "Générez votre premier rapport de recherche pour le voir ici.",
     activeJobs: "Recherche en cours — actualisation automatique...",
@@ -1339,7 +1339,7 @@ export const frFR = {
   },
   transcriptionPage: {
     reportTitleLabel: "Titre du document",
-    reportTitlePlaceholder: "ex. Réunion SI-DAGI 19/06",
+    reportTitlePlaceholder: "ex. Réunion d'équipe 19/06",
     reportTypeLabel: "Type de document",
     reportTypeAta: "Compte rendu de réunion (ATA)",
     reportTypeConversation: "Conversation / Dialogue",
