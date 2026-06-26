@@ -87,7 +87,11 @@ async def generate_session_title(message: str) -> Optional[str]:
         title = clean_title(text)
         return title or None
     except Exception as e:
-        logger.warning(f"Chat title generation failed: {e}")
+        # Show the exception type even when str(e) is empty (httpx ConnectError /
+        # ReadTimeout often have blank messages) so the cause is diagnosable.
+        logger.warning(
+            f"Chat title generation failed ({type(e).__name__}): {e or repr(e)}"
+        )
         return None
 
 

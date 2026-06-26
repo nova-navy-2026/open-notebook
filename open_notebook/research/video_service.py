@@ -369,36 +369,57 @@ async def run_video_tracking(
                     sampled_results[start_idx], sampled_results[end_idx], t
                 )
 
-    # Draw boxes on all frames and write output video
+    # Draw boxes on all frames and write output video. Drawing every frame +
+    # the VideoWriter + the ffmpeg re-encode are all CPU-bound and synchronous;
+    # running them inline would block the asyncio event loop for many seconds
+    # (large clips), which starves keepalives and gets the request killed with
+    # "socket hang up"/ECONNRESET by the proxy even though the work succeeds.
+    # Run the whole render off-loop in a worker thread.
     output_id = uuid.uuid4().hex[:12]
     raw_path = os.path.join(_OUTPUT_DIR, f"tracked_{output_id}_raw.mp4")
     output_path = os.path.join(_OUTPUT_DIR, f"tracked_{output_id}.mp4")
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(raw_path, fourcc, fps, (width, height))
     label_text = norm_target or "object"
-    for i, frame in enumerate(frames):
-        boxes = frame_boxes.get(i, [])
-        writer.write(_draw_boxes(frame, boxes, label_text, color))
-    writer.release()
 
-    # Re-encode to H.264 so browsers can play the video inline
-    try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", raw_path,
-                "-c:v", "libx264", "-preset", "fast",
-                "-crf", "23", "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                output_path,
-            ],
-            check=True,
-            capture_output=True,
-        )
-        os.remove(raw_path)
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.warning(f"ffmpeg re-encode failed, using raw mp4v: {e}")
-        os.rename(raw_path, output_path)
+    def _render_video() -> None:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(raw_path, fourcc, fps, (width, height))
+        for i, frame in enumerate(frames):
+            boxes = frame_boxes.get(i, [])
+            writer.write(_draw_boxes(frame, boxes, label_text, color))
+        writer.release()
+
+        # Re-encode to H.264 so browsers can play the video inline.
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", raw_path,
+                    "-c:v", "libx264", "-preset", "fast",
+                    "-crf", "23", "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    output_path,
+                ],
+                check=True,
+                capture_output=True,
+            )
+            os.remove(raw_path)
+        except FileNotFoundError as e:
+            # ffmpeg not installed on this node — the mp4v fallback often will
+            # NOT play in browsers (they want H.264). Make this loud, not debug.
+            logger.error(
+                "ffmpeg is not installed on this node ({}); falling back to raw "
+                "mp4v, which most browsers cannot play inline. Install ffmpeg on "
+                "the compute node to fix video playback AND audio transcription.",
+                e,
+            )
+            os.rename(raw_path, output_path)
+        except subprocess.CalledProcessError as e:
+            logger.warning(
+                "ffmpeg re-encode failed ({}); using raw mp4v.",
+                (e.stderr or b"")[:300] if isinstance(e.stderr, bytes) else e.stderr,
+            )
+            os.rename(raw_path, output_path)
+
+    await asyncio.to_thread(_render_video)
 
     frames_with_detections = sum(1 for b in frame_boxes.values() if b)
     duration_s = len(frames) / fps

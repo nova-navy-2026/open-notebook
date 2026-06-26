@@ -13,7 +13,7 @@ import { RBACProvider } from "@/lib/contexts/rbac-context";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "NNBook",
+  title: "Marinheiro de Silício",
   description: "Privacy-focused research and knowledge management",
 };
 

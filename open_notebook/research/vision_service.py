@@ -127,7 +127,22 @@ async def _run_sam3(image_bytes: bytes, filename: str, query: str) -> Dict[str, 
         files = {"file": (filename, image_bytes, "image/png")}
         data = {"query": query}
         resp = await client.post(_get_sam3_url(), files=files, data=data)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        # SAM3 returns the real cause in the body (model not loaded, GPU OOM,
+        # bad query, etc.); raise_for_status() discards it, so surface it here.
+        body = (resp.text or "").strip()[:500]
+        logger.error(
+            "SAM3 /segment returned HTTP {} for query={!r}: {}",
+            resp.status_code,
+            query[:80],
+            body or "<empty body>",
+        )
+        raise httpx.HTTPStatusError(
+            f"SAM3 segmentation failed (HTTP {resp.status_code}): "
+            f"{body or 'no detail returned by the SAM3 service'}",
+            request=resp.request,
+            response=resp,
+        )
     payload = resp.json()
 
     boxes = payload.get("boxes") or []
@@ -160,7 +175,21 @@ async def _run_rfdetr(
         files = {"file": (filename, image_bytes, "image/png")}
         data = {"threshold": str(server_thr)}
         resp = await client.post(_get_rfdetr_url(), files=files, data=data)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        # Surface RF-DETR's real failure reason (model not loaded, GPU OOM, …);
+        # raise_for_status() would discard the response body.
+        body = (resp.text or "").strip()[:500]
+        logger.error(
+            "RF-DETR /detect returned HTTP {}: {}",
+            resp.status_code,
+            body or "<empty body>",
+        )
+        raise httpx.HTTPStatusError(
+            f"RF-DETR detection failed (HTTP {resp.status_code}): "
+            f"{body or 'no detail returned by the RF-DETR service'}",
+            request=resp.request,
+            response=resp,
+        )
     payload = resp.json()
 
     det = payload.get("detections") or payload

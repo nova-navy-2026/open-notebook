@@ -10,6 +10,7 @@ from .example_commands import analyze_data_command, process_text_command
 from .opensearch_commands import reindex_opensearch_command
 from .podcast_commands import generate_podcast_command
 from .source_commands import process_source_command
+from .video_tracking_commands import track_video_command
 
 __all__ = [
     # Embedding commands
@@ -22,6 +23,7 @@ __all__ = [
     # Other commands
     "generate_podcast_command",
     "process_source_command",
+    "track_video_command",
     "process_text_command",
     "analyze_data_command",
 ]

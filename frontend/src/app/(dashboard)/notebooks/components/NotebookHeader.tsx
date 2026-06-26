@@ -77,7 +77,7 @@ export function NotebookHeader({ notebook, onEditSources }: NotebookHeaderProps)
               >
                 <Image
                   src={logoSrc}
-                  alt="NNBook"
+                  alt="Marinheiro de Silício"
                   width={32}
                   height={32}
                   style={{ width: 'auto', height: 'auto' }}

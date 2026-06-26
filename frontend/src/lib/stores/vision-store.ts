@@ -213,25 +213,63 @@ export const useVideoTrackingStore = create<VideoTrackingState & VideoTrackingAc
 
       const apiUrl = await getApiUrl()
       const token = useAuthStore.getState().token
-      const response = await fetch(`${apiUrl}/api/vision/video-tracking`, {
+      const authHeader: Record<string, string> = token
+        ? { Authorization: `Bearer ${token}` }
+        : {}
+
+      // 1) Submit the job — returns immediately with a job id. Tracking runs in
+      // a background worker, so no single request is held open long enough to be
+      // reset by a proxy (Cloudflare's ~100s cap, nginx read timeout, …).
+      const submitRes = await fetch(`${apiUrl}/api/vision/video-tracking`, {
         method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { ...authHeader },
         body: formData,
       })
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => null)
-        throw new Error(err?.detail || `Server error (${response.status})`)
+      if (!submitRes.ok) {
+        const err = await submitRes.json().catch(() => null)
+        throw new Error(err?.detail || `Server error (${submitRes.status})`)
       }
 
-      const data = await response.json()
-      set({
-        resultText: data.text || null,
-        resultVideo: data.video_base64 || null,
-        isLoading: false,
-      })
+      const { job_id: jobId } = await submitRes.json()
+      if (!jobId) throw new Error('Server did not return a job id.')
+
+      // 2) Poll for the result. Each poll is a quick read, immune to the
+      // timeouts that broke the old synchronous endpoint.
+      const POLL_INTERVAL_MS = 2000
+      const MAX_WAIT_MS = 15 * 60 * 1000 // safety ceiling: 15 min
+      const startedAt = Date.now()
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (Date.now() - startedAt > MAX_WAIT_MS) {
+          throw new Error('Video tracking timed out. Please try a shorter clip.')
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+
+        const statusRes = await fetch(
+          `${apiUrl}/api/vision/video-tracking/jobs/${encodeURIComponent(jobId)}`,
+          { headers: { ...authHeader } },
+        )
+        if (!statusRes.ok) {
+          // Transient proxy/network blip — keep polling rather than abort.
+          continue
+        }
+        const data = await statusRes.json()
+
+        if (data.status === 'completed') {
+          set({
+            resultText: data.text || null,
+            resultVideo: data.video_base64 || null,
+            isLoading: false,
+          })
+          return
+        }
+        if (data.status === 'failed') {
+          throw new Error(data.error || 'Video tracking failed.')
+        }
+        // status === 'processing' -> loop again
+      }
     } catch (e) {
       set({
         error:

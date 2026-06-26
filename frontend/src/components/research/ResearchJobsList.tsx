@@ -449,7 +449,7 @@ export function ResearchJobsList() {
                     }}
                   >
                     <BookmarkPlus className="mr-1 h-3 w-3" />
-                    {t.research?.saveToNotebook ?? "Save to Notebook"}
+                    {t.research?.saveToNotebook ?? "Save to Workspace"}
                   </Button>
                   <Button
                     variant="ghost"
@@ -646,7 +646,7 @@ export function ResearchJobsList() {
                       }}
                     >
                       <BookmarkPlus className="mr-1 h-3 w-3" />
-                      {t.research?.saveToNotebook ?? "Save to Notebook"}
+                      {t.research?.saveToNotebook ?? "Save to Workspace"}
                     </Button>
                     <Button
                       variant="outline"
@@ -707,7 +707,7 @@ export function ResearchJobsList() {
         <DialogContent className="!max-w-md sm:!max-w-md w-[min(480px,calc(100vw-2rem))]">
           <DialogHeader>
             <DialogTitle>
-              {t.research?.saveToNotebook ?? "Save to Notebook"}
+              {t.research?.saveToNotebook ?? "Save to Workspace"}
             </DialogTitle>
             <DialogDescription>
               {t.research?.saveToNotebookDesc ??

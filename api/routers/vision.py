@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from api.auth import get_current_user_id
 from api.chat_agent_log_service import build_chat_agent_event, write_chat_agent_event
+from api.command_service import CommandService
 from open_notebook.research.vision_service import run_vision_analysis
 from open_notebook.research.video_service import run_video_tracking
 
@@ -36,7 +37,35 @@ _NOTE_ASSET_RE = re.compile(r"/api/vision/note-asset/([A-Za-z0-9_-]+\.[A-Za-z0-9
 _VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi"}
 
 _VIDEO_FRAME_STRIDE = 15   # sample every N-th frame by default
-_VIDEO_MAX_FRAMES   = 50   # hard cap; triggers adaptive stride when exceeded
+# Frames are spread evenly across the whole clip (adaptive stride) and the
+# actual count scales with the video's DURATION (see _target_frame_count): a
+# short clip stays cheap, a long video gets proportionally more frames so the
+# LLM keeps enough temporal context not to "miss" parts of it. The bounds below
+# cap the worst case — one multimodal call with too many images is slow and can
+# exceed upstream timeouts. All three knobs are env-tunable.
+_VIDEO_MAX_FRAMES   = int(os.environ.get("VISION_VIDEO_MAX_FRAMES", "32"))
+_VIDEO_MIN_FRAMES   = int(os.environ.get("VISION_VIDEO_MIN_FRAMES", "8"))
+# Target temporal resolution: roughly one sampled frame per this many seconds of
+# video (then clamped to [MIN, MAX]). Lower value = denser sampling.
+_VIDEO_SECONDS_PER_FRAME = float(
+    os.environ.get("VISION_VIDEO_SECONDS_PER_FRAME", "4")
+)
+
+
+def _target_frame_count(total: int, fps: float) -> int:
+    """How many frames to sample for a clip, scaled by its duration.
+
+    Short clips need only a few frames; long videos get proportionally more
+    (about one per ``_VIDEO_SECONDS_PER_FRAME`` seconds) so we don't lose
+    context — always bounded by ``[_VIDEO_MIN_FRAMES, _VIDEO_MAX_FRAMES]``.
+    Falls back to the max when duration is unknown.
+    """
+    if fps and fps > 0 and total > 0 and _VIDEO_SECONDS_PER_FRAME > 0:
+        duration_s = total / fps
+        wanted = math.ceil(duration_s / _VIDEO_SECONDS_PER_FRAME)
+    else:
+        wanted = _VIDEO_MAX_FRAMES
+    return max(_VIDEO_MIN_FRAMES, min(_VIDEO_MAX_FRAMES, wanted))
 
 
 def _video_ocr_max_frames() -> int:
@@ -96,10 +125,11 @@ def _language_instruction(language: Optional[str]) -> str:
 
 def _extract_video_frames(video_path: str) -> List[bytes]:
     """
-    Sample frames from a video at _VIDEO_FRAME_STRIDE intervals, up to
-    _VIDEO_MAX_FRAMES total.  When the natural sample count would exceed the
-    cap, the stride is recalculated to spread exactly _VIDEO_MAX_FRAMES frames
-    evenly across the full video (adaptive stride).
+    Sample frames from a video at _VIDEO_FRAME_STRIDE intervals, up to a
+    duration-scaled budget (see _target_frame_count: more frames for longer
+    clips, bounded by [_VIDEO_MIN_FRAMES, _VIDEO_MAX_FRAMES]). When the natural
+    sample count would exceed that budget, the stride is recalculated to spread
+    exactly `budget` frames evenly across the full video (adaptive stride).
 
     For videos with a known frame count, seek-based sampling is used (fast).
     For unknown-length sources, a sequential scan is used as fallback.
@@ -109,15 +139,17 @@ def _extract_video_frames(video_path: str) -> List[bytes]:
     frames: List[bytes] = []
     try:
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        budget = _target_frame_count(total, fps)
 
         if total > 0:
             # Seek-based sampling - fast for indexed containers.
-            if total // _VIDEO_FRAME_STRIDE > _VIDEO_MAX_FRAMES:
-                stride = max(1, math.ceil(total / _VIDEO_MAX_FRAMES))
+            if total // _VIDEO_FRAME_STRIDE > budget:
+                stride = max(1, math.ceil(total / budget))
             else:
                 stride = _VIDEO_FRAME_STRIDE
             for pos in range(0, total, stride):
-                if len(frames) >= _VIDEO_MAX_FRAMES:
+                if len(frames) >= budget:
                     break
                 cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
                 ret, frame = cap.read()
@@ -129,7 +161,7 @@ def _extract_video_frames(video_path: str) -> List[bytes]:
         else:
             # Sequential scan for streams / containers without frame-count metadata.
             current = 0
-            while len(frames) < _VIDEO_MAX_FRAMES:
+            while len(frames) < budget:
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     break
@@ -995,6 +1027,37 @@ async def _ocr_video_frames_combined(
     return "\n\n".join(blocks), len(blocks)
 
 
+async def _safe_caption_image(
+    image_bytes: bytes, ext: str, language: Optional[str]
+) -> Optional[str]:
+    """Best-effort descriptive caption of an image, for note context.
+
+    Computed at analysis time so a notebook note saved from a detection/
+    segmentation reply already carries full context for the LLM (rather than
+    captioning live in the notebook, which is slow). Never raises — a caption
+    failure must not break the detection result it enriches.
+    """
+    try:
+        from open_notebook.ai.vision import generate_image_caption
+
+        mime = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }.get(ext, "image/jpeg")
+        caption = await generate_image_caption(
+            image_bytes, mime_type=mime, language=language
+        )
+        return (caption or "").strip() or None
+    except Exception as e:
+        logger.warning(
+            "Image context caption failed ({}); continuing without it.",
+            type(e).__name__,
+        )
+        return None
+
+
 @router.post("/vision/multimodal")
 async def multimodal_chat(
     query: str = Form(...),
@@ -1199,6 +1262,12 @@ async def multimodal_chat(
                     engine=engine,
                     target=target,
                 )
+                # Caption the image too, so a note saved from this reply carries
+                # full descriptive context (computed once here, not live in the
+                # notebook). Best-effort — never fails the detection result.
+                caption = await _safe_caption_image(file_bytes, ext, language)
+                if caption:
+                    text = f"{text}\n\n## Descrição do conteúdo\n{caption}"
                 response = {
                     "text": text,
                     "route": "image_analysis",
@@ -1309,57 +1378,35 @@ async def multimodal_chat(
                 file=log_file,
                 details={"route": "video_tracking", "engine": engine, "target": target},
             )
+            # Run tracking as a BACKGROUND JOB. It can take tens of seconds, and
+            # holding the HTTP connection open that long trips proxy timeouts
+            # (Cloudflare ~100s, nginx proxy_read_timeout) -> ECONNRESET even
+            # when it succeeds. The client polls GET /vision/multimodal/jobs/
+            # {job_id} for the result. The job deletes the source upload; the
+            # status endpoint serves + cleans up the annotated output and runs
+            # the conversational summary (so the chat reply is unchanged).
+            import commands.video_tracking_commands  # noqa: F401
+
             try:
-                result = await run_video_tracking(
-                    video_path=saved_path,
-                    target=target,
-                    engine=engine,
-                )
-                output_path = result.get("video_path")
-                video_base64 = None
-                if output_path:
-                    with open(output_path, "rb") as vf:
-                        video_base64 = f"data:video/mp4;base64,{base64.b64encode(vf.read()).decode()}"
-                text = _summarise_tool_result(
-                    query=query,
-                    tool_result=str(result.get("text") or ""),
-                    media_kind="video",
-                    engine=engine,
-                    target=target,
-                )
-                response = {
-                    "text": text,
-                    "route": "video_tracking",
-                    "engine": engine,
-                    "video_base64": video_base64,
-                }
-                logger.success(
-                    "ChatAgent tool success | agent=multimodal route=video_tracking "
-                    "engine={} duration_ms={} has_video={}",
-                    engine,
-                    round((perf_counter() - started_at) * 1000),
-                    bool(response.get("video_base64")),
-                )
-                await _write_multimodal_tool_log(
-                    user_id=user_id,
-                    surface=surface,
-                    run_id=run_id,
-                    session_id=session_id,
-                    notebook_id=notebook_id,
-                    model_id=model_id,
-                    status="success",
-                    duration_ms=round((perf_counter() - started_at) * 1000),
-                    query=query,
-                    file=log_file,
-                    details={
-                        "route": "video_tracking",
-                        "engine": engine,
+                job_id = await CommandService.submit_command_job(
+                    module_name="open_notebook",
+                    command_name="track_video",
+                    command_args={
+                        "video_path": saved_path,
                         "target": target,
-                        "has_video_result": bool(response.get("video_base64")),
+                        "engine": engine,
+                        # Caption + transcribe in the worker so the saved note
+                        # has full context for the LLM (computed once, here).
+                        "include_context": True,
+                        "language": language,
                     },
                 )
-                return response
             except Exception as e:
+                try:
+                    os.remove(saved_path)
+                except OSError:
+                    pass
+                detail = str(e) or repr(e)
                 await _write_multimodal_tool_log(
                     user_id=user_id,
                     surface=surface,
@@ -1376,21 +1423,38 @@ async def multimodal_chat(
                         "engine": engine,
                         "target": target,
                         "error_type": type(e).__name__,
-                        "error": str(e) or repr(e),
+                        "error": detail,
                     },
                 )
-                raise
-            finally:
-                try:
-                    os.remove(saved_path)
-                except OSError:
-                    pass
-                output_path = locals().get("output_path")
-                if output_path:
-                    try:
-                        os.remove(output_path)
-                    except OSError:
-                        pass
+                logger.error(
+                    "ChatAgent tool failure | agent=multimodal route=video_tracking "
+                    "submit error={}",
+                    detail,
+                )
+                return {
+                    "text": (
+                        "Não consegui iniciar o seguimento de vídeo. "
+                        f"Detalhe técnico: {type(e).__name__}: {detail}"
+                    ),
+                    "route": "vision_unavailable",
+                    "engine": engine,
+                    "video_base64": None,
+                }
+
+            logger.info(
+                "ChatAgent tool submitted | agent=multimodal route=video_tracking "
+                "engine={} target={!r} job_id={}",
+                engine,
+                target,
+                job_id,
+            )
+            return {
+                "async": True,
+                "job_id": job_id,
+                "route": "video_tracking",
+                "engine": engine,
+                "target": target or "",
+            }
 
         if ext in ALLOWED_VIDEO_EXTENSIONS:
             frame = _first_frame_as_jpeg(saved_path)
@@ -1842,7 +1906,14 @@ async def track_video(
     engine: str = Form("sam3"),
 ):
     """
-    Track an object across video frames using SAM3 or RF-DETR.
+    Submit an object-tracking job (SAM3 or RF-DETR) and return immediately.
+
+    Tracking can take tens of seconds (per-frame detection + interpolation +
+    H.264 re-encode) — long enough to trip proxy timeouts (Cloudflare's ~100s
+    cap, nginx proxy_read_timeout) and surface as ECONNRESET even though the work
+    succeeds. So instead of holding the request open, we enqueue a background
+    job and hand back a job id; the client polls
+    ``GET /vision/video-tracking/jobs/{job_id}`` for the result.
 
     Accepts a multipart form with:
     - video: the video file (MP4, WEBM, MOV, AVI)
@@ -1850,9 +1921,7 @@ async def track_video(
               Required for ``engine='sam3'``; optional for ``engine='rfdetr'``.
     - engine: "sam3" (default) or "rfdetr"
 
-    Returns JSON with:
-    - text: markdown tracking summary
-    - video_base64: base64-encoded annotated video (data URI)
+    Returns JSON: ``{"job_id": "...", "status": "submitted"}``.
     """
     ext = Path(video.filename or "").suffix.lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
@@ -1885,43 +1954,167 @@ async def track_video(
         f.write(video_bytes)
 
     logger.info(
-        f"Video tracking requested: engine={engine_norm}, "
+        f"Video tracking job requested: engine={engine_norm}, "
         f"target={'<none>' if normalised_target is None else repr(normalised_target[:80])}, "
         f"video={saved_path}"
     )
 
-    output_path = None
+    # Ensure the command is registered in this process before submitting.
+    import commands.video_tracking_commands  # noqa: F401
+
     try:
-        result = await run_video_tracking(
-            video_path=saved_path,
-            target=normalised_target,
-            engine=engine_norm,
+        job_id = await CommandService.submit_command_job(
+            module_name="open_notebook",
+            command_name="track_video",
+            command_args={
+                "video_path": saved_path,
+                "target": normalised_target,
+                "engine": engine_norm,
+            },
         )
-        output_path = result["video_path"]
-        text_summary = result["text"]
-
-        # Read the output video and encode as base64
-        with open(output_path, "rb") as vf:
-            video_b64 = base64.b64encode(vf.read()).decode()
-
-        return {
-            "text": text_summary,
-            "video_base64": f"data:video/mp4;base64,{video_b64}",
-        }
-
     except Exception as e:
-        logger.error(f"Video tracking failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Video tracking failed: {e}")
-    finally:
+        # Submission failed — don't leave the upload behind.
         try:
             os.remove(saved_path)
         except OSError:
             pass
-        if output_path:
+        logger.error(f"Failed to submit video tracking job: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to submit video tracking job: {e}")
+
+    return {"job_id": job_id, "status": "submitted"}
+
+
+@router.get("/vision/video-tracking/jobs/{job_id:path}")
+async def video_tracking_job_status(job_id: str):
+    """Poll a video-tracking job.
+
+    Response shapes:
+    - running:    ``{"status": "processing"}``
+    - completed:  ``{"status": "completed", "text": ..., "video_base64": "data:video/mp4;base64,..."}``
+    - failed:     ``{"status": "failed", "error": "..."}``
+
+    On a completed job the annotated video is read, base64-encoded into the
+    response, and then deleted from disk (one-shot retrieval — the client renders
+    it inline). This GET is a quick file read, so it never holds a long
+    connection regardless of how long the tracking itself took.
+    """
+    try:
+        info = await CommandService.get_command_status(job_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Job not found: {e}")
+
+    status = (info.get("status") or "").lower()
+
+    if status in ("completed", "success"):
+        result = info.get("result") or {}
+        if not result.get("success"):
+            return {
+                "status": "failed",
+                "error": result.get("error_message") or "Video tracking failed.",
+            }
+        output_path = result.get("output_path")
+        if not output_path or not os.path.exists(output_path):
+            return {
+                "status": "failed",
+                "error": "Tracking finished but the output video is no longer available.",
+            }
+        try:
+            with open(output_path, "rb") as vf:
+                video_b64 = base64.b64encode(vf.read()).decode()
+        finally:
             try:
                 os.remove(output_path)
             except OSError:
                 pass
+        return {
+            "status": "completed",
+            "text": result.get("text"),
+            "video_base64": f"data:video/mp4;base64,{video_b64}",
+        }
+
+    if status in ("failed", "error", "canceled"):
+        return {
+            "status": "failed",
+            "error": info.get("error_message") or "Video tracking failed.",
+        }
+
+    # submitted / running / queued / unknown -> keep polling
+    return {"status": "processing"}
+
+
+@router.get("/vision/multimodal/jobs/{job_id:path}")
+async def multimodal_job_status(
+    job_id: str,
+    query: str = "",
+    engine: str = "",
+    target: str = "",
+):
+    """Poll a chat-agent multimodal video job (currently video tracking).
+
+    Returns the same shape the chat used to get inline — ``{text, route, engine,
+    video_base64}`` — but delivered via polling so no request is ever held open
+    long enough to be reset by a proxy. The conversational summary runs here (a
+    short LLM call) using the original ``query``/``engine``/``target`` echoed
+    back by the submit response.
+
+    Shapes: ``{"status": "processing"}`` |
+    ``{"status": "completed", "text", "route", "engine", "video_base64"}`` |
+    ``{"status": "failed", "error"}``.
+    """
+    try:
+        info = await CommandService.get_command_status(job_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Job not found: {e}")
+
+    status = (info.get("status") or "").lower()
+
+    if status in ("completed", "success"):
+        result = info.get("result") or {}
+        if not result.get("success"):
+            return {
+                "status": "failed",
+                "error": result.get("error_message") or "Video analysis failed.",
+            }
+        output_path = result.get("output_path")
+        video_base64 = None
+        if output_path and os.path.exists(output_path):
+            try:
+                with open(output_path, "rb") as vf:
+                    video_base64 = (
+                        f"data:video/mp4;base64,{base64.b64encode(vf.read()).decode()}"
+                    )
+            finally:
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+        text = _summarise_tool_result(
+            query=query or "",
+            tool_result=str(result.get("text") or ""),
+            media_kind="video",
+            engine=engine or "sam3",
+            target=target or None,
+        )
+        # Append the descriptive caption + transcription (computed in the worker)
+        # AFTER summarising, so a note saved from this reply has full context.
+        caption = (result.get("context_caption") or "").strip()
+        if caption:
+            text = f"{text}\n\n## Descrição do conteúdo\n{caption}"
+        return {
+            "status": "completed",
+            "text": text,
+            "route": "video_tracking",
+            "engine": engine,
+            "video_base64": video_base64,
+        }
+
+    if status in ("failed", "error", "canceled"):
+        return {
+            "status": "failed",
+            "error": info.get("error_message") or "Video analysis failed.",
+        }
+
+    return {"status": "processing"}
 
 
 class NoteAssetRequest(BaseModel):

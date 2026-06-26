@@ -257,7 +257,7 @@ export function AppSidebar() {
             <div className="relative flex items-center justify-center w-full">
               <Image
                 src={logoSrc}
-                alt="NNBook"
+                alt="Marinheiro de Silício"
                 width={32}
                 height={32}
                 style={{ width: "auto", height: "auto" }}
