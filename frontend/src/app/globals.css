@@ -2,6 +2,13 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+/* Drive `dark:` utilities from the `.dark` class that ThemeProvider toggles on
+   <html>, not the OS `prefers-color-scheme`. Without this, Tailwind v4 keys
+   `dark:` off the media query, so e.g. `dark:prose-invert` on the chat bubbles
+   activated whenever the OS was dark even when the app was set to light —
+   rendering light prose text on a light bubble (invisible). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
