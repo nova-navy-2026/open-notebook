@@ -32,7 +32,7 @@ export const enUS = {
     podcast: "Podcast",
     quickActions: "Quick actions",
     quickActionsDesc: "Navigation, search, ask, theme",
-    appName: "Marinheiro de Silício",
+    appName: "Marinheiro de\u00A0Silício",
     add: "Add",
     remove: "Remove",
     confirm: "Confirm",

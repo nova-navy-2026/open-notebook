@@ -150,7 +150,7 @@ export const frFR = {
     podcast: "Podcast",
     quickActions: "Actions rapides",
     quickActionsDesc: "Navigation, recherche, poser une question, thème",
-    appName: "Marinheiro de Silício",
+    appName: "Marinheiro de\u00A0Silício",
     add: "Ajouter",
     remove: "Retirer",
     confirm: "Confirmer",

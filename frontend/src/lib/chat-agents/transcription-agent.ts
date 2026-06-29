@@ -3,6 +3,7 @@ import { researchApi } from '@/lib/api/research'
 import {
   currentAppLanguageName,
   detectTranscriptReportStyle,
+  detectTranscriptReportType,
   formatTranscriptionResponse,
   isAudioFile,
   isTranscriptionRequest,
@@ -68,18 +69,26 @@ export async function runTranscriptionAgent(
       },
     })
 
-    // If the user asked for a specific document (ATA, resumo, conversa,
-    // transcrição literal), turn the transcript into that document in the app's
-    // language — mirroring the Transcription page. Otherwise return the
-    // plain transcript.
+    // If the user asked for a document/report (ATA, resumo, conversa,
+    // transcrição literal, OR a "relatório [detalhado/aprofundado]"), turn the
+    // transcript into that document in the app's language — mirroring the
+    // Transcription page (same report types + styles, transcript-only). The
+    // chosen report TYPE drives depth/structure; the STYLE drives the document
+    // format. Otherwise return the plain transcript.
     const reportStyle = detectTranscriptReportStyle(message)
+    const reportType = detectTranscriptReportType(message)
     const transcript = (result.dialog || result.text || '').trim()
-    if (reportStyle && transcript) {
+    if ((reportStyle || reportType) && transcript) {
       try {
         const generated = await researchApi.generateResearch({
           query: transcript,
-          report_type: 'meeting_minutes',
-          report_style: reportStyle,
+          // transcript_only keeps it retrieval-free (no OpenSearch/web) for ANY
+          // report type — exactly like the Transcription page.
+          transcript_only: true,
+          report_type: reportType ?? 'meeting_minutes',
+          // No explicit style word but a report type was asked for → use a
+          // general "summary" document base instead of the ATA structure.
+          report_style: reportStyle ?? (reportType ? 'summary' : 'ata'),
           report_source: 'local',
           tone: 'Objective',
           source_urls: [],

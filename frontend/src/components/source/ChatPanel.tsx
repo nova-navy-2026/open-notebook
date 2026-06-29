@@ -648,7 +648,7 @@ export function ChatPanel({
                       className={`rounded-lg px-4 py-2 ${
                         message.type === 'human'
                           ? 'bg-primary text-primary-foreground w-fit self-end'
-                          : 'bg-muted'
+                          : 'bg-muted border border-border'
                       }`}
                     >
                       {message.type === 'ai' ? (
@@ -731,7 +731,7 @@ export function ChatPanel({
                     <Bot className="h-4 w-4" />
                   </div>
                 </div>
-                <div className="rounded-lg px-4 py-2 bg-muted">
+                <div className="rounded-lg px-4 py-2 bg-muted border border-border">
                   <Loader2 className="h-4 w-4 animate-spin" />
                 </div>
               </div>

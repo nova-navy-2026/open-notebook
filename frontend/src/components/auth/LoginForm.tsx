@@ -191,7 +191,7 @@ export function LoginForm() {
               priority
             />
           </div>
-          <CardTitle className="text-2xl">Marinheiro de Silício</CardTitle>
+          <CardTitle className="text-2xl">Marinheiro de&nbsp;Silício</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6">

@@ -60,6 +60,21 @@ export function detectTranscriptReportStyle(message: string): TranscriptReportSt
   return null
 }
 
+/** Research report TYPE requested for a transcript (depth/structure), mirroring
+ * the report types offered on the Transcription page. Distinct from the 4
+ * document STYLES above: a user can ask for a "relatório detalhado" of an audio
+ * and get a detailed, transcript-only document. */
+export type TranscriptReportType = 'research_report' | 'detailed_report' | 'deep'
+
+export function detectTranscriptReportType(message: string): TranscriptReportType | null {
+  const text = normaliseForAgentMatching(message)
+  // Check the more specific qualifiers before the generic "relatório/report".
+  if (/\b(aprofundado|profundo|exaustivo|deep|in.?depth)\b/.test(text)) return 'deep'
+  if (/\b(detalhado|detailed|pormenorizado)\b/.test(text)) return 'detailed_report'
+  if (/\b(relatorio|report|estruturado|structured)\b/.test(text)) return 'research_report'
+  return null
+}
+
 /** Map an i18n locale code to a human-readable language name for the backend. */
 export function toLanguageName(locale: string): string {
   switch (locale) {

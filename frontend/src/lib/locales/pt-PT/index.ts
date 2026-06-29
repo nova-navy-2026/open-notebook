@@ -32,7 +32,7 @@ export const ptPT = {
     podcast: "Podcast",
     quickActions: "Ações rápidas",
     quickActionsDesc: "Navegação, pesquisa, perguntar, tema",
-    appName: "Marinheiro de Silício",
+    appName: "Marinheiro de\u00A0Silício",
     add: "Adicionar",
     remove: "Remover",
     confirm: "Confirmar",
