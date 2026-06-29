@@ -299,15 +299,14 @@ export function useGlobalChat() {
     })
   }, [messages, currentSessionId, queryClient])
 
-  // Auto-select most recent session — only on the very first load.
+  // Land on a NEW conversation by default (like ChatGPT / Claude): do NOT
+  // auto-resume the most recent session. The user opens a previous conversation
+  // from the sessions tab when they want one. We still mark the initial
+  // auto-select as handled so the rest of the flow (which guards on this ref)
+  // behaves unchanged.
   useEffect(() => {
-    if (!autoSelectedRef.current && sessions.length > 0 && !currentSessionId) {
-      autoSelectedRef.current = true
-      setCurrentSessionId(sessions[0].id)
-      // Restore that conversation's previously-used documents on first load.
-      setSessionDocuments(loadSessionDocs(sessions[0].id))
-    }
-  }, [sessions, currentSessionId])
+    autoSelectedRef.current = true
+  }, [])
 
   // Create session mutation
   const createSessionMutation = useMutation({
