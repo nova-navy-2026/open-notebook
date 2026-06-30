@@ -290,7 +290,6 @@ export function ChatPanel({
   const [transcriptionSpeakers, setTranscriptionSpeakers] = useState('auto')
   const [visionEngine, setVisionEngine] = useState<'auto' | 'sam3' | 'rfdetr'>('auto')
   const [visionMode, setVisionMode] = useState<'auto' | 'describe' | 'ocr' | 'detect' | 'track'>('auto')
-  const [saveNoteNotebookId, setSaveNoteNotebookId] = useState('')
   const [activeTab, setActiveTab] = useState<'chat' | 'sessions'>('chat')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -309,11 +308,6 @@ export function ChatPanel({
   const { data: tones = [] } = useResearchTones()
   const { data: modelDefaults } = useModelDefaults()
   const { data: models = [] } = useModels()
-  const { data: availableNotebooks = [] } = useQuery({
-    queryKey: ['chat-agent-notebooks'],
-    queryFn: () => notebooksApi.list({ archived: false }),
-    enabled: enableAgentControls && !notebookId,
-  })
   const selectedFileKind = getAttachmentKind(selectedFile)
   const selectedFileIsVisual = isVisualLikeFile(selectedFile)
   const selectedFileIsAudio = isAudioLikeFile(selectedFile)
@@ -323,7 +317,6 @@ export function ChatPanel({
     selectedFileIsAudio || isVideoLikeFile(selectedFile)
   )
   const showVisionControls = enableAgentControls && selectedFileIsVisual
-  const showSaveNoteControls = enableAgentControls && !notebookId && !selectedFile && availableNotebooks.length > 1
   const researchModelName = researchModelId
     ? models.find((model) => model.id === researchModelId || model.name === researchModelId)?.name
     : undefined
@@ -404,9 +397,8 @@ export function ChatPanel({
           vision: showVisionControls
             ? { engine: visionEngine, mode: visionMode }
             : undefined,
-          saveNote: saveNoteNotebookId
-            ? { notebookId: saveNoteNotebookId }
-            : undefined,
+          // Save-to-note target is decided entirely from the prompt now (the
+          // agent asks which workspace when none is named) — no UI override.
         },
       )
       setInput('')
@@ -814,25 +806,11 @@ export function ChatPanel({
             </div>
           )}
 
-          {enableDeepResearch && !isDeepResearchSession && (
-            <div className="space-y-2 rounded-md border bg-muted/20 p-2">
-              <div className="flex items-center justify-between gap-2">
-                <Button
-                  type="button"
-                  variant={deepResearchEnabled ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-8 gap-2"
-                  onClick={() => setDeepResearchEnabled((enabled) => !enabled)}
-                  disabled={isStreaming || !!selectedFile}
-                  title={selectedFile ? 'Deep Research usa apenas pedidos de texto.' : undefined}
-                >
-                  <Search className="h-4 w-4" />
-                  Deep Research
-                </Button>
-              </div>
-
-              {deepResearchEnabled && canUseDeepResearch && (
-                <div className="grid gap-2 sm:grid-cols-3">
+          {/* Deep Research config — only shown while it's toggled ON (the toggle
+              itself is a compact icon button in the composer below), so the
+              chat area stays clear of controls when it's off. */}
+          {enableDeepResearch && !isDeepResearchSession && deepResearchEnabled && canUseDeepResearch && (
+            <div className="grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-3">
                   <div className="space-y-1">
                     <Label className="text-xs">{t.research?.reportType ?? 'Report Type'}</Label>
                     <Select
@@ -884,12 +862,10 @@ export function ChatPanel({
                       disabled={isStreaming}
                     />
                   </div>
-                </div>
-              )}
             </div>
           )}
 
-          {enableAgentControls && (showTranscriptionControls || showVisionControls || showSaveNoteControls) && (
+          {enableAgentControls && (showTranscriptionControls || showVisionControls) && (
             <div className="grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-3">
               {showTranscriptionControls && (
                 <>
@@ -970,24 +946,6 @@ export function ChatPanel({
                 </>
               )}
 
-              {showSaveNoteControls && (
-                <div className="space-y-1 sm:col-span-2">
-                  <Label className="text-xs">Guardar notas em</Label>
-                  <Select value={saveNoteNotebookId || 'auto'} onValueChange={(value) => setSaveNoteNotebookId(value === 'auto' ? '' : value)} disabled={isStreaming}>
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto">Perguntar automaticamente</SelectItem>
-                      {availableNotebooks.map((notebook) => (
-                        <SelectItem key={notebook.id} value={notebook.id}>
-                          {notebook.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
             </div>
           )}
 
@@ -1045,6 +1003,23 @@ export function ChatPanel({
                   <Paperclip className="h-4 w-4" />
                 </Button>
               </>
+            )}
+            {/* Compact Deep Research toggle — next to the file selector. Keeps
+                the chat area clear; hover shows the "Deep Research" tooltip. */}
+            {enableDeepResearch && !isDeepResearchSession && (
+              <Button
+                type="button"
+                variant={deepResearchEnabled ? 'default' : 'outline'}
+                size="icon"
+                className="h-[40px] w-[40px] flex-shrink-0"
+                onClick={() => setDeepResearchEnabled((enabled) => !enabled)}
+                disabled={isStreaming || !!selectedFile}
+                title={selectedFile ? 'Deep Research usa apenas pedidos de texto.' : 'Deep Research'}
+                aria-label="Deep Research"
+                aria-pressed={deepResearchEnabled}
+              >
+                <Search className="h-4 w-4" />
+              </Button>
             )}
             <Textarea
               id={chatInputId}

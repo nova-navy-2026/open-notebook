@@ -251,9 +251,9 @@ export function isSaveToNoteRequest(message: string): boolean {
 export function parseSaveToNoteTarget(message: string): string | undefined {
   const trimmed = message.trim()
   const patterns = [
-    /\b(?:notebook|caderno)\s+["“”']?([^"“”'.!?]+)["“”']?/i,
-    /\b(?:no|na|ao|a|para|to|in|into)\s+(?:notebook|caderno)\s+["“”']?([^"“”'.!?]+)["“”']?/i,
-    /\b(?:no|na|ao|para|to|into)\s+["“”']?([^"“”'.!?]+)["“”']?\s+(?:notebook|caderno)\b/i,
+    /\b(?:notebook|workspace|caderno)\s+["“”']?([^"“”'.!?]+)["“”']?/i,
+    /\b(?:no|na|ao|a|para|to|in|into)\s+(?:notebook|workspace|caderno)\s+["“”']?([^"“”'.!?]+)["“”']?/i,
+    /\b(?:no|na|ao|para|to|into)\s+["“”']?([^"“”'.!?]+)["“”']?\s+(?:notebook|workspace|caderno)\b/i,
   ]
 
   for (const pattern of patterns) {

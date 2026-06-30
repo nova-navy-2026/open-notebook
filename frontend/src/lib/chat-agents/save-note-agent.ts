@@ -174,8 +174,8 @@ export async function runGlobalSaveNoteAgent({
       },
     })
     return target
-      ? `Não encontrei um notebook chamado "${target}". Indica um destes notebooks:\n\n${options || '- Nenhum notebook disponível'}`
-      : `Preciso de saber em que notebook queres guardar a nota. Indica um destes notebooks:\n\n${options || '- Nenhum notebook disponível'}`
+      ? `Não encontrei nenhuma workspace chamada "${target}". Indica uma destas workspaces:\n\n${options || '- Nenhuma workspace disponível'}`
+      : `Em que workspace queres guardar a nota? Indica uma destas:\n\n${options || '- Nenhuma workspace disponível'}`
   }
 
   let note
