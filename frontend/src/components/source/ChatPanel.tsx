@@ -3,6 +3,12 @@
 import { useState, useRef, useEffect, useId, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -60,6 +66,7 @@ import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
 import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
+import { formatModelLabel } from '@/lib/utils/model-label'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 import { useVoiceInput } from '@/lib/hooks/use-voice-input'
 
@@ -318,7 +325,7 @@ export function ChatPanel({
   )
   const showVisionControls = enableAgentControls && selectedFileIsVisual
   const researchModelName = researchModelId
-    ? models.find((model) => model.id === researchModelId || model.name === researchModelId)?.name
+    ? formatModelLabel(models.find((model) => model.id === researchModelId || model.name === researchModelId)?.name)
     : undefined
   const { voiceState, handleMicClick } = useVoiceInput({
     onTranscript: (text) => {
@@ -482,32 +489,43 @@ export function ChatPanel({
   }, [messages, resolvedTitle, t])
 
   const privateToggle = onTogglePrivate ? (
-    <Button
-      variant={privateMode ? 'default' : 'ghost'}
-      size="icon"
-      className="h-8 w-8 flex-shrink-0"
-      title={privateMode ? t.chat.privateChatActive : t.chat.privateChat}
-      aria-label={t.chat.privateChat}
-      aria-pressed={privateMode}
-      onClick={onTogglePrivate}
-    >
-      <Ghost className="h-4 w-4" />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant={privateMode ? 'default' : 'ghost'}
+          size="icon"
+          className="h-8 w-8 flex-shrink-0"
+          aria-label={t.chat.privateChat}
+          aria-pressed={privateMode}
+          onClick={onTogglePrivate}
+        >
+          <Ghost className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {privateMode ? t.chat.privateChatActive : t.chat.privateChat}
+      </TooltipContent>
+    </Tooltip>
   ) : null
 
   const exportMenu = (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 flex-shrink-0"
-          title={t.chat.exportConversation ?? 'Exportar conversa'}
-          disabled={exportingAll}
-        >
-          {exportingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 flex-shrink-0"
+              aria-label={t.chat.exportConversation ?? 'Exportar conversa'}
+              disabled={exportingAll}
+            >
+              {exportingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t.chat.exportConversation ?? 'Exportar conversa'}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={handleExportCurrent}>
           <Download className="mr-2 h-4 w-4" />
@@ -660,29 +678,39 @@ export function ChatPanel({
                           notebookId={notebookId}
                         />
                         {onDeleteMessage && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
-                            onClick={() => setDeleteMessageId(message.id)}
-                            title={t.common.delete}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                                onClick={() => setDeleteMessageId(message.id)}
+                                aria-label={t.common.delete}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t.common.delete}</TooltipContent>
+                          </Tooltip>
                         )}
                       </div>
                     )}
                     {message.type === 'human' && onDeleteMessage && (
                       <div className="flex justify-end">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
-                          onClick={() => setDeleteMessageId(message.id)}
-                          title={t.common.delete}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                              onClick={() => setDeleteMessageId(message.id)}
+                              aria-label={t.common.delete}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t.common.delete}</TooltipContent>
+                        </Tooltip>
                       </div>
                     )}
                     {message.type === 'ai' && message.documents && message.documents.length > 0 && (
@@ -992,34 +1020,55 @@ export function ChatPanel({
                   className="hidden"
                   onChange={handleFileChange}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-[40px] w-[40px] flex-shrink-0"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isStreaming}
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
+                <TooltipProvider delayDuration={0}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-[40px] w-[40px] flex-shrink-0"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isStreaming}
+                        aria-label={'Enviar ficheiro'}
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{'Enviar ficheiro'}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </>
             )}
             {/* Compact Deep Research toggle — next to the file selector. Keeps
                 the chat area clear; hover shows the "Deep Research" tooltip. */}
             {enableDeepResearch && !isDeepResearchSession && (
-              <Button
-                type="button"
-                variant={deepResearchEnabled ? 'default' : 'outline'}
-                size="icon"
-                className="h-[40px] w-[40px] flex-shrink-0"
-                onClick={() => setDeepResearchEnabled((enabled) => !enabled)}
-                disabled={isStreaming || !!selectedFile}
-                title={selectedFile ? 'Deep Research usa apenas pedidos de texto.' : 'Deep Research'}
-                aria-label="Deep Research"
-                aria-pressed={deepResearchEnabled}
-              >
-                <Search className="h-4 w-4" />
-              </Button>
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant={deepResearchEnabled ? 'default' : 'outline'}
+                      size="icon"
+                      className="h-[40px] w-[40px] flex-shrink-0"
+                      onClick={() => setDeepResearchEnabled((enabled) => !enabled)}
+                      disabled={isStreaming || !!selectedFile}
+                      // Radix tooltips don't fire on disabled triggers, so keep a
+                      // native title for the disabled (file attached) case.
+                      title={selectedFile ? 'Deep Research usa apenas pedidos de texto.' : undefined}
+                      aria-label="Deep Research"
+                      aria-pressed={deepResearchEnabled}
+                    >
+                      <Search className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {selectedFile
+                      ? 'Deep Research usa apenas pedidos de texto.'
+                      : 'Deep Research'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
             <Textarea
               id={chatInputId}
@@ -1169,7 +1218,6 @@ function ChartArtifactActions({ content }: { content: string }) {
             variant="outline"
             size="sm"
             className="h-8 gap-1.5"
-            title="Copiar gráfico"
             aria-label="Copiar gráfico"
             onClick={async () => {
               try {
@@ -1188,7 +1236,6 @@ function ChartArtifactActions({ content }: { content: string }) {
             variant="outline"
             size="sm"
             className="h-8 gap-1.5"
-            title="Transferir gráfico"
             aria-label="Transferir gráfico"
             onClick={() => downloadImage(imageSrc)}
           >
@@ -1204,7 +1251,6 @@ function ChartArtifactActions({ content }: { content: string }) {
             variant="outline"
             size="sm"
             className="h-8 gap-1.5"
-            title="Copiar tabela"
             aria-label="Copiar tabela"
             onClick={async () => {
               try {
@@ -1223,7 +1269,6 @@ function ChartArtifactActions({ content }: { content: string }) {
             variant="outline"
             size="sm"
             className="h-8 gap-1.5"
-            title="Transferir tabela"
             aria-label="Transferir tabela"
             onClick={() => downloadText(tableCsv || tableMarkdown, 'chart-data.csv', 'text/csv;charset=utf-8')}
           >

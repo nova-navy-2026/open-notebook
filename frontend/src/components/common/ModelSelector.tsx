@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { useModels } from '@/lib/hooks/use-models'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { formatModelLabel } from '@/lib/utils/model-label'
 
 interface ModelSelectorProps {
   id?: string
@@ -53,7 +54,7 @@ export function ModelSelector({
             filteredModels.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 <div className="flex items-center justify-between w-full">
-                  <span>{model.name}</span>
+                  <span>{formatModelLabel(model.name)}</span>
                   <span className="text-xs text-muted-foreground ml-2">{model.provider}</span>
                 </div>
               </SelectItem>

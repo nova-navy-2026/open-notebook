@@ -2,6 +2,12 @@
 
 import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { formatModelLabel } from '@/lib/utils/model-label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -113,7 +119,7 @@ export function SessionManager({
   const getModelName = useMemo(() => {
     return (modelId: string) => {
       const model = models?.find(m => m.id === modelId)
-      return model?.name || customModelLabel
+      return formatModelLabel(model?.name || customModelLabel)
     }
   }, [models, customModelLabel])
 
@@ -295,26 +301,34 @@ export function SessionManager({
                             className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0"
-                              onClick={() => handleStartEdit(session)}
-                              title={t.common.edit ?? 'Edit'}
-                              aria-label={t.common.edit ?? 'Edit'}
-                            >
-                              <Edit2 className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                              onClick={() => setDeleteConfirmId(session.id)}
-                              title={t.common.delete ?? 'Delete'}
-                              aria-label={t.common.delete ?? 'Delete'}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => handleStartEdit(session)}
+                                  aria-label={t.common.edit ?? 'Edit'}
+                                >
+                                  <Edit2 className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t.common.edit ?? 'Edit'}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                  onClick={() => setDeleteConfirmId(session.id)}
+                                  aria-label={t.common.delete ?? 'Delete'}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>{t.common.delete ?? 'Delete'}</TooltipContent>
+                            </Tooltip>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -330,9 +344,15 @@ export function SessionManager({
                           </Badge>
                         )}
                         {session.model_override && (
-                          <Badge variant="outline" className="mt-2 ml-2 text-xs">
-                            {getModelName(session.model_override)}
-                          </Badge>
+                          <div className="mt-2 min-w-0">
+                            <Badge
+                              variant="outline"
+                              className="block max-w-full truncate text-xs"
+                              title={getModelName(session.model_override)}
+                            >
+                              {getModelName(session.model_override)}
+                            </Badge>
+                          </div>
                         )}
                       </>
                     )}

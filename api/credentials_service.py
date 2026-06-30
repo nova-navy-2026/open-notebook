@@ -577,7 +577,7 @@ async def discover_with_config(provider: str, config: dict) -> List[dict]:
         # Amália is an OpenAI-compatible endpoint
         amalia_url = (base_url or "https://api.novasearch.org/amalia-llm/v1").rstrip("/")
         amalia_key = api_key or "dummy"
-        known_model = "amalia-llm/AMALIA-9B-50-DPO"
+        known_model = "carminho/AMALIA-9B-50-DPO"
         models = []
         try:
             headers = {"Authorization": f"Bearer {amalia_key}"}

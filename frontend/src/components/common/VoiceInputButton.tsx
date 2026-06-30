@@ -5,6 +5,12 @@ import { Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import {
@@ -78,29 +84,35 @@ export function VoiceInputButton({
         : t.chat.voiceInput;
 
   return (
-    <Button
-      type="button"
-      variant={listening ? "destructive" : "outline"}
-      size="icon"
-      className={cn("relative h-[40px] w-[40px] flex-shrink-0", className)}
-      onClick={toggle}
-      disabled={disabled || busy}
-      title={title}
-      aria-label={title}
-    >
-      {busy ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : listening ? (
-        <>
-          <span
-            className="absolute inset-0 rounded-md bg-destructive/40 animate-ping"
-            style={{ opacity: 0.35 + level * 0.5 }}
-          />
-          <Square className="relative h-3.5 w-3.5 fill-current" />
-        </>
-      ) : (
-        <Mic className="h-4 w-4" />
-      )}
-    </Button>
+    <TooltipProvider delayDuration={0}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant={listening ? "destructive" : "outline"}
+            size="icon"
+            className={cn("relative h-[40px] w-[40px] flex-shrink-0", className)}
+            onClick={toggle}
+            disabled={disabled || busy}
+            aria-label={title}
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : listening ? (
+              <>
+                <span
+                  className="absolute inset-0 rounded-md bg-destructive/40 animate-ping"
+                  style={{ opacity: 0.35 + level * 0.5 }}
+                />
+                <Square className="relative h-3.5 w-3.5 fill-current" />
+              </>
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{title}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

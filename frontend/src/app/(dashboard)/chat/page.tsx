@@ -15,6 +15,11 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { globalChatApi } from "@/lib/api/global-chat";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 import {
@@ -144,15 +149,20 @@ export default function GlobalChatPage() {
         {sidebarOpen ? (
           <div className="w-64 flex-shrink-0 flex flex-col rounded-lg border bg-card/40 min-h-0">
             <div className="flex items-center justify-end px-2 pt-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setSidebarOpen(false)}
-                title={t.common.collapseHistory ?? "Collapse history"}
-              >
-                <PanelLeftClose className="h-4 w-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => setSidebarOpen(false)}
+                    aria-label={t.common.collapseHistory ?? "Collapse history"}
+                  >
+                    <PanelLeftClose className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t.common.collapseHistory ?? "Collapse history"}</TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex-1 min-h-0">
               <SessionManager
@@ -173,15 +183,20 @@ export default function GlobalChatPage() {
           </div>
         ) : (
           <div className="flex-shrink-0 pt-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setSidebarOpen(true)}
-              title={t.common.expandHistory ?? "Expand history"}
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setSidebarOpen(true)}
+                  aria-label={t.common.expandHistory ?? "Expand history"}
+                >
+                  <PanelLeftOpen className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t.common.expandHistory ?? "Expand history"}</TooltipContent>
+            </Tooltip>
           </div>
         )}
 

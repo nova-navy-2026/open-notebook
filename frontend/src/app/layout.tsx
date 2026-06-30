@@ -9,6 +9,7 @@ import { ConnectionGuard } from "@/components/common/ConnectionGuard";
 import { SuppressHydrationWarning } from "@/components/common/SuppressHydrationWarning";
 import { I18nProvider } from "@/components/providers/I18nProvider";
 import { RBACProvider } from "@/lib/contexts/rbac-context";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -30,12 +31,17 @@ export default function RootLayout({
           <ThemeProvider>
             <QueryProvider>
               <I18nProvider>
-                <RBACProvider>
-                  <ConnectionGuard>
-                    {children}
-                    <Toaster />
-                  </ConnectionGuard>
-                </RBACProvider>
+                {/* App-wide tooltip provider so every button gets the same
+                    instant, styled hover popup (delayDuration=0 matches the
+                    sidebar theme/language buttons). */}
+                <TooltipProvider delayDuration={0}>
+                  <RBACProvider>
+                    <ConnectionGuard>
+                      {children}
+                      <Toaster />
+                    </ConnectionGuard>
+                  </RBACProvider>
+                </TooltipProvider>
               </I18nProvider>
             </QueryProvider>
           </ThemeProvider>

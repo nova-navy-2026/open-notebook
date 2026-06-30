@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { formatModelLabel } from '@/lib/utils/model-label'
 import {
   Dialog,
   DialogContent,
@@ -71,10 +72,10 @@ export function ModelSelector({
       return displayNameOverride
     }
     if (currentModel) {
-      return languageModels.find(model => model.id === currentModel)?.name || currentModel
+      return formatModelLabel(languageModels.find(model => model.id === currentModel)?.name || currentModel)
     }
     if (defaultModel) {
-      return defaultModel.name
+      return formatModelLabel(defaultModel.name)
     }
     return t.common.default
   }, [displayNameOverride, currentModel, languageModels, defaultModel, t.common.default])
@@ -131,8 +132,8 @@ export function ModelSelector({
                 <SelectItem value="default">
                   <div className="flex items-center justify-between w-full">
                     <span>
-                      {defaultModel 
-                        ? `${t.common.default} (${defaultModel.name})` 
+                      {defaultModel
+                        ? `${t.common.default} (${formatModelLabel(defaultModel.name)})`
                         : t.transformations.systemDefault}
                     </span>
                     {defaultModel?.provider && (
@@ -150,7 +151,7 @@ export function ModelSelector({
                   languageModels.map((model) => (
                     <SelectItem key={model.id} value={model.id}>
                       <div className="flex items-center justify-between w-full">
-                        <span>{model.name}</span>
+                        <span>{formatModelLabel(model.name)}</span>
                         <span className="text-xs text-muted-foreground ml-2">
                           {model.provider}
                         </span>

@@ -677,7 +677,7 @@ async def discover_amalia_models() -> List[DiscoveredModel]:
         logger.warning(f"Failed to dynamically discover Amália models: {e}")
 
     # Always include the known default model
-    known_model = "amalia-llm/AMALIA-9B-50-DPO"
+    known_model = "carminho/AMALIA-9B-50-DPO"
     if not any(m.name == known_model for m in models):
         models.append(
             DiscoveredModel(
