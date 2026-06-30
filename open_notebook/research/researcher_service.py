@@ -165,6 +165,10 @@ _jobs_file = os.path.join(DATA_FOLDER, "research_jobs.json")
 _jobs: Dict[str, ResearchJob] = {}
 _running_jobs: Dict[str, ResearchJob] = {}
 _background_tasks: set[asyncio.Task] = set()
+# Tombstone set: job IDs that were deleted. Persisted inside the JSON file under
+# this special key so that other Uvicorn workers (who may still have the job in
+# their _running_jobs) never re-write a deleted job back to disk.
+_TOMBSTONE_KEY = "__tombstones__"
 RESEARCH_JOB_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_JOB_TIMEOUT_SECONDS", "2700"))
 RESEARCH_JOB_STALE_SECONDS = int(os.environ.get("RESEARCH_JOB_STALE_SECONDS", "3600"))
 RESEARCH_PREFETCH_TIMEOUT_SECONDS = float(os.environ.get("RESEARCH_PREFETCH_TIMEOUT_SECONDS", "45"))
@@ -216,7 +220,12 @@ def _read_jobs_from_disk() -> Dict[str, ResearchJob]:
         return {}
     with open(_jobs_file, "r", encoding="utf-8") as f:
         data = json.load(f) or {}
-    return {jid: ResearchJob.model_validate(raw) for jid, raw in data.items()}
+    tombstones = set(data.get(_TOMBSTONE_KEY, []))
+    return {
+        jid: ResearchJob.model_validate(raw)
+        for jid, raw in data.items()
+        if jid != _TOMBSTONE_KEY and jid not in tombstones
+    }
 
 
 def _job_time(value: Any) -> Optional[datetime]:
@@ -244,16 +253,23 @@ def _save_jobs(_deleted: Optional[set] = None) -> None:
 
         # Start from what's on disk (jobs owned by other workers) …
         merged: Dict[str, dict] = {}
+        tombstones: set = set()
         if os.path.exists(_jobs_file):
             try:
                 with open(_jobs_file, "r", encoding="utf-8") as f:
-                    merged = json.load(f) or {}
+                    raw_disk = json.load(f) or {}
+                tombstones = set(raw_disk.get(_TOMBSTONE_KEY, []))
+                merged = {k: v for k, v in raw_disk.items() if k != _TOMBSTONE_KEY}
             except Exception:
                 merged = {}
 
-        # Remove any explicitly deleted jobs from the on-disk state BEFORE the
-        # in-memory overlay — otherwise they would be resurrected from disk.
+        # Accumulate new deletions into the persistent tombstone set so that any
+        # worker's subsequent _save_jobs call also respects them. This is the key
+        # fix for the multi-worker "job respawns after deletion" bug: the worker
+        # that owns the running background task will keep calling _persist_job via
+        # its progress callback, so we need the tombstone on disk to block it.
         if _deleted:
+            tombstones.update(_deleted)
             for jid in _deleted:
                 merged.pop(jid, None)
 
@@ -264,9 +280,12 @@ def _save_jobs(_deleted: Optional[set] = None) -> None:
         _jobs.update(_running_jobs)
 
         # … then overlay this worker's view when it is at least as recent as
-        # the on-disk state. This avoids resurrecting stale "running" jobs from
-        # a polling worker after another worker already persisted completion.
+        # the on-disk state. Skip any job that has been tombstoned (deleted by
+        # any worker) — this prevents a still-running task on this worker from
+        # writing a deleted job back to disk.
         for jid, job in _jobs.items():
+            if jid in tombstones:
+                continue
             existing = merged.get(jid)
             if existing:
                 existing_time = _job_time(existing)
@@ -281,6 +300,9 @@ def _save_jobs(_deleted: Optional[set] = None) -> None:
                 ):
                     continue
             merged[jid] = job.model_dump()
+
+        # Persist tombstones alongside jobs so other workers respect them.
+        merged[_TOMBSTONE_KEY] = list(tombstones)
 
         # Write to a sibling temp file then rename so readers on other workers
         # never see a truncated / partially-written file.
