@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { convertReferencesToMarkdownLinks, createReferenceLinkComponent } from '@/lib/utils/source-references'
 import { useModalManager } from '@/lib/hooks/use-modal-manager'
+import { useCitationViewerStore } from '@/lib/stores/citation-viewer-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { toast } from 'sonner'
 
@@ -34,9 +35,22 @@ export function StreamingResponse({
   const [strategyOpen, setStrategyOpen] = useState(false)
   const [answersOpen, setAnswersOpen] = useState(false)
   const { openModal } = useModalManager()
+  const openCitation = useCitationViewerStore((s) => s.openCitation)
   const { t } = useTranslation()
 
   const handleReferenceClick = (type: string, id: string) => {
+    // Documents open in the citation viewer side panel; notes/insights keep
+    // their dialogs.
+    if (type === 'navy') {
+      // Forward the payload verbatim — it may carry :p{page} and :s{chunk}
+      // anchors that the backend uses for precise highlighting.
+      openCitation({ kind: 'navy', ref: `navy:${id}` })
+      return
+    }
+    if (type === 'source') {
+      openCitation({ kind: 'source', id })
+      return
+    }
     const modalType = type === 'source_insight' ? 'insight' : type as 'source' | 'note' | 'insight'
 
     try {

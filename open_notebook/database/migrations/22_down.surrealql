@@ -1,0 +1,3 @@
+-- Migration 22 Down: Remove cited_document table
+
+REMOVE TABLE IF EXISTS cited_document;

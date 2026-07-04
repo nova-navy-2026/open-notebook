@@ -11,6 +11,7 @@ import { CreateDialogsProvider } from '@/lib/hooks/use-create-dialogs'
 // surfaced actions that don't match the current menus. The component is kept in
 // the codebase; re-add the import and <CommandPalette /> below to bring it back.
 import { AppShell } from '@/components/layout/AppShell'
+import CitationViewerPanel from '@/components/citation/CitationViewerPanel'
 
 export default function DashboardLayout({
   children,
@@ -57,6 +58,7 @@ export default function DashboardLayout({
           {children}
         </AppShell>
         <ModalProvider />
+        <CitationViewerPanel />
       </CreateDialogsProvider>
     </ErrorBoundary>
   )

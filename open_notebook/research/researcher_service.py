@@ -483,11 +483,36 @@ async def _prefetch_opensearch_docs(
         resp.raise_for_status()
         data = resp.json()
         docs = data.get("documents", [])
+        # NOVA-Researcher returns metadata with an empty ``source`` and a
+        # title shaped like "{doc_id}.pdf, p.{N}". Derive a citation ref so
+        # the UI can open the document viewer on the cited page instead of
+        # a dead browser tab.
+        for d in docs:
+            md = d.get("metadata") or {}
+            if not md.get("source"):
+                m = re.match(r"^(?P<doc>.+?),\s*p\.\s*(?P<page>\d+)\s*$", md.get("title") or "")
+                if m:
+                    md["source"] = f"navy:{m.group('doc')}:p{m.group('page')}"
+                    d["metadata"] = md
         logger.info(f"Pre-fetched {len(docs)} docs from OpenSearch via API")
         return docs
     except Exception as exc:
         logger.error(f"OpenSearch pre-fetch via API failed: {exc}")
         return []
+
+
+def _display_title_from_source(source: str) -> str:
+    """Human-readable card title for a retrieved-document source.
+
+    Sources may be citation refs (``navy:{doc}:p{N}(:s{M})?``) rather than
+    URLs; showing the raw ref as a title leaks internal syntax into the UI.
+    """
+    m = re.match(r"^navy:(?P<doc>.+?)(?::p(?P<page>\d+))?(?::s\d+)?$", source)
+    if not m:
+        return source
+    if m.group("page"):
+        return f"{m.group('doc')}, p.{m.group('page')}"
+    return m.group("doc")
 
 
 def _research_terms(query: str) -> List[str]:
@@ -860,7 +885,7 @@ async def _run_ttd_dr(request: ResearchRequest, job_id: str, progress_callback=N
         # Snippets are not available here — the UI shows source filename
         # + page reference, which is what users care about.
         retrieved_docs = [
-            RetrievedDocument(title=s, source=s, snippet="")
+            RetrievedDocument(title=_display_title_from_source(s), source=s, snippet="")
             for s in source_urls
             if s
         ]
@@ -987,7 +1012,7 @@ async def _run_react_dr(request: ResearchRequest, job_id: str, progress_callback
             ]
 
         retrieved_docs = [
-            RetrievedDocument(title=s, source=s, snippet="")
+            RetrievedDocument(title=_display_title_from_source(s), source=s, snippet="")
             for s in source_urls
             if s
         ]
@@ -1121,7 +1146,7 @@ async def _run_plan_and_execute_dr(request: ResearchRequest, job_id: str, progre
             ]
 
         retrieved_docs = [
-            RetrievedDocument(title=s, source=s, snippet="")
+            RetrievedDocument(title=_display_title_from_source(s), source=s, snippet="")
             for s in source_urls
             if s
         ]
@@ -1346,7 +1371,7 @@ async def run_research(request: ResearchRequest, progress_callback=None) -> Rese
         for s in source_urls:
             if s and s not in existing_sources:
                 retrieved_docs.append(
-                    RetrievedDocument(title=s, source=s, snippet="")
+                    RetrievedDocument(title=_display_title_from_source(s), source=s, snippet="")
                 )
                 existing_sources.add(s)
 

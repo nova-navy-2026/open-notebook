@@ -1239,6 +1239,8 @@ export const ptPT = {
     sourceDocuments: "Documentos de Origem",
     modelPrefix: "Modelo",
     tonePrefix: "Tom",
+    backToHistory: "Voltar",
+    reportUnavailable: "Relatório indisponível",
   },
   setupBanner: {
     encryptionRequired: "Chave de criptografia não configurada",
@@ -1382,6 +1384,14 @@ export const ptPT = {
     translating: "A traduzir…",
     translationResult: "Tradução",
     translateError: "A tradução falhou. Por favor tente novamente.",
+  },
+  citationViewer: {
+    loading: "A carregar documento...",
+    loadError: "Falha ao carregar documento",
+    accessDenied: "Documento não encontrado ou acesso negado",
+    close: "Fechar visualizador de citações",
+    notFoundInDocument: "O excerto não foi encontrado no documento",
+    documentViewer: "Visualizador de Documentos",
   },
   collaboration: {
     share: "Partilhar",

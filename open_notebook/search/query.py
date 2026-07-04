@@ -146,6 +146,7 @@ def _normalize_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "similarity": score,
             "relevance": score,
             "matches": [match_text] if match_text else [],
+            "page_start": src.get("page_start"),
         }
         file_path = src.get("document_path") or src.get("file_path")
         if file_path:
@@ -170,10 +171,16 @@ def _deduplicate_by_parent(
             seen[key] = {**r, "matches": list(r.get("matches") or [])}
         else:
             existing = seen[key]
-            # Keep highest score
+            # Keep highest score; track the id and page_start of the best
+            # chunk together — citations derive :s from id and :p from
+            # page_start, so they must describe the same chunk.
             if r.get("similarity", 0) > existing.get("similarity", 0):
                 existing["similarity"] = r["similarity"]
                 existing["relevance"] = r.get("relevance", r["similarity"])
+                if r.get("id"):
+                    existing["id"] = r["id"]
+                if r.get("page_start") is not None:
+                    existing["page_start"] = r["page_start"]
             # Collect unique matches from this chunk
             for m in (r.get("matches") or []):
                 if m and m not in existing["matches"]:

@@ -260,7 +260,10 @@ async def _search_navy_corpus(
     """Semantic k-NN search over the navy corpus for one query. Never raises."""
     out: List[Dict[str, Any]] = []
     try:
-        from open_notebook.search.navy_docs import vector_search_navy_documents
+        from open_notebook.search.navy_docs import (
+            semantic_ordinal,
+            vector_search_navy_documents,
+        )
 
         navy_results = await vector_search_navy_documents(
             query=query, doc_ids=None, k=k, user_id=user_id
@@ -273,9 +276,15 @@ async def _search_navy_corpus(
             page = r.get("page_start")
             if page is not None:
                 label += f" (p.{page})"
+            # ":s{n}" pins the exact retrieved chunk so a citation click
+            # highlights the passage, not the whole page.
+            ordinal = semantic_ordinal(r.get("chunk_id"))
+            item_id = f"navy:{r.get('doc_id', '')}:p{page or 0}"
+            if ordinal is not None:
+                item_id += f":s{ordinal}"
             out.append(
                 {
-                    "id": f"navy:{r.get('doc_id', '')}:p{page or 0}",
+                    "id": item_id,
                     "doc_id": r.get("doc_id", ""),
                     "source": r.get("source", ""),
                     "title": label,
@@ -372,12 +381,16 @@ async def _build_global_context(
                 "type": "source",
                 "pages": [],
                 "chunks": 0,
+                "id": pid,
             }
         source_docs[pid]["chunks"] += 1
     for doc in source_docs.values():
         documents.append(doc)
 
-    # Navy: group by doc_id, collect page numbers
+    # Navy: group by doc_id, collect page numbers and per-passage citation
+    # refs. Each retrieved chunk keeps its own ":s"-anchored ref so the UI
+    # can open the viewer on that exact passage — a document used for two
+    # separate passages must offer two distinct citation targets.
     navy_docs: Dict[str, Dict[str, Any]] = {}
     for r in context_data["navy_corpus"]:
         did = r.get("doc_id") or r.get("id", "")
@@ -387,6 +400,8 @@ async def _build_global_context(
                 "type": "navy",
                 "pages": [],
                 "chunks": 0,
+                "doc_id": did,
+                "citations": [],
             }
         navy_docs[did]["chunks"] += 1
         ps = r.get("page_start")
@@ -395,8 +410,12 @@ async def _build_global_context(
             navy_docs[did]["pages"].append(ps)
         if pe is not None and pe != ps:
             navy_docs[did]["pages"].append(pe)
+        ref = r.get("id", "")
+        if ref and all(c["ref"] != ref for c in navy_docs[did]["citations"]):
+            navy_docs[did]["citations"].append({"page": ps, "ref": ref})
     for doc in navy_docs.values():
         doc["pages"] = sorted(set(doc["pages"]))
+        doc["citations"].sort(key=lambda c: (c["page"] is None, c["page"]))
         documents.append(doc)
 
     context_data["documents"] = documents

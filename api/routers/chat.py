@@ -838,6 +838,7 @@ async def build_context(
                 # passed to the model. Falls back to BM25 internally if the
                 # query embedding cannot be generated.
                 from open_notebook.search.navy_docs import (
+                    semantic_ordinal,
                     vector_search_navy_documents,
                 )
 
@@ -864,8 +865,14 @@ async def build_context(
                     page = r.get("page_start")
                     if page is not None:
                         label += f" (p.{page})"
+                    # ":s{n}" pins the exact retrieved chunk so a citation
+                    # click highlights the passage, not the whole page.
+                    ordinal = semantic_ordinal(r.get("chunk_id"))
+                    item_id = f"navy:{r.get('doc_id', '')}:p{page or 0}"
+                    if ordinal is not None:
+                        item_id += f":s{ordinal}"
                     item = {
-                        "id": f"navy:{r.get('doc_id', '')}:p{page or 0}",
+                        "id": item_id,
                         "title": label,
                         "content": r.get("content", ""),
                     }

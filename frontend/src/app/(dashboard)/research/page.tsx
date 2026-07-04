@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResearchGeneratePanel } from "@/components/research/ResearchGeneratePanel";
 import { ResearchJobsList } from "@/components/research/ResearchJobsList";
@@ -9,7 +10,25 @@ import { PageInfoButton } from "@/components/common/PageInfoButton";
 
 export default function ResearchPage() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState("generate");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // The tab lives in the URL (not just local state) so that navigating away
+  // to a report page and back with "Go back" reliably lands on History
+  // instead of resetting to the default tab.
+  const [activeTab, setActiveTabState] = useState(
+    searchParams?.get("tab") === "jobs" ? "jobs" : "generate",
+  );
+
+  const setActiveTab = useCallback(
+    (tab: string) => {
+      setActiveTabState(tab);
+      router.replace(tab === "jobs" ? "/research?tab=jobs" : "/research", {
+        scroll: false,
+      });
+    },
+    [router],
+  );
 
   return (
     <div className="flex flex-col">

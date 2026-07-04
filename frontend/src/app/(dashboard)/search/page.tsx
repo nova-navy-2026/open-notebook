@@ -28,6 +28,7 @@ import { useSearch } from "@/lib/hooks/use-search";
 import { useSettings } from "@/lib/hooks/use-settings";
 import { useModelDefaults } from "@/lib/hooks/use-models";
 import { useModalManager } from "@/lib/hooks/use-modal-manager";
+import { useCitationViewerStore } from "@/lib/stores/citation-viewer-store";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 import { VoiceInputButton } from "@/components/common/VoiceInputButton";
@@ -53,6 +54,7 @@ export default function SearchPage() {
   const { data: settings } = useSettings();
   const { data: modelDefaults } = useModelDefaults();
   const { openModal } = useModalManager();
+  const openCitation = useCitationViewerStore((s) => s.openCitation);
 
   const hasEmbeddingModel = !!modelDefaults?.default_embedding_model;
 
@@ -182,16 +184,32 @@ export default function SearchPage() {
       console.warn("Search result with null parent_id:", result);
       return null;
     }
-    const [type, id] = result.parent_id.split(":");
+    const type = result.parent_id.split(":")[0];
+    // Navy doc_ids are raw filenames; don't split them on ':' — take
+    // everything after the type prefix.
+    const id = result.parent_id.slice(type.length + 1);
     const isNavy = type === "navy";
-    const modalType = isNavy
-      ? null
-      : type === "source_insight"
-        ? "insight"
-        : (type as "source" | "note" | "insight");
     const { label: typeLabel, Icon, color } = typeMeta(type, isNavy);
     const matchCount = result.matches?.length ?? 0;
     const preview = result.matches?.[0];
+
+    // Documents (navy + sources) open in the citation viewer side panel with
+    // the matched chunk highlighted; notes/insights keep their dialogs.
+    const handleTitleClick = () => {
+      if (isNavy) {
+        openCitation({
+          kind: "navy",
+          ref: `navy:${id}`,
+          // result.id is the OpenSearch _id == chunk_id → chunk-precise highlight
+          chunkId: result.id || undefined,
+          snippet: preview,
+        });
+      } else if (type === "source") {
+        openCitation({ kind: "source", id, snippet: preview });
+      } else {
+        openModal(type === "source_insight" ? "insight" : (type as "note" | "insight"), id);
+      }
+    };
 
     return (
       <Card
@@ -207,22 +225,13 @@ export default function SearchPage() {
 
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
-              {modalType ? (
-                <button
-                  onClick={() => openModal(modalType, id)}
-                  className="truncate text-left font-medium text-foreground hover:text-primary hover:underline"
-                  title={result.title}
-                >
-                  {result.title}
-                </button>
-              ) : (
-                <span
-                  className="truncate font-medium text-foreground"
-                  title={result.title}
-                >
-                  {result.title}
-                </span>
-              )}
+              <button
+                onClick={handleTitleClick}
+                className="truncate text-left font-medium text-foreground hover:text-primary hover:underline"
+                title={result.title}
+              >
+                {result.title}
+              </button>
               <span className="flex-shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium tabular-nums text-primary">
                 {result.final_score.toFixed(2)}
               </span>

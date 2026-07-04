@@ -324,6 +324,292 @@ async def get_navy_document_content(
     }
 
 
+def _parent_sort_key(src: Dict[str, Any]) -> tuple:
+    """Document-order sort key for a chunk hit.
+
+    ``chunk_order`` is the child index WITHIN a parent (0..2), so document
+    order must come from ``page_start`` with the ordinals embedded in
+    ``parent_id`` (``{doc}_section_{s}_chunk_{c}``) as tiebreakers — parsed
+    numerically, because a string sort misorders section_11 vs section_111.
+    ``chunk_id`` (``{doc}_semantic_{n}``) is a last-resort global signal.
+    """
+    page = src.get("page_start")
+    page_key = page if isinstance(page, (int, float)) else math.inf
+    m = re.search(r"_section_(\d+)_chunk_(\d+)$", src.get("parent_id") or "")
+    section_key = int(m.group(1)) if m else math.inf
+    chunk_key = int(m.group(2)) if m else math.inf
+    m2 = re.search(r"_semantic_(\d+)$", src.get("chunk_id") or "")
+    semantic_key = int(m2.group(1)) if m2 else math.inf
+    return (page_key, section_key, chunk_key, semantic_key)
+
+
+def _longest_suffix_prefix(prev: str, nxt: str) -> int:
+    """Length of the longest suffix of ``prev`` equal to a prefix of ``nxt``.
+
+    Consecutive ``parent_content`` blocks share their neighbour text
+    verbatim (block_i = P(i-1)+P(i)+P(i+1), block_i+1 = P(i)+P(i+1)+P(i+2)),
+    so an exact match finds the seam. Failed comparisons bail on the first
+    character, so the scan is cheap in practice.
+    """
+    max_len = min(len(prev), len(nxt))
+    for length in range(max_len, 0, -1):
+        if prev[-length:] == nxt[:length]:
+            return length
+    return 0
+
+
+async def get_navy_document_segments(
+    doc_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Reconstruct one navy document as clean text with offset metadata.
+
+    Unlike :func:`get_navy_document_content` (which joins distinct
+    ``parent_content`` blocks and therefore repeats the ±1-neighbour text the
+    blocks share), this de-overlaps consecutive blocks via exact
+    suffix/prefix matching, yielding text where each passage appears once —
+    a requirement for character-offset highlighting in the citation viewer.
+
+    Returns ``None`` when the document doesn't exist or the user can't read
+    it (fail-closed, same ACL as ``get_navy_document_content``). Otherwise:
+
+    - ``full_text``: the de-overlapped document text.
+    - ``segments``: ``[{parent_id, section_title, page_start, page_end,
+      char_start, char_end}]`` — the span each parent block contributed
+      (display/scoping metadata; spans never overlap).
+    - ``chunks``: ``[{chunk_id, parent_id, content, section_title,
+      page_start, page_end}]`` — every child chunk, whose ``content`` is a
+      verbatim substring of the document; callers anchor highlights by
+      locating it in ``full_text``.
+    """
+    from open_notebook.access_control import access_enabled, build_opensearch_filter
+
+    if not doc_id:
+        return None
+    if user_id is None and access_enabled():
+        logger.debug("Skipping anonymous navy document segments fetch (ACL enabled)")
+        return None
+
+    client = await get_client()
+
+    query: Dict[str, Any] = {"bool": {"must": [{"term": {"doc_id": doc_id}}]}}
+    acl_filter = build_opensearch_filter(user_id)
+    if acl_filter is not None:
+        query["bool"]["filter"] = [acl_filter]
+
+    body: Dict[str, Any] = {
+        "size": 2000,  # generous upper bound on chunks per document
+        "query": query,
+        "_source": [
+            "doc_id", "content", "parent_content", "section_title",
+            "page_start", "page_end", "chunk_id", "parent_id", "chunk_order",
+            "document_name", "source", "document_type", "document_status",
+            "access_scope", "classification_level", "creator_department",
+            "document_path",
+        ],
+    }
+
+    response = await _search_with_retry(client, body)
+    hits = response.get("hits", {}).get("hits", [])
+    if not hits:
+        return None
+
+    sources = sorted(
+        (h.get("_source", {}) for h in hits), key=_parent_sort_key
+    )
+    first = sources[0]
+
+    # Group child chunks under their parent, preserving document order.
+    # Children of a parent share the same parent_content block.
+    parents: List[Dict[str, Any]] = []
+    parent_index: Dict[str, int] = {}
+    chunks: List[Dict[str, Any]] = []
+    for src in sources:
+        section_title = (src.get("section_title") or "").strip()
+        parent_key = src.get("parent_id") or f"{doc_id}:{section_title}"
+        chunks.append(
+            {
+                "chunk_id": src.get("chunk_id") or "",
+                "parent_id": parent_key,
+                "content": (src.get("content") or "").strip(),
+                # The retrieved context unit (parent ±1 neighbours) — a
+                # verbatim substring of full_text by construction; used to
+                # widen highlights when the child alone is a bare heading.
+                "parent_content": (src.get("parent_content") or "").strip(),
+                "section_title": section_title,
+                "page_start": src.get("page_start"),
+                "page_end": src.get("page_end"),
+            }
+        )
+        if parent_key in parent_index:
+            continue
+        parent_index[parent_key] = len(parents)
+        parents.append(
+            {
+                "parent_id": parent_key,
+                "block": (src.get("parent_content") or "").strip(),
+                "section_title": section_title,
+                "page_start": src.get("page_start"),
+                "page_end": src.get("page_end"),
+            }
+        )
+
+    segments: List[Dict[str, Any]] = []
+    pieces: List[str] = []
+    cursor = 0
+
+    def _append_segment(parent: Dict[str, Any], text: str) -> None:
+        nonlocal cursor
+        if not text:
+            return
+        if pieces:
+            pieces.append("\n\n")
+            cursor += 2
+        pieces.append(text)
+        segments.append(
+            {
+                "parent_id": parent["parent_id"],
+                "section_title": parent["section_title"],
+                "page_start": parent["page_start"],
+                "page_end": parent["page_end"],
+                "char_start": cursor,
+                "char_end": cursor + len(text),
+            }
+        )
+        cursor += len(text)
+
+    have_blocks = any(p["block"] for p in parents)
+    if have_blocks:
+        # Identical blocks (all children of one parent, or exact repeats)
+        # collapse; consecutive distinct blocks get de-overlapped.
+        prev_block = ""
+        for parent in parents:
+            block = parent["block"]
+            if not block or block == prev_block:
+                continue
+            overlap = _longest_suffix_prefix(prev_block, block)
+            remainder = block[overlap:]
+            if overlap and remainder:
+                # Continue the previous segment's text without a separator:
+                # the seam is mid-flow document text, not a block boundary.
+                pieces.append(remainder)
+                segments.append(
+                    {
+                        "parent_id": parent["parent_id"],
+                        "section_title": parent["section_title"],
+                        "page_start": parent["page_start"],
+                        "page_end": parent["page_end"],
+                        "char_start": cursor,
+                        "char_end": cursor + len(remainder),
+                    }
+                )
+                cursor += len(remainder)
+            elif remainder:
+                _append_segment(parent, remainder)
+            prev_block = block
+    else:
+        # Legacy docs without parent_content: stitch de-duplicated child
+        # chunks, one segment per chunk (mirrors get_navy_document_content).
+        seen: set = set()
+        for chunk in chunks:
+            text = chunk["content"]
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            _append_segment(
+                {
+                    "parent_id": chunk["parent_id"],
+                    "section_title": chunk["section_title"],
+                    "page_start": chunk["page_start"],
+                    "page_end": chunk["page_end"],
+                },
+                text,
+            )
+
+    full_text = "".join(pieces)
+
+    logger.info(
+        "Navy doc segments {!r}: {} chunk hit(s), {} parent(s), {} segment(s), "
+        "{} chars (user_id={!r})",
+        doc_id,
+        len(hits),
+        len(parents),
+        len(segments),
+        len(full_text),
+        user_id,
+    )
+
+    title = (
+        first.get("document_name")
+        or first.get("source")
+        or _pretty_doc_label(doc_id, first)
+    )
+
+    return {
+        "doc_id": doc_id,
+        "title": title,
+        "full_text": full_text,
+        "segments": segments,
+        "chunks": chunks,
+        "chunk_count": len(hits),
+        "document_type": first.get("document_type") or "",
+        "document_status": first.get("document_status") or "",
+        "access_scope": first.get("access_scope") or "",
+        "classification_level": first.get("classification_level"),
+        "creator_department": first.get("creator_department") or "",
+        "source": first.get("document_name") or first.get("source") or "",
+    }
+
+
+async def get_navy_chunk(
+    chunk_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Fetch a single navy chunk by ``chunk_id`` (ACL-enforced, fail-closed).
+
+    Used to resolve ``opensearch://{index}/{chunk_id}`` citation refs to
+    their ``doc_id`` before reconstructing the document.
+    """
+    from open_notebook.access_control import access_enabled, build_opensearch_filter
+
+    if not chunk_id:
+        return None
+    if user_id is None and access_enabled():
+        return None
+
+    client = await get_client()
+    query: Dict[str, Any] = {"bool": {"must": [{"term": {"chunk_id": chunk_id}}]}}
+    acl_filter = build_opensearch_filter(user_id)
+    if acl_filter is not None:
+        query["bool"]["filter"] = [acl_filter]
+
+    body = {
+        "size": 1,
+        "query": query,
+        "_source": [
+            "doc_id", "chunk_id", "parent_id", "content", "parent_content",
+            "section_title", "page_start", "page_end",
+        ],
+    }
+    response = await _search_with_retry(client, body)
+    hits = response.get("hits", {}).get("hits", [])
+    if not hits:
+        return None
+    return hits[0].get("_source", {})
+
+
+def semantic_ordinal(chunk_id: Optional[str]) -> Optional[int]:
+    """Extract ``n`` from a ``{doc_id}_semantic_{n}`` chunk id.
+
+    The ordinal is short enough for an LLM to reproduce inside a citation
+    (``navy:{doc_id}:p{page}:s{n}``), and the full chunk_id is reconstructible
+    from ``doc_id`` + ``n`` — that is how citation clicks resolve back to the
+    exact retrieved chunk for highlighting.
+    """
+    m = re.search(r"_semantic_(\d+)$", chunk_id or "")
+    return int(m.group(1)) if m else None
+
+
 def _pretty_doc_label(doc_id: str, sample: Dict[str, Any]) -> str:
     """Human-readable label for a document node."""
     name = sample.get("document_name") or sample.get("source")
@@ -522,6 +808,26 @@ async def build_document_graph(
     }
 
 
+# Table-of-contents / index sections. Their chunks mention every topic in the
+# document, so they embed close to almost ANY query and crowd out substantive
+# chunks — and citations that land on them highlight index entries instead of
+# content. Detected by section title or by TOC-shaped text (page-reference
+# runs like ", 2 = 58" or dotted leaders "..... 58").
+_TOC_SECTION_RE = re.compile(
+    r"^\s*(índice|indice|sumário|sumario|table of contents|contents"
+    r"|lista de (figuras|tabelas|abreviaturas|acrónimos|acronimos|anexos))\b",
+    re.IGNORECASE,
+)
+_TOC_PAGE_REF_RE = re.compile(r",\s*\d+\s*=|\.{4,}\s*\d+")
+
+
+def _is_toc_like(section_title: str, content: str) -> bool:
+    """True when a chunk is a table-of-contents / index entry, not content."""
+    if _TOC_SECTION_RE.match(section_title or ""):
+        return True
+    return len(_TOC_PAGE_REF_RE.findall(content or "")) >= 3
+
+
 def _collapse_navy_hits(
     hits: List[Dict[str, Any]], limit: int
 ) -> List[Dict[str, Any]]:
@@ -545,6 +851,11 @@ def _collapse_navy_hits(
         if parent_key in seen_parents:
             continue
         seen_parents.add(parent_key)
+        # Skip index/TOC chunks: they are retrieval noise and make citations
+        # highlight index entries. Callers over-fetch ~3x, so dropping them
+        # rarely starves the requested k.
+        if _is_toc_like(section_title, src.get("content", "")):
+            continue
         results.append({
             "doc_id": doc_id,
             "content": src.get("parent_content") or src.get("content", ""),
@@ -553,6 +864,10 @@ def _collapse_navy_hits(
             "page_start": src.get("page_start"),
             "page_end": src.get("page_end"),
             "score": hit.get("_score", 0),
+            # Best-ranked child of this parent — its semantic ordinal goes
+            # into citable ids so the citation viewer can highlight the exact
+            # retrieved passage instead of a whole page.
+            "chunk_id": src.get("chunk_id", ""),
         })
         if len(results) >= limit:
             break
