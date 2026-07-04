@@ -443,7 +443,7 @@ export const enUS = {
     showingFirst100:
       "Showing first 100 sources. Use search to find specific ones.",
     selectedCount: "{count} sources selected",
-    confirmAddToNotebook: "Add {count} to this notebook",
+    confirmAddToNotebook: "Add {count} to this workspace",
     added: "Added on {date}",
     addUrl: "Add URL",
     uploadFile: "Upload File",

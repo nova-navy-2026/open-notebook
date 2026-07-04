@@ -190,7 +190,7 @@ export function NotebookResearchDialog({
           </DialogTitle>
           <DialogDescription>
             {t.research?.notebookResearchDesc ??
-              "Run a deep research and automatically save the result as a note in this notebook."}
+              "Run a deep research and automatically save the result as a note in this workspace."}
           </DialogDescription>
         </DialogHeader>
 

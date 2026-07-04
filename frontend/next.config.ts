@@ -52,6 +52,13 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${internalApiUrl}/api/:path*`,
       },
+      // Show "/workspaces" in the browser for the Workspaces tab while still
+      // serving the existing notebooks route/page. This is a URL rewrite only —
+      // the address bar keeps "/workspaces" and no route directory is renamed.
+      {
+        source: "/workspaces",
+        destination: "/notebooks",
+      },
     ];
   },
 

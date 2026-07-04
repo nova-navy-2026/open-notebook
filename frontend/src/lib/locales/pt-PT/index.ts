@@ -448,7 +448,7 @@ export const ptPT = {
     showingFirst100:
       "Mostrando as primeiras 100 fontes. Use a pesquisa para encontrar específicas.",
     selectedCount: "{count} fontes selecionadas",
-    confirmAddToNotebook: "Adicionar {count} a este notebook",
+    confirmAddToNotebook: "Adicionar {count} a este workspace",
     added: "Adicionado em {date}",
     addUrl: "Adicionar URL",
     uploadFile: "Enviar Ficheiro",

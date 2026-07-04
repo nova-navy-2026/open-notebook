@@ -76,7 +76,7 @@ export function NotesGraph({ notebookId, className }: NotesGraphProps) {
       <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-sm text-muted-foreground gap-2 text-center px-4">
         <StickyNote className="h-6 w-6" />
         {t.navyDocs?.notesGraphEmpty ??
-          "No notes to visualize yet. Add notes to this notebook to see how they relate to topics."}
+          "No notes to visualize yet. Add notes to this workspace to see how they relate to topics."}
       </div>
     );
   }

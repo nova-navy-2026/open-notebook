@@ -75,7 +75,7 @@ const getNavigation = (t: TranslationKeys): { main: NavSection[]; admin: NavSect
       items: [
         { name: t.navigation.search ?? "Search", href: "/search", icon: Search },
         { name: t.navigation.chat ?? "Chat", href: "/chat", icon: MessageCircle },
-        { name: t.navigation.notebooks, href: "/notebooks", icon: Book },
+        { name: t.navigation.notebooks, href: "/workspaces", icon: Book },
       ],
     },
     {

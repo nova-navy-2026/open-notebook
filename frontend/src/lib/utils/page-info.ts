@@ -190,7 +190,7 @@ const enUS: PageInfoMap = {
   },
   notebooks: {
     title: 'What you can do in Workspaces',
-    description: 'A workspace is a focused workspace that brings together the sources, notes and a context-aware chat for a single topic or operation. You choose exactly which material the assistant can see, so its answers stay grounded in what matters to you.',
+    description: 'A workspace is a focused space that brings together the sources, notes and a context-aware chat for a single topic or operation. You choose exactly which material the assistant can see, so its answers stay grounded in what matters to you.',
     items: [
       'Create a workspace to group the sources, notes and conversations for one topic; share it with colleagues from the header.',
       "Choose each source's context: off / insights only / full content — the chat uses exactly what you select.",

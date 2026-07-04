@@ -109,7 +109,7 @@ export function SaveTranscriptToNotebook({
               <SelectTrigger>
                 <SelectValue
                   placeholder={
-                    t.research?.selectNotebook ?? "Select a notebook..."
+                    t.research?.selectNotebook ?? "Select a workspace..."
                   }
                 />
               </SelectTrigger>

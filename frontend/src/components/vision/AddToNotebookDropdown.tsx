@@ -150,7 +150,7 @@ export function AddToNotebookDropdown({
               <SelectTrigger>
                 <SelectValue
                   placeholder={
-                    t.research?.selectNotebook ?? "Select a notebook..."
+                    t.research?.selectNotebook ?? "Select a workspace..."
                   }
                 />
               </SelectTrigger>
