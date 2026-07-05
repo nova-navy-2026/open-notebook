@@ -157,6 +157,13 @@ class ResearchJob(BaseModel):
     # Ids of notebook notes created from this report (via "Save to Notebook").
     # When the report is deleted from the history, these notes are deleted too.
     saved_note_ids: List[str] = []
+    # User-supplied document title (from the transcription menu). Shown as the
+    # report's display name in the history list / dialog. When empty, the UI
+    # falls back to the transcript document-type name (report_style).
+    title: Optional[str] = None
+    # Transcript document style (ata | conversation | summary | literal). Used
+    # by the UI to name an untitled transcript report ("Ata da Reunião", …).
+    report_style: Optional[str] = None
 
 
 # ── Persistent job store ──────────────────────────────────────────────
@@ -756,6 +763,21 @@ def _normalize_report_headings(report: str, fallback_title: str = "") -> str:
     return normalized
 
 
+def _force_report_title(report: str, title: str) -> str:
+    """Force ``title`` as the report's H1, replacing whatever the model produced.
+
+    Used by the transcript flows (ATA / resumo / conversa / literal) where the
+    user typed an explicit document title: the model is asked to start with it
+    but does not always comply, so we replace the first ``# ...`` heading (or
+    prepend one when missing) to honour the user's choice exactly.
+    """
+    report = (report or "").strip()
+    heading = f"# {title.strip().rstrip(' ,.;:-')}"
+    if re.match(r"(?m)^#\s+\S", report):
+        return re.sub(r"^#\s+.+", heading, report, count=1)
+    return f"{heading}\n\n{report}" if report else heading
+
+
 # ── Core Research Execution (via NOVA-Researcher API) ─────────────────
 
 
@@ -1188,28 +1210,72 @@ async def _run_meeting_minutes(
         # transcript prompt (depth/structure + voice) — still retrieval-free.
         # Legacy meeting_minutes requests send report_type=meeting_minutes,
         # which has no extra guidance, so behaviour is unchanged for them.
-        resp = await _http_client.post(
-            f"{NOVA_RESEARCHER_URL}/meeting-minutes",
-            json={
-                "transcript": request.query,
-                "language": language,
-                "style": style,
-                "title": request.title or None,
-                "report_type": request.report_type.value,
-                "tone": request.tone.value,
-            },
-            params={"provider": provider} if provider else {},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        payload = {
+            "transcript": request.query,
+            "language": language,
+            "style": style,
+            "title": request.title or None,
+            "report_type": request.report_type.value,
+            "tone": request.tone.value,
+        }
+        params = {"provider": provider} if provider else {}
+
+        # The LLM occasionally returns an empty body (transient model-server
+        # glitch). A completed-but-empty document renders as just the transcript
+        # as a title with nothing below it, which looks like a silent failure to
+        # the user. Retry once on an empty response, and if it is still empty,
+        # fail loudly (below) instead of persisting an empty "completed" report.
+        raw_report = ""
+        costs = 0.0
+        for attempt in range(2):
+            resp = await _http_client.post(
+                f"{NOVA_RESEARCHER_URL}/meeting-minutes",
+                json=payload,
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            raw_report = (data.get("report") or "").strip()
+            costs = data.get("costs", 0.0)
+            logger.info(
+                f"Job {job_id}: meeting-minutes attempt {attempt + 1} → "
+                f"{len(raw_report)} chars (style={style})"
+            )
+            if raw_report:
+                break
+            logger.warning(
+                f"Job {job_id}: NOVA returned an empty meeting-minutes report "
+                f"(style={style}, provider={provider or 'gemma'}); retrying"
+                if attempt == 0
+                else f"Job {job_id}: NOVA returned an empty meeting-minutes report "
+                f"again (style={style})"
+            )
+
+        if not raw_report:
+            raise RuntimeError(
+                "O serviço de geração devolveu um documento vazio. "
+                "Tenta novamente dentro de momentos."
+            )
 
         if progress_callback:
             await progress_callback(90, "A finalizar o documento...")
 
+        # No user title → fall back to a heading that matches the chosen style
+        # (so a resumo/conversa/transcrição isn't mislabelled "Ata da Reunião").
+        style_default_title = {
+            "ata": "Ata da Reunião",
+            "summary": "Resumo",
+            "conversation": "Conversa",
+            "literal": "Transcrição",
+        }.get(style, "Ata da Reunião")
         report = _normalize_report_headings(
-            data.get("report", ""),
-            fallback_title=request.title or "Ata da Reunião",
+            raw_report,
+            fallback_title=request.title or style_default_title,
         )
+        # Honour the user-supplied title: when provided, force it as the H1 so a
+        # title the model invented for itself does not override the user's choice.
+        if request.title and request.title.strip():
+            report = _force_report_title(report, request.title.strip())
 
         return ResearchResult(
             id=job_id,
@@ -1217,7 +1283,7 @@ async def _run_meeting_minutes(
             report_type=request.report_type.value,
             report=report,
             source_urls=[],
-            research_costs=data.get("costs", 0.0),
+            research_costs=costs,
             images=[],
             status="completed",
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -1406,6 +1472,8 @@ async def submit_research_job(request: ResearchRequest) -> ResearchJob:
         model_id=request.model_id,
         notebook_id=request.notebook_id,
         user_id=request.user_id or request.auth_user_id,
+        title=(request.title or None),
+        report_style=(request.report_style or None) if request.transcript_only else None,
     )
     _jobs[job_id] = job
     _running_jobs[job_id] = job

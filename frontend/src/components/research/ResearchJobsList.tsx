@@ -93,25 +93,70 @@ function StatusBadge({ status }: { status: string }) {
   }
 }
 
+const REPORT_TYPE_LABELS: Record<string, string> = {
+  research_report: "Research Report",
+  resource_report: "Resource Report",
+  outline_report: "Outline Report",
+  custom_report: "Custom Report",
+  detailed_report: "Detailed Report",
+  subtopic_report: "Subtopic Report",
+  deep: "Deep Research",
+  ttd_dr: "TTD-DR Deep Research",
+  react_deep: "ReAct Deep Research",
+  plan_and_execute_dr: "Plan-and-Execute Deep Research",
+  meeting_minutes: "Ata da Reunião",
+};
+
 function ReportTypeLabel({ type }: { type: string }) {
-  const labels: Record<string, string> = {
-    research_report: "Research Report",
-    resource_report: "Resource Report",
-    outline_report: "Outline Report",
-    custom_report: "Custom Report",
-    detailed_report: "Detailed Report",
-    subtopic_report: "Subtopic Report",
-    deep: "Deep Research",
-    ttd_dr: "TTD-DR Deep Research",
-    react_deep: "ReAct Deep Research",
-    plan_and_execute_dr: "Plan-and-Execute Deep Research",
-    meeting_minutes: "Ata da Reunião",
-  };
   return (
     <span className="text-xs text-muted-foreground">
-      {labels[type] ?? type}
+      {REPORT_TYPE_LABELS[type] ?? type}
     </span>
   );
+}
+
+// Display names for the transcript document styles (transcription menu/chat).
+const TRANSCRIPT_STYLE_LABELS: Record<string, string> = {
+  ata: "Ata da Reunião",
+  summary: "Resumo",
+  conversation: "Conversa / Diálogo",
+  literal: "Transcrição",
+};
+
+/**
+ * Title to show for a research job in the list card and the report dialog.
+ *
+ * Priority:
+ *   1. the title the user typed in the transcription menu (`job.title`);
+ *   2. for an untitled transcript report, the document-type name derived from
+ *      `report_style` ("Ata da Reunião", "Conversa / Diálogo", …);
+ *   3. a short, single-line query — a normal research question;
+ *   4. the document's own H1 heading, then the report-type label as a last
+ *      resort. Never the raw transcript (which `job.query` holds for transcript
+ *      reports). The creation date is shown next to the title in both places.
+ */
+function reportDisplayTitle(job: {
+  query?: string;
+  report_type: string;
+  title?: string | null;
+  report_style?: string | null;
+  result?: { report?: string } | null;
+}): string {
+  const title = (job.title ?? "").trim();
+  if (title) return title;
+
+  if (job.report_style) {
+    return TRANSCRIPT_STYLE_LABELS[job.report_style] ?? "Documento";
+  }
+  if (job.report_type === "meeting_minutes") return "Ata da Reunião";
+
+  const query = (job.query ?? "").trim();
+  if (query && query.length <= 120 && !query.includes("\n")) return query;
+
+  const h1 = (job.result?.report ?? "").match(/^#\s+(.+?)\s*$/m)?.[1]?.trim();
+  if (h1) return h1;
+
+  return REPORT_TYPE_LABELS[job.report_type] ?? "Relatório";
 }
 
 type TocItem = { level: number; text: string; id: string; index: number; line: number };
@@ -392,9 +437,7 @@ export function ResearchJobsList() {
               <div className="flex items-start justify-between">
                 <div className="space-y-1 flex-1 mr-4">
                   <CardTitle className="text-base line-clamp-2">
-                    {job.report_type === "meeting_minutes"
-                      ? "Ata da Reunião"
-                      : job.query}
+                    {reportDisplayTitle(job)}
                   </CardTitle>
                   <div className="flex items-center gap-2 flex-wrap">
                     <ReportTypeLabel type={job.report_type} />
@@ -495,10 +538,8 @@ export function ResearchJobsList() {
       >
         <DialogContent className="!max-w-4xl sm:!max-w-4xl w-[min(896px,calc(100vw-2rem))] max-h-[90vh] overflow-hidden p-0 flex flex-col">
           <DialogHeader className="px-6 pt-6">
-            <DialogTitle>
-              {selectedJob?.report_type === "meeting_minutes"
-                ? "Ata da Reunião"
-                : (selectedJob?.query ?? "Research Report")}
+            <DialogTitle className="line-clamp-2">
+              {selectedJob ? reportDisplayTitle(selectedJob) : "Research Report"}
             </DialogTitle>
             <DialogDescription className="flex items-center gap-3 flex-wrap">
               <ReportTypeLabel type={selectedJob?.report_type ?? ""} />
@@ -516,7 +557,7 @@ export function ResearchJobsList() {
               {(() => {
                 const reportMarkdown = normalizeReportMarkdown(
                   selectedJob.result.report,
-                  selectedJob.query,
+                  reportDisplayTitle(selectedJob),
                 );
                 const toc = buildToc(reportMarkdown);
                 const headingComponents = createHeadingComponents(toc);
@@ -630,7 +671,7 @@ export function ResearchJobsList() {
                       size="sm"
                       onClick={() =>
                         handleCopyReport(
-                          normalizeReportMarkdown(selectedJob.result!.report, selectedJob.query),
+                          normalizeReportMarkdown(selectedJob.result!.report, reportDisplayTitle(selectedJob)),
                         )
                       }
                     >

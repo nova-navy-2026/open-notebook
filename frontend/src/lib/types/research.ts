@@ -79,6 +79,11 @@ export interface ResearchJob {
   result?: ResearchResultData | null;
   tone?: string;
   model_id?: string;
+  // User-supplied document title (transcription menu). Shown as the report's
+  // display name; falls back to the transcript document-type when empty.
+  title?: string | null;
+  // Transcript document style: ata | conversation | summary | literal.
+  report_style?: string | null;
 }
 
 export interface ResearchSyncResult {

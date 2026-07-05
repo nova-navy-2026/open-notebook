@@ -64,6 +64,8 @@ def _job_to_response(job) -> dict:
         "has_result": job.result is not None,
         "tone": job.tone,
         "model_id": job.model_id,
+        "title": getattr(job, "title", None),
+        "report_style": getattr(job, "report_style", None),
     }
     if job.result:
         response["result"] = {
@@ -275,6 +277,8 @@ async def list_jobs(
                 "has_result": j.result is not None,
                 "tone": j.tone,
                 "model_id": j.model_id,
+                "title": getattr(j, "title", None),
+                "report_style": getattr(j, "report_style", None),
             }
             for j in jobs
         ]
