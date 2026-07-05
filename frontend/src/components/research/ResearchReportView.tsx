@@ -22,7 +22,7 @@ import { useDirectUpdateReport } from "@/lib/hooks/use-research";
 import { useModels } from "@/lib/hooks/use-models";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { useToast } from "@/lib/hooks/use-toast";
-import { ReportTypeLabel } from "@/components/research/research-shared";
+import { ReportTypeLabel, reportDisplayTitle } from "@/components/research/research-shared";
 import { SaveToNotebookDialog } from "@/components/research/SaveToNotebookDialog";
 import type { ResearchJob, ResearchResultData } from "@/lib/types/research";
 
@@ -268,7 +268,7 @@ export function ResearchReportView({ job }: ResearchReportViewProps) {
     });
   };
 
-  const reportMarkdown = normalizeReportMarkdown(job.result.report, job.query);
+  const reportMarkdown = normalizeReportMarkdown(job.result.report, reportDisplayTitle(job));
   const toc = buildToc(reportMarkdown);
   const headingComponents = createHeadingComponents(toc);
 

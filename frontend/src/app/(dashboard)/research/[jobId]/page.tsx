@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useResearchJob } from "@/lib/hooks/use-research";
 import { ResearchReportView } from "@/components/research/ResearchReportView";
-import { ReportTypeLabel } from "@/components/research/research-shared";
+import { ReportTypeLabel, reportDisplayTitle } from "@/components/research/research-shared";
 import { formatDateTime } from "@/lib/utils/format-datetime";
 import { useTranslation } from "@/lib/hooks/use-translation";
 
@@ -41,7 +41,7 @@ export default function ResearchReportPage() {
         <>
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight">
-              {job.report_type === "meeting_minutes" ? "Ata da Reunião" : job.query}
+              {reportDisplayTitle(job)}
             </h1>
             <div className="flex items-center gap-3 flex-wrap">
               <ReportTypeLabel type={job.report_type} />
