@@ -60,6 +60,7 @@ import { SessionManager } from '@/components/source/SessionManager'
 import { MessageActions } from '@/components/source/MessageActions'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
 import { useModalManager } from '@/lib/hooks/use-modal-manager'
+import { useCitationViewerStore } from '@/lib/stores/citation-viewer-store'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
@@ -221,6 +222,25 @@ function MessageSourcesAffordance({
   label: string
 }) {
   const [open, setOpen] = useState(false)
+  const openCitation = useCitationViewerStore((s) => s.openCitation)
+
+  const openDocument = (doc: GlobalChatDocument) => {
+    if (doc.type === 'navy' && doc.doc_id) {
+      // Prefer the first passage-anchored ref (exact highlight); fall back to
+      // a page-level ref for messages saved before refs were emitted.
+      const ref = doc.citations?.[0]?.ref
+      const page = doc.pages?.[0]
+      openCitation({
+        kind: 'navy',
+        ref:
+          ref ??
+          (page != null ? `navy:${doc.doc_id}:p${page}` : `navy:${doc.doc_id}`),
+      })
+    } else if (doc.type === 'source' && doc.id) {
+      openCitation({ kind: 'source', id: doc.id })
+    }
+  }
+
   return (
     <div className="w-fit">
       <Button
@@ -236,16 +256,52 @@ function MessageSourcesAffordance({
       {open && (
         <div className="mt-1 max-w-md rounded-md border p-2 text-xs">
           <ul className="space-y-0.5">
-            {documents.map((doc, i) => (
-              <li key={`${doc.name}-${i}`} className="text-foreground">
-                {doc.name}
-                {doc.pages?.length > 0 && (
-                  <span className="ml-1 text-muted-foreground">
-                    (p. {doc.pages.join(', ')})
-                  </span>
-                )}
-              </li>
-            ))}
+            {documents.map((doc, i) => {
+              const clickable =
+                (doc.type === 'navy' && !!doc.doc_id) ||
+                (doc.type === 'source' && !!doc.id)
+              return (
+                <li key={`${doc.name}-${i}`} className="text-foreground">
+                  {clickable ? (
+                    <button
+                      type="button"
+                      onClick={() => openDocument(doc)}
+                      className="text-left text-primary hover:underline"
+                    >
+                      {doc.name}
+                    </button>
+                  ) : (
+                    doc.name
+                  )}
+                  {doc.type === 'navy' && doc.citations && doc.citations.length > 0 ? (
+                    // One link per cited passage: a document used for several
+                    // separate passages opens each one on its own highlight.
+                    <span className="ml-1 text-muted-foreground">
+                      (
+                      {doc.citations.map((c, j) => (
+                        <span key={c.ref}>
+                          {j > 0 && ', '}
+                          <button
+                            type="button"
+                            onClick={() => openCitation({ kind: 'navy', ref: c.ref })}
+                            className="text-primary hover:underline"
+                          >
+                            p. {c.page ?? '?'}
+                          </button>
+                        </span>
+                      ))}
+                      )
+                    </span>
+                  ) : (
+                    doc.pages?.length > 0 && (
+                      <span className="ml-1 text-muted-foreground">
+                        (p. {doc.pages.join(', ')})
+                      </span>
+                    )
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
@@ -302,6 +358,7 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { openModal } = useModalManager()
+  const openCitation = useCitationViewerStore((s) => s.openCitation)
   const { user } = useAuthStore()
   const userInitials = user?.name
     ? user.name
@@ -353,6 +410,18 @@ export function ChatPanel({
   }, [])
 
   const handleReferenceClick = (type: string, id: string) => {
+    // Documents open in the citation viewer side panel (NotebookLM-style);
+    // notes/insights keep their dialogs.
+    if (type === 'navy') {
+      // Forward the payload verbatim — it may carry :p{page} and :s{chunk}
+      // anchors that the backend uses for precise highlighting.
+      openCitation({ kind: 'navy', ref: `navy:${id}` })
+      return
+    }
+    if (type === 'source') {
+      openCitation({ kind: 'source', id })
+      return
+    }
     const modalType = type === 'source_insight' ? 'insight' : type as 'source' | 'note' | 'insight'
 
     try {

@@ -114,6 +114,8 @@ export const frFR = {
     sourceDocuments: "Documents sources",
     modelPrefix: "Modèle",
     tonePrefix: "Ton",
+    backToHistory: "Retour",
+    reportUnavailable: "Rapport indisponible",
   },
   common: {
     account: "Compte",
@@ -1395,6 +1397,14 @@ export const frFR = {
     saveToNotebookDescription:
       "Choisissez un carnet pour enregistrer la transcription comme note.",
     defaultNoteTitle: "Transcription",
+  },
+  citationViewer: {
+    loading: "Chargement du document...",
+    loadError: "Échec du chargement du document",
+    accessDenied: "Document introuvable ou accès refusé",
+    close: "Fermer le visualiseur de citations",
+    notFoundInDocument: "L'extrait n'a pas pu être localisé dans le document",
+    documentViewer: "Visualiseur de documents",
   },
   collaboration: {
     share: "Partager",

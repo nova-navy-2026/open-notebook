@@ -199,7 +199,20 @@ async def provide_answer(state: SubGraphState, config: RunnableConfig) -> dict:
         if len(results) == 0:
             return {"answers": []}
         payload["results"] = results
-        ids = [r["id"] for r in results]
+        ids = []
+        for r in results:
+            pid = r.get("parent_id") or r["id"]
+            if pid.startswith("navy:"):
+                if r.get("page_start") is not None:
+                    pid = f"{pid}:p{r['page_start']}"
+                # r["id"] is the OpenSearch _id == chunk_id of the best child;
+                # ":s{n}" lets a citation click highlight that exact passage.
+                from open_notebook.search.navy_docs import semantic_ordinal
+
+                ordinal = semantic_ordinal(r.get("id"))
+                if ordinal is not None:
+                    pid = f"{pid}:s{ordinal}"
+            ids.append(pid)
         payload["ids"] = ids
         system_prompt = Prompter(prompt_template="ask/query_process").render(data=payload)  # type: ignore[arg-type]
         model = await provision_langchain_model(

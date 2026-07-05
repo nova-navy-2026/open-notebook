@@ -1,0 +1,13 @@
+-- Migration 22: cited_document table
+-- Temporary materializations of OpenSearch-only (navy) documents for the
+-- citation viewer side panel: created on citation click, deleted when the
+-- panel closes (plus staleness sweeps — there is no TTL in SurrealDB).
+--
+-- SCHEMALESS on purpose: `highlights` and `segments` are arrays of objects,
+-- and this SurrealDB version rejects nested object fields on SCHEMAFULL
+-- tables even with FLEXIBLE ("Found field 'highlights[0].end', but no such
+-- field exists"). Shape validation lives in the CitedDocument Pydantic
+-- model; created/updated timestamps are set by the repository layer.
+
+DEFINE TABLE IF NOT EXISTS cited_document SCHEMALESS;
+DEFINE INDEX IF NOT EXISTS idx_cited_document_owner_doc ON cited_document FIELDS owner, doc_id;

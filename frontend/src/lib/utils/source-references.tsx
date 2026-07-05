@@ -1,7 +1,86 @@
 import React from 'react'
-import { FileText, Lightbulb, FileEdit } from 'lucide-react'
+import { Anchor, FileText, Lightbulb, FileEdit } from 'lucide-react'
 
-export type ReferenceType = 'source' | 'note' | 'source_insight'
+export type ReferenceType = 'source' | 'note' | 'source_insight' | 'navy'
+
+/**
+ * Navy citation refs are bracket-bounded because their ids are RAW FILENAMES
+ * ("PEETNA 3253 - Logística I.pdf", "45255_panavsup 206 (a).pdf") — spaces,
+ * accents, dots, hyphens, parentheses. A charset-based pattern cannot match
+ * them. The payload is `{doc_id}` optionally followed by `:p{page}`/`:s{n}`.
+ *
+ * A bracket may hold several comma-separated refs (LLM edge case, same as the
+ * source/note handling below), so navy refs are found in two steps: locate
+ * bracket contents, then split items at commas that precede another known ref
+ * prefix — a bare comma can legitimately appear inside a filename.
+ */
+const BRACKET_CONTENT_PATTERN = /\[([^\[\]\n]+)\]/g
+const NAVY_ITEM_PATTERN =
+  /(?<=^|[,\s])navy:(.+?)(?=\s*,\s*(?:source_insight|insight|note|source|navy):|$)/g
+
+interface NavyRefMatch {
+  /** Decoded payload: `{doc_id}(:p{N})?(:s{M})?` */
+  payload: string
+  /** Absolute index of `navy:` in the text */
+  start: number
+  /** Absolute index just past the payload */
+  end: number
+  /** True when the ref is the bracket's entire content (`[navy:X]`) */
+  wholeBracket: boolean
+}
+
+function findNavyRefs(text: string): NavyRefMatch[] {
+  const out: NavyRefMatch[] = []
+  BRACKET_CONTENT_PATTERN.lastIndex = 0
+  let bracket: RegExpExecArray | null
+  while ((bracket = BRACKET_CONTENT_PATTERN.exec(text)) !== null) {
+    const content = bracket[1]
+    if (!content.includes('navy:')) continue
+    const contentStart = bracket.index + 1
+    NAVY_ITEM_PATTERN.lastIndex = 0
+    let item: RegExpExecArray | null
+    while ((item = NAVY_ITEM_PATTERN.exec(content)) !== null) {
+      const payload = item[1].trim()
+      if (!payload) continue
+      out.push({
+        payload,
+        start: contentStart + item.index,
+        end: contentStart + item.index + 'navy:'.length + item[1].length,
+        wholeBracket: item.index === 0 && item[0].length === content.length,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * Encode a navy ref payload for use inside a markdown link href.
+ * encodeURIComponent alone is not enough: it leaves `()!'*` unescaped and a
+ * raw `)` (or space) inside `[text](#href)` terminates the link early.
+ */
+export function encodeRefPayload(payload: string): string {
+  return encodeURIComponent(payload).replace(
+    /[()!'*]/g,
+    (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase()
+  )
+}
+
+export function decodeRefPayload(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    return encoded
+  }
+}
+
+/** Split an optional trailing `:p{N}` page anchor off a navy ref payload. */
+export function splitNavyPayload(payload: string): { docId: string; page?: number } {
+  const m = payload.match(/:p(\d+)$/)
+  if (m) {
+    return { docId: payload.slice(0, m.index), page: parseInt(m[1], 10) }
+  }
+  return { docId: payload }
+}
 
 export interface ParsedReference {
   type: ReferenceType
@@ -44,14 +123,15 @@ export interface ReferenceData {
  * @returns Array of parsed references
  */
 export function parseSourceReferences(text: string): ParsedReference[] {
-  // Match pattern: (source_insight|note|source):alphanumeric_id
-  // This handles references both inside and outside brackets
-  const pattern = /(source_insight|note|source):([a-zA-Z0-9_]+)/g
+  // Match pattern: (source_insight|insight|note|source):alphanumeric_id
+  // This handles references both inside and outside brackets. `insight` is
+  // an alias the prompts emit for source_insight.
+  const pattern = /(source_insight|insight|note|source):([a-zA-Z0-9_]+)/g
   const matches: ParsedReference[] = []
 
   let match
   while ((match = pattern.exec(text)) !== null) {
-    const type = match[1] as ReferenceType
+    const type = (match[1] === 'insight' ? 'source_insight' : match[1]) as ReferenceType
     const id = match[2]
 
     matches.push({
@@ -63,6 +143,20 @@ export function parseSourceReferences(text: string): ParsedReference[] {
     })
   }
 
+  // Navy refs are matched bracket-bounded (raw-filename ids); indices cover
+  // the inner `navy:{payload}` span so callers' bracket-context handling
+  // (looking one char around the match) works unchanged.
+  for (const navy of findNavyRefs(text)) {
+    matches.push({
+      type: 'navy',
+      id: navy.payload,
+      originalText: `navy:${navy.payload}`,
+      startIndex: navy.start,
+      endIndex: navy.end
+    })
+  }
+
+  matches.sort((a, b) => a.startIndex - b.startIndex)
   return matches
 }
 
@@ -172,13 +266,36 @@ export function convertSourceReferences(
  * @returns Text with references converted to markdown links
  */
 export function convertReferencesToMarkdownLinks(text: string): string {
+  // Step 0: Navy refs first — bracket-bounded, raw-filename payloads that the
+  // generic charset pattern cannot express. `[navy:X]` → `[[navy:X]](#href)`
+  // matching the single-bracket display convention below; a navy ref sharing
+  // its bracket with other refs is linked in place without consuming the
+  // bracket. The payload is percent-encoded because spaces/parens would
+  // terminate the markdown href.
+  const navyRefs = findNavyRefs(text)
+  for (let i = navyRefs.length - 1; i >= 0; i--) {
+    const navy = navyRefs[i]
+    const href = `#ref-navy-${encodeRefPayload(navy.payload)}`
+    if (navy.wholeBracket) {
+      text =
+        text.slice(0, navy.start - 1) +
+        `[[navy:${navy.payload}]](${href})` +
+        text.slice(navy.end + 1)
+    } else {
+      text =
+        text.slice(0, navy.start) +
+        `[navy:${navy.payload}](${href})` +
+        text.slice(navy.end)
+    }
+  }
+
   // Step 1: Find ALL references using simple greedy pattern
-  const refPattern = /(source_insight|note|source):([a-zA-Z0-9_]+)/g
+  const refPattern = /(source_insight|insight|note|source):([a-zA-Z0-9_]+)/g
   const references: Array<{ type: string; id: string; index: number; length: number }> = []
 
   let match
   while ((match = refPattern.exec(text)) !== null) {
-    const type = match[1]
+    const type = match[1] === 'insight' ? 'source_insight' : match[1]
     const id = match[2]
 
     // Validate the reference
@@ -279,12 +396,15 @@ export function createReferenceLinkComponent(
       // Parse: #ref-source-abc123 → type=source, id=abc123
       const parts = href.substring(5).split('-') // Remove '#ref-'
       const type = parts[0] as ReferenceType
-      const id = parts.slice(1).join('-') // Rejoin in case ID has dashes
+      const rawId = parts.slice(1).join('-') // Rejoin in case ID has dashes
+      // Navy payloads are percent-encoded raw filenames
+      const id = type === 'navy' ? decodeRefPayload(rawId) : rawId
 
       // Select appropriate icon based on reference type
       const IconComponent =
         type === 'source' ? FileText :
         type === 'source_insight' ? Lightbulb :
+        type === 'navy' ? Anchor :
         FileEdit // note
 
       return (
@@ -389,8 +509,11 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
       replaceEnd = refEnd + 1
     }
 
-    // Build the numbered citation with full reference in href
-    const citationLink = `[${number}](#ref-${reference.type}-${reference.id})`
+    // Build the numbered citation with full reference in href. Navy ids are
+    // raw filenames — percent-encode them or the markdown href breaks.
+    const hrefId =
+      reference.type === 'navy' ? encodeRefPayload(reference.id) : reference.id
+    const citationLink = `[${number}](#ref-${reference.type}-${hrefId})`
 
     // Replace in the result string
     result = result.substring(0, replaceStart) + citationLink + result.substring(replaceEnd)
@@ -401,13 +524,16 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
     source: '📄 Source',
     source_insight: '💡 Insight',
     note: '📝 Note',
+    navy: '⚓ Document',
   }
   const refListLines: string[] = [`\n\n---\n\n**${referencesLabel}:**`]
 
   // Iterate through reference map in insertion order (Map preserves order)
   for (const [, refData] of referenceMap) {
     const label = typeLabels[refData.type] || refData.type
-    const refListItem = `**[${refData.number}]** ${label} — [${refData.type}:${refData.id}](#ref-${refData.type}-${refData.id})`
+    const listHrefId =
+      refData.type === 'navy' ? encodeRefPayload(refData.id) : refData.id
+    const refListItem = `**[${refData.number}]** ${label} — [${refData.type}:${refData.id}](#ref-${refData.type}-${listHrefId})`
     refListLines.push(refListItem)
   }
 
@@ -450,12 +576,15 @@ export function createCompactReferenceLinkComponent(
       // Parse: #ref-source-abc123 → type=source, id=abc123
       const parts = href.substring(5).split('-') // Remove '#ref-'
       const type = parts[0] as ReferenceType
-      const id = parts.slice(1).join('-') // Rejoin in case ID has dashes
+      const rawId = parts.slice(1).join('-') // Rejoin in case ID has dashes
+      // Navy payloads are percent-encoded raw filenames
+      const id = type === 'navy' ? decodeRefPayload(rawId) : rawId
 
       // Select icon based on reference type
       const IconComponent =
         type === 'source' ? FileText :
         type === 'source_insight' ? Lightbulb :
+        type === 'navy' ? Anchor :
         FileEdit // note
 
       return (

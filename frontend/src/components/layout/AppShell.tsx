@@ -53,7 +53,7 @@ export function AppShell({ children }: AppShellProps) {
       <AppSidebar />
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden w-full">
         {!isImmersiveNotebook && <SetupBanner />}
-        <div className="flex-1 min-h-0 overflow-auto w-full scroll-smooth">
+        <div id="app-scroll-container" className="flex-1 min-h-0 overflow-auto w-full scroll-smooth">
           {children}
         </div>
       </main>

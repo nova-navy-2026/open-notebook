@@ -333,6 +333,11 @@ export interface GlobalChatDocument {
   type: 'source' | 'navy'
   pages: number[]
   chunks: number
+  doc_id?: string
+  id?: string
+  // One entry per retrieved passage: `ref` is a full chunk-anchored citation
+  // (navy:{doc_id}:p{N}:s{M}) so each passage opens its own highlight.
+  citations?: { page: number | null; ref: string }[]
 }
 
 export interface GlobalChatContextStats {

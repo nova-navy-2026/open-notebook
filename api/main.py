@@ -37,6 +37,7 @@ from api.routers import (
     chat,
     chat_agents,
     charts,
+    citations,
     collaboration,
     config,
     context,
@@ -349,6 +350,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Auto-assign default models failed (non-fatal): {e}")
 
+    # Sweep cited_document records leaked by crashed sessions (the citation
+    # viewer normally deletes them when the panel closes; there is no TTL).
+    try:
+        from api.citations_service import sweep_stale_cited_documents
+
+        await sweep_stale_cited_documents(max_age="2h")
+    except Exception as e:
+        logger.warning(f"cited_document startup sweep failed (non-fatal): {e}")
+
     logger.success("API initialization completed successfully")
 
     # Yield control to the application
@@ -583,6 +593,7 @@ app.include_router(episode_profiles.router, prefix="/api", tags=["episode-profil
 app.include_router(speaker_profiles.router, prefix="/api", tags=["speaker-profiles"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(chat_agents.router, prefix="/api", tags=["chat-agents"])
+app.include_router(citations.router, prefix="/api", tags=["citations"])
 app.include_router(charts.router, prefix="/api", tags=["charts"])
 app.include_router(source_chat.router, prefix="/api", tags=["source-chat"])
 app.include_router(credentials.router, prefix="/api", tags=["credentials"])

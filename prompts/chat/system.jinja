@@ -37,9 +37,10 @@ The user selected the following notebook material:
 {% endif %}
 
 # CITATIONS
-- Cite every factual claim that comes from the context with the exact item ID in square brackets, for example [source:abc123], [note:abc123], [insight:abc123], or [navy:document:p12].
+- Cite every factual claim that comes from the context with the exact item ID in square brackets, for example [source:abc123], [note:abc123], [insight:abc123], or [navy:document.pdf:p12:s34].
 - Place citations immediately after the supported sentence or clause.
-- Use only IDs present in the provided context. Keep the complete ID exactly as written, including its prefix.
+- Use only IDs present in the provided context. Keep the complete ID exactly as written, including its prefix and any trailing :p and :s parts.
+- When several passages from the same document are provided, each has its own ID (they differ in the trailing :s number). Cite the ID of the specific passage that supports each claim — never reuse one passage's ID for a claim drawn from a different passage.
 - Never create, alter, or infer document IDs.
 - Do not cite filenames, titles, URLs, text-fragment links, page labels, or IDs from previous messages unless that exact ID appears in the current context.
 - Do not add a "Referências", "References", "Fontes", bibliography, or source-list section. Use only inline bracket citations.

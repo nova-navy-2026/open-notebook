@@ -443,7 +443,7 @@ export const enUS = {
     showingFirst100:
       "Showing first 100 sources. Use search to find specific ones.",
     selectedCount: "{count} sources selected",
-    confirmAddToNotebook: "Add {count} to this notebook",
+    confirmAddToNotebook: "Add {count} to this workspace",
     added: "Added on {date}",
     addUrl: "Add URL",
     uploadFile: "Upload File",
@@ -1230,6 +1230,8 @@ export const enUS = {
     sourceDocuments: "Source Documents",
     modelPrefix: "Model",
     tonePrefix: "Tone",
+    backToHistory: "Go back",
+    reportUnavailable: "Report not available",
   },
   setupBanner: {
     encryptionRequired: "Encryption key not configured",
@@ -1378,6 +1380,14 @@ export const enUS = {
     translating: "Translating…",
     translationResult: "Translation",
     translateError: "Translation failed. Please try again.",
+  },
+  citationViewer: {
+    loading: "Loading document...",
+    loadError: "Failed to load document",
+    accessDenied: "Document not found or access denied",
+    close: "Close citation viewer",
+    notFoundInDocument: "Snippet could not be located in the document",
+    documentViewer: "Document Viewer",
   },
   collaboration: {
     share: "Share",

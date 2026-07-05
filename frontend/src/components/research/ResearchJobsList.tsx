@@ -1,11 +1,8 @@
 "use client";
 import { formatDateTime } from '@/lib/utils/format-datetime'
 
-import { isValidElement, useRef, useState } from "react";
-import type { HTMLAttributes, ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import type { Components, ExtraProps } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -16,383 +13,43 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  CheckCircle2,
-  Clock,
-  Loader2,
-  AlertCircle,
   FileText,
   BookmarkPlus,
-  ExternalLink,
-  Copy,
+  Loader2,
   Trash2,
-  Pencil,
-  X,
-  Save,
 } from "lucide-react";
-import {
-  useResearchJobs,
-  useResearchJob,
-  useSaveResearchAsNote,
-  useDeleteResearchJob,
-  useDirectUpdateReport,
-} from "@/lib/hooks/use-research";
-import { Textarea } from "@/components/ui/textarea";
-import { useModels } from "@/lib/hooks/use-models";
-import { useQuery } from "@tanstack/react-query";
-import { QUERY_KEYS } from "@/lib/api/query-client";
+import { useResearchJobs, useDeleteResearchJob } from "@/lib/hooks/use-research";
+import { StatusBadge, ReportTypeLabel, reportDisplayTitle } from "@/components/research/research-shared";
+import { SaveToNotebookDialog } from "@/components/research/SaveToNotebookDialog";
+import { saveScrollPosition, consumeScrollPosition } from "@/lib/utils/scroll-restore";
 import { useTranslation } from "@/lib/hooks/use-translation";
-import { useToast } from "@/lib/hooks/use-toast";
-import apiClient from "@/lib/api/client";
 
-function StatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case "completed":
-      return (
-        <Badge variant="default" className="bg-green-600">
-          <CheckCircle2 className="mr-1 h-3 w-3" />
-          Completed
-        </Badge>
-      );
-    case "running":
-      return (
-        <Badge variant="default" className="bg-blue-600">
-          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          Running
-        </Badge>
-      );
-    case "pending":
-      return (
-        <Badge variant="secondary">
-          <Clock className="mr-1 h-3 w-3" />
-          Pending
-        </Badge>
-      );
-    case "failed":
-      return (
-        <Badge variant="destructive">
-          <AlertCircle className="mr-1 h-3 w-3" />
-          Failed
-        </Badge>
-      );
-    default:
-      return <Badge variant="outline">{status}</Badge>;
-  }
-}
-
-const REPORT_TYPE_LABELS: Record<string, string> = {
-  research_report: "Research Report",
-  resource_report: "Resource Report",
-  outline_report: "Outline Report",
-  custom_report: "Custom Report",
-  detailed_report: "Detailed Report",
-  subtopic_report: "Subtopic Report",
-  deep: "Deep Research",
-  ttd_dr: "TTD-DR Deep Research",
-  react_deep: "ReAct Deep Research",
-  plan_and_execute_dr: "Plan-and-Execute Deep Research",
-  meeting_minutes: "Ata da Reunião",
-};
-
-function ReportTypeLabel({ type }: { type: string }) {
-  return (
-    <span className="text-xs text-muted-foreground">
-      {REPORT_TYPE_LABELS[type] ?? type}
-    </span>
-  );
-}
-
-// Display names for the transcript document styles (transcription menu/chat).
-const TRANSCRIPT_STYLE_LABELS: Record<string, string> = {
-  ata: "Ata da Reunião",
-  summary: "Resumo",
-  conversation: "Conversa / Diálogo",
-  literal: "Transcrição",
-};
-
-/**
- * Title to show for a research job in the list card and the report dialog.
- *
- * Priority:
- *   1. the title the user typed in the transcription menu (`job.title`);
- *   2. for an untitled transcript report, the document-type name derived from
- *      `report_style` ("Ata da Reunião", "Conversa / Diálogo", …);
- *   3. a short, single-line query — a normal research question;
- *   4. the document's own H1 heading, then the report-type label as a last
- *      resort. Never the raw transcript (which `job.query` holds for transcript
- *      reports). The creation date is shown next to the title in both places.
- */
-function reportDisplayTitle(job: {
-  query?: string;
-  report_type: string;
-  title?: string | null;
-  report_style?: string | null;
-  result?: { report?: string } | null;
-}): string {
-  const title = (job.title ?? "").trim();
-  if (title) return title;
-
-  if (job.report_style) {
-    return TRANSCRIPT_STYLE_LABELS[job.report_style] ?? "Documento";
-  }
-  if (job.report_type === "meeting_minutes") return "Ata da Reunião";
-
-  const query = (job.query ?? "").trim();
-  if (query && query.length <= 120 && !query.includes("\n")) return query;
-
-  const h1 = (job.result?.report ?? "").match(/^#\s+(.+?)\s*$/m)?.[1]?.trim();
-  if (h1) return h1;
-
-  return REPORT_TYPE_LABELS[job.report_type] ?? "Relatório";
-}
-
-type TocItem = { level: number; text: string; id: string; index: number; line: number };
-type MarkdownHeadingProps = HTMLAttributes<HTMLHeadingElement> & ExtraProps;
-
-function markdownNodeText(node: ReactNode): string {
-  if (node == null) return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(markdownNodeText).join("");
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return markdownNodeText(node.props.children);
-  }
-  return "";
-}
-
-function slugifyHeading(text: string) {
-  return text
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
-}
-
-function nextHeadingId(counts: Map<string, number>, text: string) {
-  const base = slugifyHeading(text) || "section";
-  const count = counts.get(base) ?? 0;
-  counts.set(base, count + 1);
-  return count === 0 ? base : `${base}-${count + 1}`;
-}
-
-function isLikelyBareHeading(line: string) {
-  const stripped = line.trim().replace(/^\*+|\*+$/g, "");
-  if (!stripped) return false;
-  if (stripped.length > 100 || /[.!?]\s*$/.test(stripped)) return false;
-  if (/^(?:[-*+>]|\d+[.)]\s+|\|)/.test(stripped)) return false;
-  if (/https?:\/\/|`|\[[^\]]+\]\([^)]+\)/.test(stripped)) return false;
-  if (stripped.includes(":") && !stripped.endsWith(":")) return false;
-  const words = stripped.replace(/:$/, "").split(/\s+/);
-  if (words.length < 1 || words.length > 12) return false;
-  return /^[A-ZÁÉÍÓÚÀÂÊÔÇÃÕ0-9]/.test(stripped);
-}
-
-function normalizeReportMarkdown(markdown: string, fallbackTitle: string) {
-  const source = (markdown || "").trim();
-  if (!source) return source;
-
-  const lines = source.split("\n");
-  const output: string[] = [];
-  let inFence = false;
-  let firstContentSeen = false;
-  let hasH1 = /^#\s+\S/m.test(source);
-
-  lines.forEach((line, index) => {
-    const stripped = line.trim();
-    if (/^```/.test(stripped)) {
-      inFence = !inFence;
-      output.push(line);
-      return;
-    }
-    if (inFence || !stripped) {
-      output.push(line);
-      return;
-    }
-    if (stripped.startsWith("#")) {
-      output.push(line);
-      firstContentSeen = true;
-      return;
-    }
-
-    const prevBlank = index === 0 || !lines[index - 1].trim();
-    const nextBlank = index + 1 >= lines.length || !lines[index + 1].trim();
-    if (!firstContentSeen && !hasH1 && stripped.length <= 140 && !/[.!?]\s*$/.test(stripped)) {
-      output.push(`# ${stripped.replace(/:$/, "")}`);
-      firstContentSeen = true;
-      hasH1 = true;
-      return;
-    }
-    if (firstContentSeen && (prevBlank || nextBlank) && isLikelyBareHeading(stripped)) {
-      output.push(`## ${stripped.replace(/:$/, "")}`);
-      return;
-    }
-
-    output.push(line);
-    firstContentSeen = true;
-  });
-
-  let normalized = output.join("\n").trim();
-  if (!hasH1) {
-    const title = fallbackTitle.trim().replace(/[ ,.;:-]+$/, "") || "Research Report";
-    normalized = `# ${title}\n\n${normalized}`;
-  }
-  if (!/^#{2,3}\s+\S/m.test(normalized)) {
-    normalized = normalized.replace(/^(#\s+.+)\n+/, "$1\n\n## Síntese\n\n");
-  }
-  return normalized;
-}
-
-// Extract a table of contents from report headings. Keep IDs in lock-step
-// with the rendered markdown headings, including duplicate-title suffixes.
-function buildToc(markdown: string): TocItem[] {
-  const lines = markdown.split("\n");
-  const items: TocItem[] = [];
-  const counts = new Map<string, number>();
-  let inFence = false;
-  lines.forEach((raw, lineIndex) => {
-    const line = raw.trimEnd();
-    if (/^```/.test(line)) {
-      inFence = !inFence;
-      return;
-    }
-    if (inFence) return;
-    const m = /^(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!m) return;
-    const level = m[1].length;
-    const text = m[2].replace(/[*_`~]/g, "").trim();
-    const id = nextHeadingId(counts, text);
-    items.push({ level, text, id, index: items.length, line: lineIndex + 1 });
-  });
-  return items;
-}
-
-function scrollReportHeading(container: HTMLElement | null, headingIndex: number) {
-  if (!container) return;
-
-  const heading = container.querySelector<HTMLElement>(
-    `[data-report-heading-index="${headingIndex}"]`,
-  );
-  if (!heading) return;
-
-  const containerRect = container.getBoundingClientRect();
-  const headingRect = heading.getBoundingClientRect();
-  const containerStyle = window.getComputedStyle(container);
-  const paddingTop = Number.parseFloat(containerStyle.paddingTop) || 0;
-  const top =
-    container.scrollTop +
-    headingRect.top -
-    containerRect.top -
-    paddingTop -
-    12;
-
-  container.scrollTo({
-    top: Math.max(0, top),
-    behavior: "smooth",
-  });
-}
-
-function createHeadingComponents(toc: TocItem[]): Components {
-  const tocByLine = new Map(toc.map((item) => [item.line, item]));
-  const counts = new Map<string, number>();
-  const Heading = (Tag: "h1" | "h2" | "h3") => {
-    const MarkdownHeading = ({ children, node, ...rest }: MarkdownHeadingProps) => {
-      const fallbackId = nextHeadingId(counts, markdownNodeText(children));
-      const position = (node as { position?: { start?: { line?: number } } } | undefined)?.position;
-      const line = position?.start?.line;
-      const tocItem = typeof line === "number" ? tocByLine.get(line) : undefined;
-      const id = tocItem?.id ?? fallbackId;
-      const className = [rest.className, "scroll-mt-4"].filter(Boolean).join(" ");
-      return (
-        <Tag
-          {...rest}
-          id={id}
-          data-report-heading-id={id}
-          data-report-heading-index={tocItem?.index ?? -1}
-          className={className}
-        >
-          {children}
-        </Tag>
-      );
-    };
-    MarkdownHeading.displayName = `Markdown${Tag.toUpperCase()}`;
-    return MarkdownHeading;
-  };
-
-  return {
-    h1: Heading("h1"),
-    h2: Heading("h2"),
-    h3: Heading("h3"),
-  };
-}
+const JOBS_SCROLL_KEY = "research-jobs";
 
 export function ResearchJobsList() {
   const { t } = useTranslation();
-  const { toast } = useToast();
+  const router = useRouter();
   const { jobs, isLoading, hasActiveJobs } = useResearchJobs();
-  const saveAsNote = useSaveResearchAsNote();
   const deleteJob = useDeleteResearchJob();
-  const { data: allModels } = useModels();
 
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveJobId, setSaveJobId] = useState<string | null>(null);
-  const [selectedNotebookId, setSelectedNotebookId] = useState<string>("");
-  const [editMode, setEditMode] = useState(false);
-  const [editContent, setEditContent] = useState("");
-  const reportScrollRef = useRef<HTMLDivElement | null>(null);
-  const directUpdate = useDirectUpdateReport();
 
-  // Fetch the full job with result when selected
-  const { data: selectedJob } = useResearchJob(selectedJobId);
-
-  // Resolve a model id to its human-friendly name when possible.
-  const resolveModelName = (modelId?: string | null) => {
-    if (!modelId) return undefined;
-    const found = allModels?.find((m) => m.id === modelId || m.name === modelId);
-    return found?.name ?? modelId;
-  };
-
-  // Fetch notebooks for the save dialog
-  const { data: notebooks } = useQuery({
-    queryKey: QUERY_KEYS.notebooks,
-    queryFn: async () => {
-      const res = await apiClient.get("/notebooks");
-      return res.data;
-    },
-    enabled: saveDialogOpen,
-  });
-
-  const handleCopyReport = (report: string) => {
-    navigator.clipboard.writeText(report);
-    toast({
-      title: t.research?.copied ?? "Copied",
-      description: t.research?.copiedDesc ?? "Report copied to clipboard",
+  // Restore scroll position after returning from a report page, once the
+  // list has actually rendered so there's content to scroll to.
+  useEffect(() => {
+    if (jobs.length === 0) return;
+    const saved = consumeScrollPosition(JOBS_SCROLL_KEY);
+    if (saved == null) return;
+    requestAnimationFrame(() => {
+      const el = document.getElementById("app-scroll-container");
+      if (el) el.scrollTop = saved;
     });
-  };
+  }, [jobs.length]);
 
-  const handleSaveAsNote = async () => {
-    if (!saveJobId || !selectedNotebookId) return;
-    await saveAsNote.mutateAsync({
-      research_id: saveJobId,
-      notebook_id: selectedNotebookId,
-    });
-    setSaveDialogOpen(false);
-    setSaveJobId(null);
-    setSelectedNotebookId("");
+  const handleViewReport = (jobId: string) => {
+    saveScrollPosition(JOBS_SCROLL_KEY);
+    router.push(`/research/${jobId}`);
   };
 
   if (isLoading) {
@@ -478,7 +135,7 @@ export function ResearchJobsList() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setSelectedJobId(job.id)}
+                    onClick={() => handleViewReport(job.id)}
                   >
                     <FileText className="mr-1 h-3 w-3" />
                     {t.research?.viewReport ?? "View Report"}
@@ -525,282 +182,14 @@ export function ResearchJobsList() {
         ))}
       </div>
 
-      {/* Report Viewer Dialog */}
-      <Dialog
-        open={!!selectedJobId}
+      <SaveToNotebookDialog
+        jobId={saveJobId}
+        open={saveDialogOpen}
         onOpenChange={(open) => {
-          if (!open) {
-            setSelectedJobId(null);
-            setEditMode(false);
-            setEditContent("");
-          }
+          setSaveDialogOpen(open);
+          if (!open) setSaveJobId(null);
         }}
-      >
-        <DialogContent className="!max-w-4xl sm:!max-w-4xl w-[min(896px,calc(100vw-2rem))] max-h-[90vh] overflow-hidden p-0 flex flex-col">
-          <DialogHeader className="px-6 pt-6">
-            <DialogTitle className="line-clamp-2">
-              {selectedJob ? reportDisplayTitle(selectedJob) : "Research Report"}
-            </DialogTitle>
-            <DialogDescription className="flex items-center gap-3 flex-wrap">
-              <ReportTypeLabel type={selectedJob?.report_type ?? ""} />
-              {selectedJob?.created_at && (
-                <span className="text-xs text-muted-foreground">
-                  {formatDateTime(selectedJob.created_at)}
-                </span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedJob?.result ? (
-            <div className="flex-1 min-h-0 overflow-hidden grid grid-cols-[200px_1fr] gap-0">
-              {/* Table of contents */}
-              {(() => {
-                const reportMarkdown = normalizeReportMarkdown(
-                  selectedJob.result.report,
-                  reportDisplayTitle(selectedJob),
-                );
-                const toc = buildToc(reportMarkdown);
-                const headingComponents = createHeadingComponents(toc);
-                return (
-                  <>
-                  <aside className="min-h-0 border-r bg-muted/30 overflow-y-auto px-3 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                      {t.research?.tableOfContents ?? "Table of Contents"}
-                    </p>
-                    {toc.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">—</p>
-                    ) : (
-                      <ul className="space-y-1 text-xs">
-                        {toc.map((item, i) => (
-                          <li
-                            key={`${item.id}-${i}`}
-                            style={{ paddingLeft: `${(item.level - 1) * 8}px` }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => scrollReportHeading(reportScrollRef.current, item.index)}
-                              className="block w-full text-left text-muted-foreground hover:text-foreground hover:underline line-clamp-2"
-                            >
-                              {item.text}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </aside>
-
-              <div ref={reportScrollRef} className="min-h-0 overflow-y-auto overscroll-contain px-6 pb-6 space-y-4">
-              {/* Report Content */}
-              {editMode ? (
-                <Textarea
-                  className="min-h-[60vh] font-mono text-xs resize-none"
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                />
-              ) : (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={headingComponents}
-                  >
-                    {reportMarkdown}
-                  </ReactMarkdown>
-                </div>
-              )}
-
-              {/* Source Documents */}
-              {selectedJob.result.retrieved_documents &&
-                selectedJob.result.retrieved_documents.length > 0 && (
-                  <div className="border-t pt-4">
-                    <h4 className="font-medium mb-2">
-                      {t.research?.sourceDocuments ?? "Source Documents"} (
-                      {selectedJob.result.retrieved_documents.length})
-                    </h4>
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                      {selectedJob.result.retrieved_documents.map((doc, i) => (
-                        <a
-                          key={i}
-                          href={doc.source || "#"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block rounded-md border p-3 text-sm space-y-1 hover:bg-accent/50 transition-colors cursor-pointer"
-                        >
-                          <div className="font-medium flex items-center gap-1">
-                            <ExternalLink className="h-3 w-3 flex-shrink-0" />
-                            {doc.title || doc.source || `Document ${i + 1}`}
-                          </div>
-                          {doc.snippet && (
-                            <p className="text-xs text-muted-foreground line-clamp-3">
-                              {doc.snippet}
-                            </p>
-                          )}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-              {/* Settings used */}
-              <div className="border-t pt-4">
-                <h4 className="font-medium mb-2">
-                  {t.research?.researchConfiguration ?? "Research Configuration"}
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">
-                    <ReportTypeLabel type={selectedJob.report_type} />
-                  </Badge>
-                  {selectedJob.result.tone && (
-                    <Badge variant="outline">
-                      {(t.research?.tonePrefix ?? "Tone")}: {selectedJob.result.tone}
-                    </Badge>
-                  )}
-                  {selectedJob.result.model_id && (
-                    <Badge variant="outline">
-                      {(t.research?.modelPrefix ?? "Model")}: {resolveModelName(selectedJob.result.model_id)}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 border-t pt-4 flex-wrap">
-                {!editMode && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        handleCopyReport(
-                          normalizeReportMarkdown(selectedJob.result!.report, reportDisplayTitle(selectedJob)),
-                        )
-                      }
-                    >
-                      <Copy className="mr-1 h-3 w-3" />
-                      {t.research?.copyReport ?? "Copy Report"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSaveJobId(selectedJob.id);
-                        setSaveDialogOpen(true);
-                      }}
-                    >
-                      <BookmarkPlus className="mr-1 h-3 w-3" />
-                      {t.research?.saveToNotebook ?? "Save to Workspace"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setEditContent(selectedJob.result!.report);
-                        setEditMode(true);
-                      }}
-                    >
-                      <Pencil className="mr-1 h-3 w-3" />
-                      {t.research?.editReport ?? "Edit"}
-                    </Button>
-                  </>
-                )}
-                {editMode && (
-                  <>
-                    <Button
-                      size="sm"
-                      disabled={directUpdate.isPending}
-                      onClick={async () => {
-                        await directUpdate.mutateAsync({ jobId: selectedJob.id, report: editContent });
-                        setEditMode(false);
-                      }}
-                    >
-                      {directUpdate.isPending ? (
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      ) : (
-                        <Save className="mr-1 h-3 w-3" />
-                      )}
-                      {t.common?.save ?? "Save"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => { setEditMode(false); setEditContent(""); }}
-                    >
-                      <X className="mr-1 h-3 w-3" />
-                      {t.common?.cancel ?? "Cancel"}
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
-                  </>
-                );
-              })()}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Save to Notebook Dialog */}
-      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-        <DialogContent className="!max-w-md sm:!max-w-md w-[min(480px,calc(100vw-2rem))]">
-          <DialogHeader>
-            <DialogTitle>
-              {t.research?.saveToNotebook ?? "Save to Workspace"}
-            </DialogTitle>
-            <DialogDescription>
-              {t.research?.saveToNotebookDesc ??
-                "Choose a notebook to save this research report as a note."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <Select
-              value={selectedNotebookId}
-              onValueChange={setSelectedNotebookId}
-            >
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    t.research?.selectNotebook ?? "Select a notebook..."
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {(
-                  notebooks as Array<{ id: string; name: string }> | undefined
-                )?.map((nb) => (
-                  <SelectItem key={nb.id} value={nb.id}>
-                    {nb.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setSaveDialogOpen(false)}
-              >
-                {t.common?.cancel ?? "Cancel"}
-              </Button>
-              <Button
-                onClick={handleSaveAsNote}
-                disabled={!selectedNotebookId || saveAsNote.isPending}
-              >
-                {saveAsNote.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <BookmarkPlus className="mr-2 h-4 w-4" />
-                )}
-                {t.research?.save ?? "Save"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      />
     </>
   );
 }

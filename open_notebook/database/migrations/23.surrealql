@@ -1,0 +1,10 @@
+-- Migration 23: make the cited_document (owner, doc_id) index UNIQUE
+-- materialize_citation does a check-then-write; without uniqueness a race
+-- (double-click, two browser tabs) creates duplicate rows for the same
+-- (owner, doc_id), making later lookups and panel-close deletes
+-- nondeterministic. Records are ephemeral materializations, so clearing the
+-- table before tightening the index is safe.
+
+DELETE cited_document;
+REMOVE INDEX IF EXISTS idx_cited_document_owner_doc ON TABLE cited_document;
+DEFINE INDEX IF NOT EXISTS idx_cited_document_owner_doc ON cited_document FIELDS owner, doc_id UNIQUE;

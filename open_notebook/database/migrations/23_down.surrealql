@@ -1,0 +1,4 @@
+-- Migration 23 Down: restore the non-unique (owner, doc_id) index
+
+REMOVE INDEX IF EXISTS idx_cited_document_owner_doc ON TABLE cited_document;
+DEFINE INDEX IF NOT EXISTS idx_cited_document_owner_doc ON cited_document FIELDS owner, doc_id;
