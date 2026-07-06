@@ -1,8 +1,10 @@
 services:
   surrealdb:
-    image: surrealdb/surrealdb:latest
+    image: surrealdb/surrealdb:${SURREALDB_TAG:-latest}
     container_name: nn-notebook-surrealdb
-    command: start -u root -p root surrealkv:///data/mydatabase.db
+    # Credentials come from the root .env (see marinha/.env.example). Fail fast
+    # if the password was not set — never fall back to the insecure root/root.
+    command: start -u ${SURREAL_ROOT_USER:-root} -p ${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in marinha/.env} surrealkv:///data/mydatabase.db
     user: root  # Required for bind mounts on Linux
     ports:
       - "8555:8000"
@@ -11,7 +13,12 @@ services:
     networks:
       - marinha-net
     restart: always
-    pull_policy: always
+    mem_limit: ${SURREALDB_MEM_LIMIT:-8g}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-20m}
+        max-file: "${LOG_MAX_FILE:-5}"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 10s
@@ -37,9 +44,11 @@ services:
       # Override DB host so the container talks to the surrealdb service
       # via the compose network (overrides any SURREAL_URL in .env).
       - SURREAL_URL=ws://surrealdb:8000/rpc
-      - SURREAL_USER=root
-      - SURREAL_PASS=root
-      - SURREAL_PASSWORD=root
+      # DB credentials come from the root .env — MUST match the surrealdb
+      # service above (see marinha/.env.example). No more hardcoded root/root.
+      - SURREAL_USER=${SURREAL_ROOT_USER:-root}
+      - SURREAL_PASS=${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in marinha/.env}
+      - SURREAL_PASSWORD=${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in marinha/.env}
       - SURREAL_NAMESPACE=open_notebook
       - SURREAL_DATABASE=open_notebook
       # Reach NOVA-Researcher services by their container names on the
@@ -71,6 +80,12 @@ services:
     networks:
       - marinha-net
     restart: always
+    mem_limit: ${NN_NOTEBOOK_MEM_LIMIT:-12g}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-20m}
+        max-file: "${LOG_MAX_FILE:-5}"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:5055/api/health"]
       interval: 15s
