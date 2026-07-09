@@ -4,19 +4,23 @@ Supports Azure AD and local email/password authentication backed by the
 SurrealDB user table. No other OAuth providers are supported.
 """
 
-from datetime import datetime
-from typing import Optional
+import base64
+import json
 import os
 import secrets
+from datetime import datetime
+from typing import Optional
+from urllib.parse import quote
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
+from open_notebook.access_control import get_user_by_email as navy_get_user_by_email
 from open_notebook.domain.user import User
 from open_notebook.security.jwt_manager import JWTManager
 from open_notebook.utils.encryption import get_secret_from_env
-from open_notebook.access_control import get_user_by_email as navy_get_user_by_email
 
 
 def _navy_claims_for_email(email: Optional[str]) -> dict:
@@ -406,111 +410,195 @@ async def list_oauth_providers():
     }
 
 
+class OAuthInitRequest(BaseModel):
+    """Body for POST /oauth/azure/init (sent by the frontend)."""
+    state: Optional[str] = None
+    redirect_uri: Optional[str] = None
+
+
+class OAuthCallbackRequest(BaseModel):
+    """Body for POST /oauth/azure/callback (sent by the frontend)."""
+    code: str
+    state: Optional[str] = None
+    redirect_uri: Optional[str] = None
+
+
+def _azure_authority() -> str:
+    return os.getenv(
+        "AZURE_AUTHORITY", "https://login.microsoftonline.com/common"
+    ).rstrip("/")
+
+
+def _decode_id_token_claims(id_token: str) -> dict:
+    """Read the claims from Azure's id_token.
+
+    The id_token is fetched over a direct server-to-server TLS call to the
+    Microsoft token endpoint (below), so it is trusted at the point we read it;
+    we decode the payload without re-verifying the signature.
+    """
+    try:
+        payload_b64 = id_token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)  # pad base64url
+        return json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not decode Azure id_token: {e}")
+        return {}
+
+
 @router.post("/oauth/azure/init")
-async def azure_oauth_init():
+async def azure_oauth_init(req: Optional[OAuthInitRequest] = None):
     """
-    Initialize Azure OAuth login flow.
-    Returns authorization URL to redirect user to.
-    
-    Required environment variables:
-    - AZURE_CLIENT_ID
-    - AZURE_CLIENT_SECRET
-    - AZURE_AUTHORITY
-    - AZURE_REDIRECT_URI
-    
-    Example:
-    ```
-    curl -X POST http://localhost:5055/auth/oauth/azure/init
-    ```
+    Start the Azure AD login flow. Returns the Microsoft authorization URL that
+    the frontend redirects the browser to. The frontend supplies its own
+    ``redirect_uri`` (its /auth/oauth/callback page) and a CSRF ``state``.
+
+    Local email/password login stays available independently of this.
     """
-    
     azure_client_id = os.getenv("AZURE_CLIENT_ID")
-    
     if not azure_client_id:
         raise HTTPException(
             status_code=400,
-            detail="Azure OAuth not configured. Set AZURE_CLIENT_ID environment variable."
+            detail="Azure OAuth not configured. Set AZURE_CLIENT_ID.",
         )
-    
-    azure_authority = os.getenv(
-        "AZURE_AUTHORITY",
-        "https://login.microsoftonline.com/common"
+
+    req = req or OAuthInitRequest()
+    redirect_uri = req.redirect_uri or os.getenv(
+        "AZURE_REDIRECT_URI", "http://localhost:5055/auth/oauth/azure/callback"
     )
-    azure_redirect_uri = os.getenv(
-        "AZURE_REDIRECT_URI",
-        "http://localhost:5055/auth/oauth/azure/callback"
-    )
-    
-    # Generate CSRF state parameter
-    state = secrets.token_urlsafe(32)
-    
-    # Build authorization URL
+    state = req.state or secrets.token_urlsafe(32)
+
     auth_url = (
-        f"{azure_authority}/oauth2/v2.0/authorize?"
-        f"client_id={azure_client_id}&"
-        f"redirect_uri={azure_redirect_uri}&"
+        f"{_azure_authority()}/oauth2/v2.0/authorize?"
+        f"client_id={quote(azure_client_id)}&"
+        f"redirect_uri={quote(redirect_uri, safe='')}&"
         f"response_type=code&"
-        f"scope=openid%20profile%20email&"
-        f"state={state}"
+        f"response_mode=query&"
+        f"scope={quote('openid profile email')}&"
+        f"state={quote(state)}"
     )
-    
-    logger.info("✅ Azure OAuth initialization requested")
-    
-    return {
-        "provider": "azure",
-        "auth_url": auth_url,
-        "state": state,
-        "message": "Redirect user to auth_url to log in with Azure"
+    logger.info("✅ Azure OAuth init")
+    # Return both key names (frontend expects authorization_url; keep auth_url too).
+    return {"authorization_url": auth_url, "auth_url": auth_url, "state": state}
+
+
+@router.post("/oauth/azure/callback")
+async def azure_oauth_callback(req: OAuthCallbackRequest):
+    """
+    Complete the Azure AD login: exchange the authorization code for tokens,
+    read the user's identity from the id_token, create/link the local user, and
+    return a JWT in the SAME shape as local login (so the frontend treats both
+    the same way). Local admin/password login is unaffected.
+    """
+    azure_client_id = os.getenv("AZURE_CLIENT_ID")
+    azure_client_secret = get_secret_from_env("AZURE_CLIENT_SECRET") or os.getenv(
+        "AZURE_CLIENT_SECRET"
+    )
+    if not azure_client_id or not azure_client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Azure OAuth not configured (need AZURE_CLIENT_ID + AZURE_CLIENT_SECRET).",
+        )
+
+    redirect_uri = req.redirect_uri or os.getenv(
+        "AZURE_REDIRECT_URI", "http://localhost:5055/auth/oauth/azure/callback"
+    )
+
+    # 1) Exchange the authorization code for tokens (server-to-server, over TLS).
+    token_url = f"{_azure_authority()}/oauth2/v2.0/token"
+    form = {
+        "client_id": azure_client_id,
+        "client_secret": azure_client_secret,
+        "grant_type": "authorization_code",
+        "code": req.code,
+        "redirect_uri": redirect_uri,
+        "scope": "openid profile email",
     }
-
-
-@router.get("/oauth/azure/callback")
-async def azure_oauth_callback(
-    code: str = None,
-    state: str = None,
-    error: str = None
-):
-    """
-    Handle Azure OAuth callback (redirect from Azure AD).
-    Exchanges authorization code for user token and creates JWT.
-    
-    TODO: Implement token exchange with Azure token endpoint
-    """
-    
-    if error:
-        logger.error(f"❌ Azure OAuth error: {error}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"OAuth error: {error}"
-        )
-    
-    if not code:
-        raise HTTPException(
-            status_code=400,
-            detail="No authorization code received from Azure"
-        )
-    
     try:
-        # TODO: Exchange code for token
-        # 1. Call Azure token endpoint with code
-        # 2. Parse response to get access token
-        # 3. Call Azure /me endpoint with access token
-        # 4. Create local user and JWT
-        # 5. Redirect to frontend with JWT
-        
-        logger.warning("⚠️ Azure OAuth token exchange not yet implemented")
-        
-        return {
-            "status": "pending",
-            "message": "Azure OAuth token exchange not yet implemented",
-            "help": "For development, use: POST /auth/login/local with admin account",
-            "example_credentials": {
-                "email": "admin@open-notebook.local",
-                "password": "admin (from ADMIN_PASSWORD env var)"
-            }
-        }
-    except Exception as e:
-        logger.error(f"❌ Azure OAuth callback error: {e}")
-        raise HTTPException(status_code=500, detail="OAuth callback failed")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(token_url, data=form)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"❌ Azure token endpoint unreachable: {e}")
+        raise HTTPException(status_code=502, detail="Could not reach Azure token endpoint")
+
+    if resp.status_code != 200:
+        logger.warning(
+            f"❌ Azure token exchange failed ({resp.status_code}): {resp.text[:300]}"
+        )
+        raise HTTPException(status_code=401, detail="Azure token exchange failed")
+
+    # 2) Identify the user from the id_token claims.
+    claims = _decode_id_token_claims(resp.json().get("id_token", ""))
+    email = (
+        claims.get("email")
+        or claims.get("preferred_username")
+        or claims.get("upn")
+        or ""
+    ).strip().lower()
+    name = claims.get("name")
+    external_id = claims.get("oid") or claims.get("sub")
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Azure did not return an email for this account.",
+        )
+
+    try:
+        # 3) Find or create the local user (link by Azure object id, else email).
+        user = None
+        if external_id:
+            user = await User.get_by_provider("azure", external_id)
+        if user is None:
+            user = await User.get_by_email(email)
+        if user is None:
+            user = User(
+                email=email,
+                name=name,
+                provider="azure",
+                external_id=external_id,
+                roles=["user"],
+            )
+            await user.save()
+            logger.info(f"✅ Created Azure user: {email}")
+        else:
+            changed = False
+            if not user.external_id and external_id:
+                user.external_id = external_id
+                changed = True
+            if name and user.name != name:
+                user.name = name
+                changed = True
+            if changed:
+                await user.save()
+            await user.update_last_login()
+
+        user_data = user.to_safe_dict()
+
+        # The configured admin email always carries the admin role.
+        admin_email = os.getenv("ADMIN_EMAIL")
+        if admin_email and email == admin_email.strip().lower():
+            user_data["roles"] = ["admin"]
+
+        # 4) Issue the JWT (with navy ACL claims when applicable).
+        navy_claims = _navy_claims_for_email(email)
+        if navy_claims:
+            user_data.update(navy_claims)
+
+        token = JWTManager.create_token(
+            user_id=user_data["id"],
+            email=user_data["email"],
+            roles=user_data["roles"],
+            extra_claims=navy_claims or None,
+        )
+        logger.info(f"✅ Azure login successful: {email}")
+        return TokenResponse(
+            access_token=token,
+            expires_in=JWTManager.EXPIRY_SECONDS,
+            user=user_data,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"❌ Azure callback error: {e}")
+        raise HTTPException(status_code=500, detail="Azure login failed")
 
 

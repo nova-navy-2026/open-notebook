@@ -283,7 +283,7 @@ export const useAuthStore = create<AuthState>()(
               },
               body: JSON.stringify({
                 state,
-                redirect_uri: `${window.location.origin}/auth/oauth/callback`,
+                redirect_uri: `${window.location.origin}/oauth/callback`,
               }),
             },
           );
@@ -323,7 +323,7 @@ export const useAuthStore = create<AuthState>()(
               body: JSON.stringify({
                 code,
                 state,
-                redirect_uri: `${window.location.origin}/auth/oauth/callback`,
+                redirect_uri: `${window.location.origin}/oauth/callback`,
               }),
             },
           );

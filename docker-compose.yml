@@ -2,9 +2,9 @@ services:
   surrealdb:
     image: surrealdb/surrealdb:${SURREALDB_TAG:-latest}
     container_name: nn-notebook-surrealdb
-    # Credentials come from the root .env (see marinha/.env.example). Fail fast
+    # Credentials come from THIS project's .env (open-notebook/.env). Fail fast
     # if the password was not set — never fall back to the insecure root/root.
-    command: start -u ${SURREAL_ROOT_USER:-root} -p ${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in marinha/.env} surrealkv:///data/mydatabase.db
+    command: start -u ${SURREAL_ROOT_USER:-root} -p ${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in open-notebook/.env} surrealkv:///data/mydatabase.db
     user: root  # Required for bind mounts on Linux
     ports:
       - "8555:8000"
@@ -19,8 +19,10 @@ services:
       options:
         max-size: ${LOG_MAX_SIZE:-20m}
         max-file: "${LOG_MAX_FILE:-5}"
+    # The SurrealDB image is distroless (no curl/shell) — use the surreal
+    # binary's own readiness probe instead of curl.
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      test: ["CMD", "/surreal", "isready", "--endpoint", "http://localhost:8000"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -44,11 +46,11 @@ services:
       # Override DB host so the container talks to the surrealdb service
       # via the compose network (overrides any SURREAL_URL in .env).
       - SURREAL_URL=ws://surrealdb:8000/rpc
-      # DB credentials come from the root .env — MUST match the surrealdb
-      # service above (see marinha/.env.example). No more hardcoded root/root.
+      # DB credentials from open-notebook/.env — MUST match the surrealdb service
+      # above. No more hardcoded root/root.
       - SURREAL_USER=${SURREAL_ROOT_USER:-root}
-      - SURREAL_PASS=${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in marinha/.env}
-      - SURREAL_PASSWORD=${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in marinha/.env}
+      - SURREAL_PASS=${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in open-notebook/.env}
+      - SURREAL_PASSWORD=${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in open-notebook/.env}
       - SURREAL_NAMESPACE=open_notebook
       - SURREAL_DATABASE=open_notebook
       # Reach NOVA-Researcher services by their container names on the
@@ -74,9 +76,12 @@ services:
       - API_RELOAD=false
     volumes:
       - ./notebook_data:/app/data
+    # Start once the DB container is up; the app retries the connection
+    # (SURREAL_CONNECT_ATTEMPTS) and restarts if the DB isn't ready yet, so a
+    # healthcheck quirk can never leave the app permanently blocked.
     depends_on:
       surrealdb:
-        condition: service_healthy
+        condition: service_started
     networks:
       - marinha-net
     restart: always
