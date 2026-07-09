@@ -8,15 +8,43 @@ from open_notebook.utils import token_count
 
 
 def _amalia_from_env(**kwargs) -> LanguageModel:
-    """Build an AMALIA language model directly from env vars (no DB required)."""
+    """Build the fallback AMALIA language model directly from env vars (no DB).
+
+    The model can run locally — served either through an OpenAI-compatible
+    endpoint (vLLM / TGI / the in-house AMALIA host) or through Ollama. The
+    provider is chosen, first match wins:
+
+      1. explicit ``AMALIA_PROVIDER`` = ``openai-compatible`` | ``ollama``
+      2. the scheme of ``AMALIA_SMART_LLM`` (e.g. ``ollama:llama3`` -> ollama)
+      3. ``openai-compatible`` (default — the AMALIA host)
+    """
     import os
 
+    # AMALIA_SMART_LLM is "<scheme>:<model>", e.g. "openai:carminho/AMALIA-9B-50-DPO"
+    # or "ollama:qwen3:8b". Keep the full model name after the first ':'.
+    smart_llm = os.environ.get("AMALIA_SMART_LLM", "openai:carminho/AMALIA-9B-50-DPO")
+    scheme, sep, rest = smart_llm.partition(":")
+    model_name = rest if sep else smart_llm
+
+    provider = os.environ.get("AMALIA_PROVIDER", "").strip().lower()
+    if not provider:
+        provider = "ollama" if scheme.strip().lower() == "ollama" else "openai-compatible"
+
+    if provider == "ollama":
+        # Esperanto's ollama provider already falls back to OLLAMA_BASE_URL /
+        # OLLAMA_API_BASE, but pass base_url explicitly when set so the target
+        # is unambiguous (e.g. the bundled `ollama` container on marinha-net).
+        base_url = os.environ.get("OLLAMA_API_BASE") or os.environ.get("OLLAMA_BASE_URL")
+        config = {**kwargs}
+        if base_url:
+            config["base_url"] = base_url.rstrip("/")
+        return AIFactory.create_language(
+            model_name=model_name, provider="ollama", config=config
+        )
+
+    # Default: OpenAI-compatible endpoint (vLLM / TGI / AMALIA host).
     base_url = os.environ.get("AMALIA_BASE_URL", "https://api.novasearch.org/amalia-llm/v1")
     api_key = os.environ.get("AMALIA_API_KEY", "dummy")
-    # AMALIA_SMART_LLM is "openai:carminho/AMALIA-9B-50-DPO" — strip the prefix
-    smart_llm = os.environ.get("AMALIA_SMART_LLM", "openai:carminho/AMALIA-9B-50-DPO")
-    model_name = smart_llm.split(":", 1)[-1]
-
     return AIFactory.create_language(
         model_name=model_name,
         provider="openai-compatible",
