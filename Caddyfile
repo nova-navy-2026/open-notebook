@@ -1,0 +1,31 @@
+{
+	# Only used once this moves to a real domain and "tls internal" below is
+	# removed — then Caddy fetches a real Let's Encrypt cert automatically
+	# and needs a contact address for it.
+	email admin@example.com
+
+	# Per RFC 6066, browsers/curl/wget omit the SNI extension entirely when
+	# connecting to a bare IP address. Without this, Caddy has no cert to
+	# offer such connections and fails the TLS handshake with a generic
+	# "internal error" alert — default_sni tells it which cert to fall back
+	# to when SNI is absent. Not needed once PUBLIC_ADDRESS is a real domain
+	# (real hostnames always send SNI), but harmless to leave in.
+	default_sni {$PUBLIC_ADDRESS:192.168.56.101}
+}
+
+https://{$PUBLIC_ADDRESS:192.168.56.101} {
+	# Self-signed, locally-trusted cert. Required here because Let's Encrypt
+	# cannot issue certificates for bare IPs or private/non-public addresses.
+	#
+	# >>> On the real server: set PUBLIC_ADDRESS to your real public domain
+	# and DELETE this "tls internal" line. Caddy will then request a real
+	# Let's Encrypt certificate automatically — no other change needed.
+	tls internal
+
+	reverse_proxy nn-notebook:3675 {
+		transport http {
+			read_timeout 600s
+			write_timeout 600s
+		}
+	}
+}

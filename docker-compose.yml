@@ -7,7 +7,7 @@ services:
     command: start -u ${SURREAL_ROOT_USER:-root} -p ${SURREAL_ROOT_PASS:?set SURREAL_ROOT_PASS in open-notebook/.env} surrealkv:///data/mydatabase.db
     user: root  # Required for bind mounts on Linux
     ports:
-      - "8555:8000"
+      - "127.0.0.1:8555:8000"
     volumes:
       - surrealdb_data:/data
     networks:
@@ -36,13 +36,17 @@ services:
       dockerfile: Dockerfile
     pull_policy: build
     ports:
-      # Only the frontend (Web UI) is published. The REST API on 5055 stays
-      # internal to the container — the frontend proxies /api/* to it via the
-      # Next.js rewrite (localhost:5055). Do NOT expose 5055 publicly.
-      - "3675:3675"  # Web UI (reverse-proxy / Cloudflare points here)
+      # Only reachable from the host itself now — Caddy (below) is the
+      # public HTTPS entrypoint and proxies to this port internally over
+      # marinha-net. Still handy for local debugging (curl localhost:3675).
+      - "127.0.0.1:3675:3675"
     env_file:
       - .env
     environment:
+      # Tells the frontend its own public URL is HTTPS (served via Caddy),
+      # so it doesn't emit http:// links/redirects and trip mixed-content
+      # errors in the browser.
+      - API_URL=https://${PUBLIC_ADDRESS:-192.168.56.101}
       # Override DB host so the container talks to the surrealdb service
       # via the compose network (overrides any SURREAL_URL in .env).
       - SURREAL_URL=ws://surrealdb:8000/rpc
@@ -56,12 +60,12 @@ services:
       # Reach NOVA-Researcher services by their container names on the
       # shared ``marinha-net`` network.
       - NOVA_RESEARCHER_URL=http://nova-researcher:3800
-      - WHISPER_API_URL=http://nova-whisper:4805
-      - SAM3_API_URL=http://nova-sam3:4800
-      - NOMIC_SERVER_URL=http://nova-nomic:4801
-      - RFDETR_API_URL=http://nova-rf-detr:4802
-      - BGE_M3_SERVER_URL=http://nova-bge-m3:4803
-      - CLIP_SERVER_URL=http://nova-clip:4804
+      - WHISPER_API_URL=http://${ML_HOST_IP:-192.168.56.1}:4805
+      - SAM3_API_URL=http://${ML_HOST_IP:-192.168.56.1}:4800
+      - NOMIC_SERVER_URL=http://${ML_HOST_IP:-192.168.56.1}:4801
+      - RFDETR_API_URL=http://${ML_HOST_IP:-192.168.56.1}:4802
+      - BGE_M3_SERVER_URL=http://${ML_HOST_IP:-192.168.56.1}:4803
+      - CLIP_SERVER_URL=http://${ML_HOST_IP:-192.168.56.1}:4804
       # ── Chart generator tunables (POST /api/charts/generate) ─────────
       # pandas/matplotlib/openpyxl/tabulate are bundled in the image.
       # Increase these if you need to handle larger data files.
@@ -98,8 +102,38 @@ services:
       retries: 5
       start_period: 60s
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: nn-notebook-caddy
+    environment:
+      - PUBLIC_ADDRESS=${PUBLIC_ADDRESS:-192.168.56.101}
+    ports:
+      # Port 80 isn't published here: this VM already has a stock nginx
+      # holding it (systemd-enabled, serving nothing but its default page —
+      # see conversation). Caddy still listens on 80 *inside* the container
+      # for its automatic HTTP->HTTPS redirect, it's just unreachable from
+      # outside until that conflict is resolved. HTTPS on 443 is unaffected.
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      nn-notebook:
+        condition: service_healthy
+    networks:
+      - marinha-net
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-20m}
+        max-file: "${LOG_MAX_FILE:-5}"
+
 volumes:
   surrealdb_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   marinha-net:
