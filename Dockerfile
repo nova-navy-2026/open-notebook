@@ -1,6 +1,17 @@
 # Build stage
 FROM python:3.12-slim-bookworm AS builder
 
+# marinha.pt certificate nchagas 9Jul26
+
+ARG HTTP_PROXY=http://10.46.0.118:8080
+ARG HTTPS_PROXY=http://10.46.0.118:8080
+ARG NO_PROXY=localhost,127.0.0.1
+ENV https_proxy=$HTTPS_PROXY \
+    no_proxy=$NO_PROXY
+
+COPY root-ca-ca.crt /usr/local/share/ca-certificates/
+COPY marinha-root-ca.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 # Install uv using the official method
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
