@@ -1,0 +1,12 @@
+# Overlay para USAR uma imagem já construída e carregada com `docker load`
+# (fluxo de transferência por pen), em vez de a reconstruir a partir do código.
+#
+#   docker load < marinha-images.tar.gz
+#   docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up -d
+#
+# A imagem base já é `nn-notebook:local`; aqui só impedimos o build/pull para que
+# a imagem carregada seja usada tal como está.
+services:
+  nn-notebook:
+    pull_policy: never     # nunca faz pull; usa a imagem local nn-notebook:local
+    build: !reset null      # remove o build: para nunca reconstruir

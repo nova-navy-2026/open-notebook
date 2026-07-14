@@ -11,10 +11,10 @@ ENV http_proxy=$HTTP_PROXY
 ENV https_proxy=$HTTPS_PROXY
 ENV no_proxy=$NO_PROXY
 
-RUN printf '%s\n' \
-'Acquire::http::Proxy "http://10.46.0.118:8080";' \
-'Acquire::https::Proxy "http://10.46.0.118:8080";' \
-> /etc/apt/apt.conf.d/01proxy
+RUN if [ -n "$HTTP_PROXY" ]; then \
+      printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' "$HTTP_PROXY" "$HTTPS_PROXY" \
+      > /etc/apt/apt.conf.d/01proxy; \
+    fi
 
 COPY root-ca-ca.crt /usr/local/share/ca-certificates/
 COPY marinha-root-ca.crt /usr/local/share/ca-certificates/
@@ -106,10 +106,10 @@ ENV http_proxy=$HTTP_PROXY
 ENV https_proxy=$HTTPS_PROXY
 ENV no_proxy=$NO_PROXY
 
-RUN printf '%s\n' \
-'Acquire::http::Proxy "http://10.46.0.118:8080";' \
-'Acquire::https::Proxy "http://10.46.0.118:8080";' \
-> /etc/apt/apt.conf.d/01proxy
+RUN if [ -n "$HTTP_PROXY" ]; then \
+      printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' "$HTTP_PROXY" "$HTTPS_PROXY" \
+      > /etc/apt/apt.conf.d/01proxy; \
+    fi
 
 COPY root-ca-ca.crt /usr/local/share/ca-certificates/
 COPY marinha-root-ca.crt /usr/local/share/ca-certificates/
