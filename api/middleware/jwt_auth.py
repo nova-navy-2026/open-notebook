@@ -26,6 +26,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     # (login/status/refresh endpoints that must work without a valid token)
     EXEMPT_PATHS = [
         "/health",
+        "/api/health",
         "/docs",
         "/openapi.json",
         "/redoc",
