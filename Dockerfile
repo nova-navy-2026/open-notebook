@@ -28,17 +28,6 @@ ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-# marinha.pt certificate nchagas 9Jul26
-
-ARG HTTP_PROXY=http://10.46.0.118:8080
-ARG HTTPS_PROXY=http://10.46.0.118:8080
-ARG NO_PROXY=localhost,127.0.0.1
-ENV https_proxy=$HTTPS_PROXY \
-    no_proxy=$NO_PROXY
-
-COPY root-ca-ca.crt /usr/local/share/ca-certificates/
-COPY marinha-root-ca.crt /usr/local/share/ca-certificates/
-RUN update-ca-certificates
 # Install uv using the official method
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
