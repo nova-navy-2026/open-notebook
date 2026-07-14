@@ -112,6 +112,7 @@ class RBACMiddleware(BaseHTTPMiddleware):
     # (endpoints handle their own auth/authz)
     EXEMPT_PATHS = [
         "/health",
+        "/api/health",
         "/docs",
         "/openapi.json",
         "/redoc",

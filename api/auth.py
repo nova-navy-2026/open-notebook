@@ -110,6 +110,7 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
         self.excluded_paths = excluded_paths or [
             "/",
             "/health",
+            "/api/health",
             "/docs",
             "/openapi.json",
             "/redoc",
