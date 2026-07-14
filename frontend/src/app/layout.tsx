@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { QueryProvider } from "@/components/providers/QueryProvider";
@@ -11,7 +10,6 @@ import { I18nProvider } from "@/components/providers/I18nProvider";
 import { RBACProvider } from "@/lib/contexts/rbac-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Marinheiro de Silício",
@@ -25,7 +23,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
-      <body className={`${inter.className} h-full`} suppressHydrationWarning>
+      <body className= "h-full" suppressHydrationWarning>
         <SuppressHydrationWarning />
         <ErrorBoundary>
           <ThemeProvider>

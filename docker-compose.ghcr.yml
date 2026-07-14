@@ -1,0 +1,15 @@
+# Overlay to PULL the app image from ghcr.io instead of building from source.
+# Use on any host that should run a pre-built image (no build toolchain needed):
+#
+#   cd open-notebook
+#   export NN_NOTEBOOK_IMAGE=ghcr.io/<your-gh-owner>/nn-notebook:latest
+#   docker login ghcr.io                       # once, PAT with read:packages
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+#
+# It only overrides the image source + pull policy of the `nn-notebook` service;
+# everything else (surrealdb, env, ports, volumes) comes from docker-compose.yml.
+services:
+  nn-notebook:
+    image: ${NN_NOTEBOOK_IMAGE:-ghcr.io/CHANGE-ME/nn-notebook:latest}
+    pull_policy: always   # fetch the registry image; do NOT build locally
+    build: !reset null     # drop the base file's build: block so `up` never builds

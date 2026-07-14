@@ -6,8 +6,8 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --port 3675",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "dev": "NODE_OPTIONS=--max-old-space-size=4096 next dev --port 3675",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "node start-server.js",
     "lint": "eslint src/",
     "test": "vitest run",

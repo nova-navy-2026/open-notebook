@@ -139,3 +139,5 @@ specs/
 
 *.local.yml
 **/*.local.md
+# Runtime override file (may contain secrets) — never commit
+.env.local

@@ -42,6 +42,14 @@ services:
       - "3675:3675"  # Web UI (reverse-proxy / Cloudflare points here)
     env_file:
       - .env
+      # Runtime overrides you can edit on the cluster WITHOUT rebuilding the image.
+      # Plain app vars here win over .env. Recreate to apply: docker compose up -d
+      # To ALSO override interpolated values (image tags, mem limits, and the
+      # ${VAR:-default} entries in `environment:` below), run compose with:
+      #   export COMPOSE_ENV_FILES=.env,.env.local   (see .env.local.example)
+      # Optional — the stack still starts if the file is absent.
+      - path: .env.local
+        required: false
     environment:
       # Override DB host so the container talks to the surrealdb service
       # via the compose network (overrides any SURREAL_URL in .env).

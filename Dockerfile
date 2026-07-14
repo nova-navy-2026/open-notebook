@@ -1,5 +1,32 @@
 # Build stage
 FROM python:3.12-slim-bookworm AS builder
+ARG HTTP_PROXY=http://10.46.0.118:8080
+ARG HTTPS_PROXY=http://10.46.0.118:8080
+ARG NO_PROXY=localhost,127.0.0.1,surrealdb,nn-notebook-surrealdb,nova-researcher,nova-whisper,nova-sam3,nova-nomic,nova-rf-detr,nova-bge-m3,nova-clip,ollama,marinha-opensearch
+
+ENV HTTP_PROXY=$HTTP_PROXY
+ENV HTTPS_PROXY=$HTTPS_PROXY
+ENV NO_PROXY=$NO_PROXY
+ENV http_proxy=$HTTP_PROXY
+ENV https_proxy=$HTTPS_PROXY
+ENV no_proxy=$NO_PROXY
+
+RUN printf '%s\n' \
+'Acquire::http::Proxy "http://10.46.0.118:8080";' \
+'Acquire::https::Proxy "http://10.46.0.118:8080";' \
+> /etc/apt/apt.conf.d/01proxy
+
+COPY root-ca-ca.crt /usr/local/share/ca-certificates/
+COPY marinha-root-ca.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
+# pip / uv / requests default to the certifi bundle, which lacks the corporate
+# root CA — point them at the system store (updated above) so HTTPS through the
+# MITM proxy validates during THIS build stage (uv sync, pip torch install).
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 # Install uv using the official method
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -19,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV MAKEFLAGS="-j$(nproc)"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV UV_COMPILE_BYTECODE=1
+ENV UV_COMPILE_BYTECODE=0
 ENV UV_LINK_MODE=copy
 
 # Set the working directory in the container to /app
@@ -30,7 +57,7 @@ COPY pyproject.toml uv.lock ./
 COPY open_notebook/__init__.py ./open_notebook/__init__.py
 
 # Install dependencies with optimizations (this layer will be cached unless dependencies change)
-RUN uv sync --frozen --no-dev
+RUN UV_COMPILE_BYTECODE=0 uv sync --frozen --no-dev
 
 # Install the optional "transformers" embedding provider stack (CPU-only torch wheel).
 # Needed so the local HuggingFace transformers embedding provider in esperanto works
@@ -57,6 +84,8 @@ WORKDIR /app/frontend
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm config set registry ${NPM_REGISTRY}
+RUN npm config set registry https://registry.npmjs.org/
+RUN npm config set strict-ssl false
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
@@ -66,7 +95,31 @@ WORKDIR /app
 
 # Runtime stage
 FROM python:3.12-slim-bookworm AS runtime
+ARG HTTP_PROXY=http://10.46.0.118:8080
+ARG HTTPS_PROXY=http://10.46.0.118:8080
+ARG NO_PROXY=localhost,127.0.0.1,surrealdb,nn-notebook-surrealdb,nova-researcher,nova-whisper,nova-sam3,nova-nomic,nova-rf-detr,nova-bge-m3,nova-clip,ollama,marinha-opensearch
 
+ENV HTTP_PROXY=$HTTP_PROXY
+ENV HTTPS_PROXY=$HTTPS_PROXY
+ENV NO_PROXY=$NO_PROXY
+ENV http_proxy=$HTTP_PROXY
+ENV https_proxy=$HTTPS_PROXY
+ENV no_proxy=$NO_PROXY
+
+RUN printf '%s\n' \
+'Acquire::http::Proxy "http://10.46.0.118:8080";' \
+'Acquire::https::Proxy "http://10.46.0.118:8080";' \
+> /etc/apt/apt.conf.d/01proxy
+
+COPY root-ca-ca.crt /usr/local/share/ca-certificates/
+COPY marinha-root-ca.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+# Runtime Python HTTPS (LLM / HuggingFace / OpenSearch through the MITM proxy)
+# also needs the corporate CA. This is a fresh base stage, so the builder's
+# cert env does NOT carry over — set it again here.
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 # Install only runtime system dependencies (no build tools)
 # Add Node.js 20.x LTS for running frontend
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
