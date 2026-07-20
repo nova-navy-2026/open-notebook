@@ -3,7 +3,9 @@ import { persist } from "zustand/middleware";
 import { getApiUrl } from "@/lib/config";
 import { queryClient } from "@/lib/api/query-client";
 
-export type UserRole = "admin" | "editor" | "viewer";
+// Only two roles exist in this deployment: a single bootstrap "admin"
+// (ADMIN_EMAIL / ADMIN_PASSWORD) and everyone else as "user".
+export type UserRole = "admin" | "user";
 
 export interface UserInfo {
   id: string;
@@ -204,7 +206,7 @@ export const useAuthStore = create<AuthState>()(
               user: user || {
                 id: data.user?.id || "unknown",
                 email: data.user?.email || email,
-                roles: data.user?.roles || ["viewer"],
+                roles: data.user?.roles || ["user"],
                 provider: "local",
               },
               isLoading: false,
@@ -353,7 +355,7 @@ export const useAuthStore = create<AuthState>()(
               user: user || {
                 id: provider,
                 email: "user@provider.com",
-                roles: ["viewer"],
+                roles: ["user"],
                 provider,
               },
               isLoading: false,
@@ -475,8 +477,7 @@ export const useAuthStore = create<AuthState>()(
         // Check specific permissions based on role
         const rolePermissions: Record<UserRole, string[]> = {
           admin: ["*"],
-          editor: ["read", "write", "delete-own", "search", "view-shared"],
-          viewer: ["read", "search", "view-shared"],
+          user: ["read", "write", "delete-own", "search", "view-shared"],
         };
 
         for (const role of roles) {

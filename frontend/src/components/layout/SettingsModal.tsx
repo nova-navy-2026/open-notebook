@@ -19,6 +19,7 @@ import {
   Mic,
   Users,
   Activity,
+  ShieldAlert,
 } from "lucide-react";
 
 // Settings pages rendered inline inside the modal. Each page is self-contained
@@ -31,6 +32,7 @@ import PodcastsPage from "@/app/(dashboard)/podcasts/page";
 import { StatusDashboard } from "@/components/admin/StatusDashboard";
 import { AskPanel } from "@/components/admin/AskPanel";
 import { AuditLogViewer } from "@/components/admin/AuditLogViewer";
+import { FlaggedContentViewer } from "@/components/admin/FlaggedContentViewer";
 import { RoleManagementComponent } from "@/components/admin/RoleManagementComponent";
 import { UserCreationDialog } from "@/components/admin/UserCreationDialog";
 
@@ -43,6 +45,7 @@ type TabId =
   | "ask"
   | "podcasts"
   | "users"
+  | "flagged"
   | "audit";
 
 type Tab = {
@@ -91,6 +94,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               { id: "ask" as TabId, label: "Ask", icon: MessageCircleQuestion },
               { id: "podcasts" as TabId, label: t.navigation.podcasts, icon: Mic },
               { id: "users" as TabId, label: "Users & Roles", icon: Users },
+              { id: "flagged" as TabId, label: "Flagged Content", icon: ShieldAlert },
               { id: "audit" as TabId, label: "Audit Logs", icon: Activity },
             ],
           },
@@ -137,6 +141,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               />
             </div>
             <RoleManagementComponent key={usersRefreshKey} />
+          </div>
+        );
+      case "flagged":
+        return (
+          <div className="flex-1 overflow-y-auto p-6">
+            <FlaggedContentViewer />
           </div>
         );
       case "audit":

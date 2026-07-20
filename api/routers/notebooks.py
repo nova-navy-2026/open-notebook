@@ -68,19 +68,17 @@ async def get_notebooks(
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
-        # Fail-closed scoping: regular users see notebooks they own PLUS the
-        # collaborative notebooks they are a member of. Ownerless/legacy
-        # notebooks are NOT public. Admins see everything.
-        if is_admin(request):
-            where_clause = ""
-            params: dict = {}
-        else:
-            member_ids = await get_member_notebook_ids(user_id)
-            where_clause = "WHERE owner = $owner OR id IN $member_ids"
-            params = {
-                "owner": user_id,
-                "member_ids": [ensure_record_id(n) for n in member_ids],
-            }
+        # Fail-closed scoping: every caller — admins included — sees only the
+        # notebooks they own plus the collaborative ones they belong to.
+        # Ownerless/legacy notebooks are NOT public. Admin oversight does not
+        # run through this listing: admins reach user content solely via
+        # flagged items (see api/routers/flags.py).
+        member_ids = await get_member_notebook_ids(user_id)
+        where_clause = "WHERE owner = $owner OR id IN $member_ids"
+        params: dict = {
+            "owner": user_id,
+            "member_ids": [ensure_record_id(n) for n in member_ids],
+        }
 
         query = f"""
             SELECT *,

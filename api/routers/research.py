@@ -169,8 +169,19 @@ async def get_tones():
 
 @router.get("/research/sources")
 async def get_sources():
-    """Get available report sources."""
-    return get_source_info()
+    """Get available report sources, flagged by current connectivity.
+
+    Web-backed sources are reported as unavailable when the deployment has no
+    internet access, so the UI can disable them rather than let the user pick
+    an option that will fail.
+    """
+    from open_notebook.utils.connectivity import internet_available
+
+    online = await internet_available()
+    return [
+        {**src, "available": online or not src.get("requires_internet")}
+        for src in get_source_info()
+    ]
 
 
 @router.post("/research/generate")
@@ -190,6 +201,25 @@ async def generate_research(
         logger.debug(f"Research request received: query='{request.query[:100]}', type={request.report_type}, navy_user={user_id}, auth_user={auth_user_id}")
         if request.notebook_id:
             await _require_owned_notebook(request.notebook_id, auth_user_id)
+
+        # Backstop for the UI gating: web-backed research needs the public
+        # internet. Refuse up front with a clear message rather than letting
+        # the retriever fail deep inside the run.
+        from open_notebook.research.researcher_service import (
+            INTERNET_REPORT_SOURCES,
+        )
+        from open_notebook.utils.connectivity import internet_available
+
+        if request.report_source in INTERNET_REPORT_SOURCES:
+            if not await internet_available():
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"'{request.report_source}' research requires an internet "
+                        "connection, which is not available on this network. "
+                        "Use the document corpus instead."
+                    ),
+                )
 
         research_request = ResearchRequest(
             query=request.query,

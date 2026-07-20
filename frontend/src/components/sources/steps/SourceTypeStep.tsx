@@ -64,6 +64,7 @@ export function parseAndValidateUrls(text: string): {
 }
 
 import { TranslationKeys } from '@/lib/locales'
+import { useHasInternet } from '@/lib/hooks/use-capabilities'
 
 const getSourceTypes = (t: TranslationKeys) => [
   {
@@ -98,6 +99,9 @@ interface SourceTypeStepProps {
 const MAX_BATCH_SIZE = 50
 
 export function SourceTypeStep({ control, register, setValue, errors, urlValidationErrors, onClearUrlErrors }: SourceTypeStepProps) {
+  // Adding a source from a URL needs the public internet. On a closed LAN the
+  // fetch can never succeed, so the tab is disabled rather than left to fail.
+  const hasInternet = useHasInternet()
   const { t } = useTranslation()
   // Watch the selected type and inputs to detect batch mode
   const selectedType = useWatch({ control, name: 'type' })
@@ -171,8 +175,20 @@ export function SourceTypeStep({ control, register, setValue, errors, urlValidat
               <TabsList className="grid w-full grid-cols-3">
                 {getSourceTypes(t).map((type) => {
                   const Icon = type.icon
+                  const needsInternet = type.value === 'link'
+                  const disabled = needsInternet && !hasInternet
                   return (
-                    <TabsTrigger key={type.value} value={type.value} className="gap-2">
+                    <TabsTrigger
+                      key={type.value}
+                      value={type.value}
+                      className="gap-2"
+                      disabled={disabled}
+                      title={
+                        disabled
+                          ? 'Unavailable: this system has no internet connection'
+                          : undefined
+                      }
+                    >
                       <Icon className="h-4 w-4" />
                       {type.label}
                     </TabsTrigger>
@@ -185,7 +201,15 @@ export function SourceTypeStep({ control, register, setValue, errors, urlValidat
                   <p className="text-sm text-muted-foreground mb-4">{type.description}</p>
                   
                   {/* Type-specific fields */}
-                  {type.value === 'link' && (
+                  {type.value === 'link' && !hasInternet && (
+                    <div className="text-sm text-muted-foreground border rounded-md p-4">
+                      Adding sources from a URL requires an internet connection,
+                      which is not available on this network. Upload the file
+                      directly or paste its text instead.
+                    </div>
+                  )}
+
+                  {type.value === 'link' && hasInternet && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <Label htmlFor="url">{t.sources.urlLabel}</Label>

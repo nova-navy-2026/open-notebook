@@ -58,13 +58,16 @@ def assert_owns(resource_owner: Optional[str], request: Request) -> None:
     """Fail-closed per-user ownership check for direct-by-ID access.
 
     Raises 404 (not 403, to avoid leaking that the resource exists) unless the
-    caller owns the resource or is an admin. Resources with no owner
-    (``owner is None``) are treated as private to admins — they are NOT public.
-    Use this on every GET/PUT/DELETE-by-id and link endpoint so that list
-    filtering (which already scopes by owner) cannot be bypassed via a known id.
+    caller owns the resource. Resources with no owner (``owner is None``) are
+    never reachable here. Use this on every GET/PUT/DELETE-by-id and link
+    endpoint so that list filtering (which already scopes by owner) cannot be
+    bypassed via a known id.
+
+    Note: there is deliberately NO admin bypass. Admins do not get blanket
+    access to user content; they reach it only through items the risk
+    classifier flagged as dangerous (see ``api/routers/flags.py`` and
+    ``api/collaboration_access._admin_may_access``).
     """
-    if is_admin(request):
-        return
     user_id = getattr(request.state, "user_id", "anonymous")
     if resource_owner is None or resource_owner != user_id:
         raise HTTPException(status_code=404, detail="Not found")
@@ -73,22 +76,30 @@ def assert_owns(resource_owner: Optional[str], request: Request) -> None:
 def get_navy_acl_user_id(request: Request) -> Optional[str]:
     """FastAPI dependency that returns the navy user id to use for ACL filtering.
 
+    - Admins → always ``"__admin__"``, which now **fails closed** against the
+      navy corpus (see ``build_opensearch_filter``). Admin oversight is
+      flagged-content only; the corpus is read-only navy material that the risk
+      classifier never scans, so admins get no corpus documents at all. The
+      admin check runs FIRST so an admin who also has a users.json entry (e.g.
+      ``admin@open-notebook.local`` → ``m10001``, clearance 4) cannot read the
+      corpus through that profile either.
     - Users with a navy entry → returns their ``navy_user_id``
       (ACL filter applied via ``build_opensearch_filter``).
-    - Admins without a navy entry → returns ``"__admin__"`` so bootstrap
-      administration can still inspect the corpus.
     - Regular users without a navy entry → returns ``None``, callers
       fail-closed (empty results).
+
+    ``"__admin__"`` is still used by ``api/routers/research.py`` to tag the
+    admin's *own* research jobs — that is job ownership, not corpus access.
     """
     roles = getattr(request.state, "user_permissions", []) or []
     navy_id = getattr(request.state, "navy_user_id", None)
     logger.debug(
         f"[navy-acl] resolving user_id: roles={roles!r} navy_user_id={navy_id!r}"
     )
-    if navy_id:
-        return navy_id
     if "admin" in roles:
         return "__admin__"
+    if navy_id:
+        return navy_id
     return None
 
 

@@ -8,7 +8,13 @@ from open_notebook.access_control import build_opensearch_filter, is_document_al
 from open_notebook.search import navy_docs
 
 
-def test_admin_with_navy_identity_uses_navy_acl_identity():
+def test_admin_with_navy_identity_does_not_use_that_identity():
+    """An admin must not read the corpus through their own users.json profile.
+
+    ``admin@open-notebook.local`` is ``m10001`` (clearance 4) in users.json, so
+    honouring the navy id here would hand the admin the entire corpus. The
+    admin check runs first and yields the fail-closed ``__admin__`` sentinel.
+    """
     request = SimpleNamespace(
         state=SimpleNamespace(
             user_permissions=["admin"],
@@ -16,10 +22,10 @@ def test_admin_with_navy_identity_uses_navy_acl_identity():
         )
     )
 
-    assert get_navy_acl_user_id(request) == "m24409"
+    assert get_navy_acl_user_id(request) == "__admin__"
 
 
-def test_admin_without_navy_identity_keeps_bootstrap_bypass():
+def test_admin_without_navy_identity_is_admin_sentinel():
     request = SimpleNamespace(
         state=SimpleNamespace(
             user_permissions=["admin"],
@@ -28,6 +34,30 @@ def test_admin_without_navy_identity_keeps_bootstrap_bypass():
     )
 
     assert get_navy_acl_user_id(request) == "__admin__"
+
+
+def test_admin_sentinel_fails_closed_against_corpus(monkeypatch):
+    """``__admin__`` must match NOTHING — admins get no corpus documents."""
+    monkeypatch.setattr(
+        "open_notebook.access_control.load_users",
+        lambda: {"m10001": {"departments": ["SP-DP"], "clearance_level": 4}},
+    )
+
+    assert build_opensearch_filter("__admin__") == {
+        "bool": {"must_not": {"match_all": {}}}
+    }
+    assert (
+        is_document_allowed(
+            {
+                "document_status": "active",
+                "access_scope": "general",
+                "allowed_entities": ["general"],
+                "classification_level": 0,
+            },
+            "__admin__",
+        )
+        is False
+    )
 
 
 def test_acl_filter_requires_clearance_and_department(monkeypatch):

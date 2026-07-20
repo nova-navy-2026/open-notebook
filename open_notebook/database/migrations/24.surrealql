@@ -1,0 +1,62 @@
+-- Migration 24: content risk flagging ("dangerous content" admin oversight)
+--
+-- Admin oversight in this deployment is deliberately NARROW: the admin does
+-- NOT get blanket visibility over every user's notebooks/sources/chats.
+-- Instead, user content (chat messages, assistant replies, uploaded sources,
+-- notes) is classified by an LLM and only the items judged dangerous are
+-- surfaced to the admin, via rows in this table.
+--
+-- Each row is one flagged piece of content. `content_type` + `content_id`
+-- identify the item; `excerpt` stores just the offending snippet so the admin
+-- can triage without opening the whole private document/conversation.
+
+DEFINE TABLE IF NOT EXISTS content_flag SCHEMAFULL;
+
+-- What was flagged -----------------------------------------------------------
+-- content_type: chat_message | assistant_message | source | note
+DEFINE FIELD IF NOT EXISTS content_type ON TABLE content_flag TYPE string;
+-- Record id (source:xxx / note:xxx) or "<session_id>#<message_index>" for chat.
+DEFINE FIELD IF NOT EXISTS content_id ON TABLE content_flag TYPE string;
+DEFINE FIELD IF NOT EXISTS notebook_id ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS session_id ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS title ON TABLE content_flag TYPE option<string>;
+-- The offending snippet only — not the full document/conversation.
+DEFINE FIELD IF NOT EXISTS excerpt ON TABLE content_flag TYPE option<string>;
+
+-- Who produced it ------------------------------------------------------------
+DEFINE FIELD IF NOT EXISTS user_id ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS user_email ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS navy_user_id ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS departments ON TABLE content_flag TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS clearance_level ON TABLE content_flag TYPE option<int>;
+
+-- Classifier verdict ---------------------------------------------------------
+-- categories: classified_leak | threat_violence | exfiltration_opsec |
+--             illegal_misconduct
+DEFINE FIELD IF NOT EXISTS categories ON TABLE content_flag TYPE array<string> DEFAULT [];
+-- severity: low | medium | high
+DEFINE FIELD IF NOT EXISTS severity ON TABLE content_flag TYPE string DEFAULT "medium";
+DEFINE FIELD IF NOT EXISTS reason ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS classifier_model ON TABLE content_flag TYPE option<string>;
+
+-- Admin triage ---------------------------------------------------------------
+-- status: open | reviewed | dismissed
+DEFINE FIELD IF NOT EXISTS status ON TABLE content_flag TYPE string DEFAULT "open";
+DEFINE FIELD IF NOT EXISTS reviewed_by ON TABLE content_flag TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reviewed_at ON TABLE content_flag TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS review_note ON TABLE content_flag TYPE option<string>;
+
+DEFINE FIELD IF NOT EXISTS created ON content_flag DEFAULT time::now() VALUE $before OR time::now();
+DEFINE FIELD IF NOT EXISTS updated ON content_flag DEFAULT time::now() VALUE time::now();
+
+DEFINE INDEX IF NOT EXISTS content_flag_created_idx ON TABLE content_flag COLUMNS created;
+DEFINE INDEX IF NOT EXISTS content_flag_status_idx ON TABLE content_flag COLUMNS status;
+DEFINE INDEX IF NOT EXISTS content_flag_user_idx ON TABLE content_flag COLUMNS user_id;
+DEFINE INDEX IF NOT EXISTS content_flag_content_idx ON TABLE content_flag COLUMNS content_type, content_id;
+
+-- Only two roles exist in this deployment (admin + user). Migration 15 seeded
+-- editor/viewer and defaulted user.roles to ["viewer"]; realign both.
+DEFINE FIELD IF NOT EXISTS roles ON TABLE user TYPE array<string> DEFAULT ["user"];
+UPDATE user SET roles = ["user"] WHERE roles = ["viewer"] OR roles = ["editor"];
+DELETE role WHERE name IN ["editor", "viewer"];
+CREATE role SET name = "user", description = "Standard user", permissions = ["notebooks:read", "notebooks:write", "sources:read", "sources:write", "notes:read", "notes:write", "chat:access", "podcasts:manage"], is_default = true;

@@ -38,5 +38,80 @@
     "email": "guilherme.frazao@teste.com",
     "departments": ["SI-DITIC"],
     "clearance_level": 3
+  },
+  "m10006": {
+    "email": "user1@teste.com",
+    "departments": ["SI-DAGI"],
+    "clearance_level": 0
+  },
+  "m10007": {
+    "email": "user2@teste.com",
+    "departments": ["SI-DAGI"],
+    "clearance_level": 1
+  },
+  "m10008": {
+    "email": "user3@teste.com",
+    "departments": ["SI-DAGI"],
+    "clearance_level": 2
+  },
+  "m10009": {
+    "email": "user4@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 1
+  },
+  "m10010": {
+    "email": "user5@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 2
+  },
+  "m10011": {
+    "email": "user6@teste.com",
+    "departments": ["SI-DITIC"],
+    "clearance_level": 3
+  },
+  "m10012": {
+    "email": "user7@teste.com",
+    "departments": ["SP-DP"],
+    "clearance_level": 2
+  },
+  "m10013": {
+    "email": "user8@teste.com",
+    "departments": ["SP-DP"],
+    "clearance_level": 4
+  },
+  "m10014": {
+    "email": "user9@teste.com",
+    "departments": ["COMNAV"],
+    "clearance_level": 1
+  },
+  "m10015": {
+    "email": "user10@teste.com",
+    "departments": ["COMNAV"],
+    "clearance_level": 3
+  },
+  "m10016": {
+    "email": "user11@teste.com",
+    "departments": ["EMA"],
+    "clearance_level": 2
+  },
+  "m10017": {
+    "email": "user12@teste.com",
+    "departments": ["EMA"],
+    "clearance_level": 4
+  },
+  "m10018": {
+    "email": "user13@teste.com",
+    "departments": ["SI-DAGI", "SI-DITIC"],
+    "clearance_level": 2
+  },
+  "m10019": {
+    "email": "user14@teste.com",
+    "departments": ["SI-DITIC", "COMNAV"],
+    "clearance_level": 3
+  },
+  "m10020": {
+    "email": "user15@teste.com",
+    "departments": [],
+    "clearance_level": 1
   }
 }

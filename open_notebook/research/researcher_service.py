@@ -1748,15 +1748,40 @@ def get_tone_info() -> List[Dict[str, str]]:
     ]
 
 
-def get_source_info() -> List[Dict[str, str]]:
-    """Return metadata about available report sources for the UI."""
+# Report sources that reach the public internet. On a closed LAN these cannot
+# work, so the API marks them unavailable and the UI disables them.
+INTERNET_REPORT_SOURCES = frozenset({"web", "hybrid"})
+
+
+def get_source_info() -> List[Dict[str, Any]]:
+    """Return metadata about available report sources for the UI.
+
+    ``requires_internet`` lets the caller gate options on connectivity; see
+    ``api/routers/research.py::get_sources``.
+    """
     return [
-        {"value": "web", "label": "Web", "description": "Search and scrape content from the web"},
-        {"value": "local", "label": "Local Documents", "description": "Use local documents and files"},
-        {"value": "hybrid", "label": "Hybrid", "description": "Combine web and local sources"},
+        {
+            "value": "web",
+            "label": "Web",
+            "description": "Search and scrape content from the web",
+            "requires_internet": True,
+        },
+        {
+            "value": "local",
+            "label": "Local Documents",
+            "description": "Use local documents and files",
+            "requires_internet": False,
+        },
+        {
+            "value": "hybrid",
+            "label": "Hybrid",
+            "description": "Combine web and local sources",
+            "requires_internet": True,
+        },
         {
             "value": "langchain_vectorstore",
             "label": "Vector Store",
             "description": "Use vector store for retrieval (e.g., OpenSearch)",
+            "requires_internet": False,
         },
     ]

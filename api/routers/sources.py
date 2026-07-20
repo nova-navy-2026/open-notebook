@@ -100,9 +100,8 @@ async def _authorize_source_access(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    if _is_admin_request(request):
-        return source
-
+    # No blanket admin bypass here: the assert_can_* helpers below grant admins
+    # access only to sources flagged as dangerous.
     owner = getattr(source, "owner", None)
     user_id = getattr(request.state, "user_id", "anonymous")
 
@@ -307,10 +306,11 @@ async def get_sources(
                 status_code=400, detail="sort_order must be 'asc' or 'desc'"
             )
 
-        # Fail-closed: admins see every source; regular users see ONLY their own.
-        # Ownerless/legacy sources are not public.
-        is_admin = bool(request is not None and _is_admin_request(request))
-        owner_filter_clause = "" if is_admin else "WHERE owner = $owner"
+        # Fail-closed: every caller — admins included — sees ONLY their own
+        # sources. Ownerless/legacy sources are not public. Admins do not get a
+        # blanket view here; they reach user content solely through flagged
+        # items (see api/routers/flags.py).
+        owner_filter_clause = "WHERE owner = $owner"
 
         # Build ORDER BY clause
         order_clause = f"ORDER BY {sort_by} {sort_order.upper()}"
@@ -360,9 +360,7 @@ async def get_sources(
                 LIMIT $limit START $offset
                 FETCH command
             """
-            params = {"limit": limit, "offset": offset}
-            if not is_admin:
-                params["owner"] = user_id
+            params = {"limit": limit, "offset": offset, "owner": user_id}
             result = await repo_query(query, params)
 
         # Convert result to response model
@@ -483,6 +481,20 @@ async def create_source(
             if not source_data.url:
                 raise HTTPException(
                     status_code=400, detail="URL is required for link type"
+                )
+            # Backstop for the UI gating: fetching a URL needs the public
+            # internet, which this LAN deployment usually lacks. Refuse with a
+            # clear message instead of hanging until the fetch times out.
+            from open_notebook.utils.connectivity import internet_available
+
+            if not await internet_available():
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Adding sources from a URL requires an internet "
+                        "connection, which is not available on this network. "
+                        "Upload the file directly or paste its text instead."
+                    ),
                 )
             content_state["url"] = source_data.url
         elif source_data.type == "upload":
@@ -1127,6 +1139,14 @@ async def delete_source(source_id: str, request: Request):
     try:
         source = await _authorize_source_access(
             source_id, request, mode="delete"
+        )
+
+        # Retain any flag on this source as evidence: the flag row and its
+        # snapshot survive the delete, we just record that the original is gone.
+        from open_notebook.domain.content_flag import ContentFlag
+
+        await ContentFlag.mark_original_deleted(
+            content_type="source", content_id=str(source.id)
         )
 
         await source.delete()

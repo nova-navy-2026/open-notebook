@@ -9,6 +9,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from api.auth import assert_owns, get_current_user_id
+from api.risk_scan import actor_context
+from api.routers.chat import _scan_chat_turn
 from api.chat_title import (
     DEFAULT_SESSION_TITLE,
     fallback_title,
@@ -586,6 +588,15 @@ async def send_message_to_source_chat(
 
         # Update session timestamp
         await session.save()
+
+        # Risk-scan the prompt; the reply is scanned inside the generator.
+        _scan_chat_turn(
+            full_session_id,
+            request.message,
+            "chat_message",
+            actor_context(http_request),
+            None,
+        )
 
         # Return streaming response
         return StreamingResponse(

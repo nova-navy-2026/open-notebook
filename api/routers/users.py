@@ -10,6 +10,10 @@ from open_notebook.domain.user import User
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+# The only roles this deployment recognises. "admin" is the single bootstrap
+# account (ADMIN_EMAIL); everyone else is "user".
+VALID_ROLES = {"admin", "user"}
+
 
 @router.get("")
 async def list_users(request: Request):
@@ -119,7 +123,16 @@ async def update_user_roles(user_id: str, request: Request):
             raise HTTPException(status_code=401, detail="Not authenticated")
 
         body = await request.json()
-        roles = body.get("roles", ["viewer"])
+        roles = body.get("roles", ["user"])
+
+        # Only two roles exist: "admin" and "user". Reject anything else so a
+        # stale client can't write a role the rest of the system won't honour.
+        invalid = [r for r in roles if r not in VALID_ROLES]
+        if not roles or invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid role(s): {invalid or roles}. Allowed: {sorted(VALID_ROLES)}",
+            )
 
         record_id = user_id if ":" in user_id else f"user:{user_id}"
         try:

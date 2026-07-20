@@ -127,9 +127,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             # behaviour (development / single-user only).
             if self.allow_anonymous:
                 logger.debug("ℹ️ ALLOW_ANONYMOUS set — allowing unauthenticated access")
-                request.state.user = {"id": "anonymous", "email": "anonymous", "roles": ["viewer"]}
+                request.state.user = {"id": "anonymous", "email": "anonymous", "roles": ["user"]}
                 request.state.user_id = "anonymous"
-                request.state.user_role = "viewer"
+                request.state.user_role = "user"
                 return await call_next(request)
             return JSONResponse(
                 status_code=401,

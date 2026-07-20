@@ -1,0 +1,9 @@
+-- Rollback migration 24: drop the content risk flagging table and restore the
+-- legacy editor/viewer roles seeded by migration 15.
+
+REMOVE TABLE IF EXISTS content_flag;
+
+DEFINE FIELD IF NOT EXISTS roles ON TABLE user TYPE array<string> DEFAULT ["viewer"];
+DELETE role WHERE name = "user";
+CREATE role SET name = "editor", description = "Can create and edit content", permissions = ["notebooks:read", "notebooks:write", "sources:read", "sources:write", "notes:read", "notes:write", "chat:access", "podcasts:manage"], is_default = true;
+CREATE role SET name = "viewer", description = "Read-only access", permissions = ["notebooks:read", "sources:read", "notes:read", "chat:access"], is_default = true;

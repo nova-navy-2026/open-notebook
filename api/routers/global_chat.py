@@ -20,13 +20,15 @@ import re
 import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user_id, get_navy_acl_user_id
+from api.risk_scan import actor_context
+from api.routers.chat import _scan_chat_turn
 from api.chat_title import (
     DEFAULT_SESSION_TITLE,
     fallback_title,
@@ -945,6 +947,7 @@ async def delete_global_chat_message(
 @router.post("/global-chat/execute", response_model=ExecuteGlobalChatResponse)
 async def execute_global_chat(
     request: ExecuteGlobalChatRequest,
+    http_request: Request,
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
     auth_user_id: str = Depends(get_current_user_id),
 ):
@@ -964,6 +967,9 @@ async def execute_global_chat(
             raise HTTPException(status_code=404, detail="Session not found")
         if not _session_belongs_to_user(session, auth_user_id):
             raise HTTPException(status_code=404, detail="Session not found")
+
+        risk_context = actor_context(http_request)
+        _scan_chat_turn(full_id, request.message, "chat_message", risk_context, None)
 
         # Build context from app uploads plus ACL-filtered Navy corpus.
         context = await _build_global_context(
@@ -1020,6 +1026,18 @@ async def execute_global_chat(
 
         messages = _serialize_chat_messages(result.get("messages", []))
 
+        # Scan the reply the model just produced (the last AI message).
+        for msg in reversed(messages):
+            msg_type = msg.get("type") if isinstance(msg, dict) else getattr(msg, "type", None)
+            if msg_type in ("ai", "assistant"):
+                content = (
+                    msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+                )
+                _scan_chat_turn(
+                    full_id, content or "", "assistant_message", risk_context, None
+                )
+                break
+
         context_stats = {
             "sources_count": len(context.get("sources", [])),
             "notes_count": 0,
@@ -1053,10 +1071,14 @@ async def _stream_global_chat_sse(
     model_override: Optional[str],
     agent_instruction: Optional[str] = None,
     app_language: Optional[str] = None,
+    risk_context: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
     """Wrap ``astream_chat_response`` as Server-Sent Events for global chat."""
     yield f"data: {json.dumps({'type': 'user_message', 'content': user_message})}\n\n"
     yield f"data: {json.dumps({'type': 'context_stats', 'data': context_stats})}\n\n"
+
+    # Risk-scan the prompt out-of-band; the stream must not wait on it.
+    _scan_chat_turn(session_id, user_message, "chat_message", risk_context, None)
     try:
         async for event in astream_chat_response(
             session_id=session_id,
@@ -1067,6 +1089,14 @@ async def _stream_global_chat_sse(
             app_language=app_language,
             documents=context_stats.get("documents"),
         ):
+            if event.get("type") == "complete":
+                _scan_chat_turn(
+                    session_id,
+                    event.get("content") or "",
+                    "assistant_message",
+                    risk_context,
+                    None,
+                )
             yield f"data: {json.dumps(event)}\n\n"
     except Exception as e:
         logger.error(f"Error in global chat stream: {e}\n{traceback.format_exc()}")
@@ -1076,6 +1106,7 @@ async def _stream_global_chat_sse(
 @router.post("/global-chat/execute/stream")
 async def execute_global_chat_stream(
     request: ExecuteGlobalChatRequest,
+    http_request: Request,
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
     auth_user_id: str = Depends(get_current_user_id),
 ):
@@ -1130,6 +1161,8 @@ async def execute_global_chat_stream(
             model_override=model_override,
             agent_instruction=request.agent_instruction,
             app_language=request.app_language,
+            # Captured now: the generator runs after the request scope ends.
+            risk_context=actor_context(http_request),
         ),
         media_type="text/event-stream",
         headers={

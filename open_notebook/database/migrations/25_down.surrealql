@@ -1,0 +1,8 @@
+-- Rollback migration 25: drop the evidence-preservation fields.
+-- NOTE: this destroys any snapshotted evidence for content the user has
+-- already deleted — it cannot be recovered afterwards.
+
+REMOVE FIELD IF EXISTS content_snapshot ON TABLE content_flag;
+REMOVE FIELD IF EXISTS conversation_snapshot ON TABLE content_flag;
+REMOVE FIELD IF EXISTS original_deleted ON TABLE content_flag;
+REMOVE FIELD IF EXISTS original_deleted_at ON TABLE content_flag;

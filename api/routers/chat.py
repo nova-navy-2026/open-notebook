@@ -1,9 +1,10 @@
 import asyncio
 import json
+import time
 import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
@@ -15,6 +16,7 @@ from api.chat_title import (
     fallback_title,
     generate_session_title,
 )
+from api.risk_scan import actor_context, scan_request_text
 from open_notebook.ai.vision import is_visual_mime
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Note, Notebook, Source
@@ -554,6 +556,14 @@ async def delete_session(
             raise HTTPException(status_code=404, detail="Session not found")
         await _ensure_session_access(full_session_id, user_id)
 
+        # Retain any flags on this conversation as evidence. The flag rows and
+        # their snapshots survive; we only record that the user deleted the
+        # original. This runs BEFORE the delete so the marking still happens
+        # even if deletion then fails.
+        from open_notebook.domain.content_flag import ContentFlag
+
+        await ContentFlag.mark_original_deleted(session_id=full_session_id)
+
         await session.delete()
 
         return SuccessResponse(success=True, message="Session deleted successfully")
@@ -567,6 +577,7 @@ async def delete_session(
 @router.post("/chat/execute", response_model=ExecuteChatResponse)
 async def execute_chat(
     request: ExecuteChatRequest,
+    http_request: Request,
     user_id: str = Depends(get_current_user_id),
 ):
     """Execute a chat request and get AI response."""
@@ -577,7 +588,16 @@ async def execute_chat(
         session = await ChatSession.get(full_session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        await _ensure_session_access(full_session_id, user_id)
+        notebook_id = await _ensure_session_access(full_session_id, user_id)
+
+        risk_context = actor_context(http_request)
+        _scan_chat_turn(
+            full_session_id,
+            request.message,
+            "chat_message",
+            risk_context,
+            notebook_id,
+        )
 
         # Determine model override (per-request override takes precedence over session-level)
         model_override = (
@@ -636,6 +656,18 @@ async def execute_chat(
                 )
             )
 
+        # Scan the reply the model just produced (the last AI message).
+        for msg in reversed(messages):
+            if msg.type in ("ai", "assistant"):
+                _scan_chat_turn(
+                    full_session_id,
+                    msg.content or "",
+                    "assistant_message",
+                    risk_context,
+                    notebook_id,
+                )
+                break
+
         return ExecuteChatResponse(session_id=request.session_id, messages=messages)
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -650,6 +682,33 @@ async def execute_chat(
         raise HTTPException(status_code=500, detail=f"Error executing chat: {str(e)}")
 
 
+def _scan_chat_turn(
+    session_id: str,
+    text: str,
+    content_type: str,
+    risk_context: Optional[Dict[str, Any]],
+    notebook_id: Optional[str],
+) -> None:
+    """Queue a risk scan for one chat turn.
+
+    ``content_id`` is ``<session_id>#<role>:<epoch_ms>`` so each turn gets a
+    distinct flag row and the admin can locate it inside the conversation.
+    """
+    if not (text or "").strip():
+        return
+    stamp = int(time.time() * 1000)
+    role = "user" if content_type == "chat_message" else "assistant"
+    scan_request_text(
+        None,
+        text,
+        content_type,
+        f"{session_id}#{role}:{stamp}",
+        session_id=session_id,
+        notebook_id=notebook_id,
+        **(risk_context or {}),
+    )
+
+
 async def _stream_chat_sse(
     session_id: str,
     user_message: str,
@@ -657,10 +716,17 @@ async def _stream_chat_sse(
     model_override: Optional[str],
     agent_instruction: Optional[str] = None,
     app_language: Optional[str] = None,
+    risk_context: Optional[Dict[str, Any]] = None,
+    notebook_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Wrap ``astream_chat_response`` as Server-Sent Events."""
     # Echo user message first so the client can confirm receipt
     yield f"data: {json.dumps({'type': 'user_message', 'content': user_message})}\n\n"
+
+    # Risk-scan the prompt out-of-band; the stream must not wait on it.
+    _scan_chat_turn(
+        session_id, user_message, "chat_message", risk_context, notebook_id
+    )
     try:
         async for event in astream_chat_response(
             session_id=session_id,
@@ -670,6 +736,16 @@ async def _stream_chat_sse(
             prompt_template="chat/system",
             app_language=app_language,
         ):
+            # The terminal "complete" event carries the full reply — scan that
+            # rather than reassembling deltas.
+            if event.get("type") == "complete":
+                _scan_chat_turn(
+                    session_id,
+                    event.get("content") or "",
+                    "assistant_message",
+                    risk_context,
+                    notebook_id,
+                )
             yield f"data: {json.dumps(event)}\n\n"
     except Exception as e:
         logger.error(f"Error in chat stream: {e}\n{traceback.format_exc()}")
@@ -679,6 +755,7 @@ async def _stream_chat_sse(
 @router.post("/chat/execute/stream")
 async def execute_chat_stream(
     request: ExecuteChatRequest,
+    http_request: Request,
     user_id: str = Depends(get_current_user_id),
 ):
     """Execute a chat request with token-by-token SSE streaming."""
@@ -686,7 +763,7 @@ async def execute_chat_stream(
     session = await ChatSession.get(full_session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    await _ensure_session_access(full_session_id, user_id)
+    notebook_id = await _ensure_session_access(full_session_id, user_id)
 
     model_override = (
         request.model_override
@@ -697,6 +774,10 @@ async def execute_chat_stream(
     # Update session timestamp
     await session.save()
 
+    # Capture identity now: the generator runs after the request scope ends,
+    # so request.state is no longer safe to read from inside it.
+    risk_context = actor_context(http_request)
+
     return StreamingResponse(
         _stream_chat_sse(
             session_id=full_session_id,
@@ -705,6 +786,8 @@ async def execute_chat_stream(
             model_override=model_override,
             agent_instruction=request.agent_instruction,
             app_language=request.app_language,
+            risk_context=risk_context,
+            notebook_id=notebook_id,
         ),
         media_type="text/event-stream",
         headers={

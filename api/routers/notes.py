@@ -6,6 +6,7 @@ from loguru import logger
 from api.auth import get_current_user_id
 from api.collaboration_access import assert_can_read_note
 from api.models import NoteCreate, NoteResponse, NoteUpdate
+from api.risk_scan import scan_request_text
 from open_notebook.domain.notebook import Note
 from open_notebook.exceptions import InvalidInputError
 
@@ -126,6 +127,15 @@ async def create_note(
                     f"{note_data.research_id}: {exc}"
                 )
 
+        scan_request_text(
+            request,
+            new_note.content or "",
+            "note",
+            str(new_note.id),
+            title=new_note.title,
+            notebook_id=note_data.notebook_id,
+        )
+
         return NoteResponse(
             id=new_note.id or "",
             title=new_note.title,
@@ -196,6 +206,16 @@ async def update_note(note_id: str, note_update: NoteUpdate, request: Request):
 
         command_id = await note.save()
 
+        # Re-scan on edit: a note can turn dangerous after it was created.
+        if note_update.content is not None:
+            scan_request_text(
+                request,
+                note.content or "",
+                "note",
+                str(note.id),
+                title=note.title,
+            )
+
         return NoteResponse(
             id=note.id or "",
             title=note.title,
@@ -224,6 +244,14 @@ async def delete_note(note_id: str, request: Request):
         # Shared notes are readable and editable by every member of a
         # collaborative notebook they belong to (joint curation).
         await assert_can_read_note(getattr(note, "owner", None), note_id, request)
+
+        # Retain any flag on this note as evidence: the flag row and its
+        # snapshot survive the delete, we just record that the original is gone.
+        from open_notebook.domain.content_flag import ContentFlag
+
+        await ContentFlag.mark_original_deleted(
+            content_type="note", content_id=str(note.id)
+        )
 
         await note.delete()
 

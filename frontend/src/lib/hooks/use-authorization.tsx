@@ -122,7 +122,6 @@ export function useAuthorization() {
     hasRole,
     hasPermission,
     isAdmin: hasRole("admin"),
-    isEditor: hasRole("editor"),
-    isViewer: hasRole("viewer"),
+    isUser: hasRole("user"),
   };
 }

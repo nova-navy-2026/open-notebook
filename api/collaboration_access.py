@@ -13,6 +13,7 @@ we never reveal that a resource the caller can't reach exists.
 from typing import List, Optional
 
 from fastapi import HTTPException, Request
+from loguru import logger
 
 from api.auth import is_admin
 from open_notebook.database.repository import ensure_record_id, repo_query
@@ -21,6 +22,43 @@ from open_notebook.domain.collaboration import get_member_notebook_ids
 
 def _user_id(request: Request) -> str:
     return getattr(request.state, "user_id", "anonymous")
+
+
+async def _admin_may_access(
+    request: Request, content_type: str, content_id: str
+) -> bool:
+    """True when an admin may reach this specific item.
+
+    Admins deliberately do NOT get blanket access to user content. Their reach
+    is limited to items the risk classifier flagged as dangerous — see
+    ``open_notebook.domain.content_flag``. Anything unflagged stays private to
+    its owner, including from the admin.
+    """
+    if not is_admin(request):
+        return False
+    try:
+        from open_notebook.domain.content_flag import ContentFlag
+
+        return await ContentFlag.is_flagged(content_type, str(content_id))
+    except Exception as e:  # noqa: BLE001
+        # Fail closed: if we cannot prove the item is flagged, deny.
+        logger.error(f"[risk] flag lookup failed for {content_type} {content_id}: {e}")
+        return False
+
+
+async def _admin_may_access_notebook(request: Request, notebook_id: str) -> bool:
+    """True when an admin may open a notebook — i.e. it holds flagged content."""
+    if not is_admin(request):
+        return False
+    try:
+        rows = await repo_query(
+            "SELECT VALUE id FROM content_flag WHERE notebook_id = $nb LIMIT 1",
+            {"nb": str(notebook_id)},
+        )
+        return bool(rows)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[risk] notebook flag lookup failed for {notebook_id}: {e}")
+        return False
 
 
 async def user_member_notebook_ids(user_id: str) -> List[str]:
@@ -49,14 +87,14 @@ async def _resource_in_member_notebook(
 async def assert_can_read_notebook(
     notebook_owner: Optional[str], notebook_id: str, request: Request
 ) -> None:
-    """Allow owner, admin, or any member of the notebook to read it."""
-    if is_admin(request):
-        return
+    """Allow owner or member; admins only when it contains flagged content."""
     user_id = _user_id(request)
     if notebook_owner is not None and notebook_owner == user_id:
         return
     member_ids = await user_member_notebook_ids(user_id)
     if str(notebook_id) in member_ids:
+        return
+    if await _admin_may_access_notebook(request, notebook_id):
         return
     raise HTTPException(status_code=404, detail="Notebook not found")
 
@@ -64,14 +102,14 @@ async def assert_can_read_notebook(
 async def assert_can_read_source(
     source_owner: Optional[str], source_id: str, request: Request
 ) -> None:
-    """Allow owner, admin, or a member of a notebook containing the source."""
-    if is_admin(request):
-        return
+    """Allow owner or member; admins only when the source is flagged."""
     user_id = _user_id(request)
     if source_owner is not None and source_owner == user_id:
         return
     member_ids = await user_member_notebook_ids(user_id)
     if await _resource_in_member_notebook(source_id, "reference", member_ids):
+        return
+    if await _admin_may_access(request, "source", source_id):
         return
     raise HTTPException(status_code=404, detail="Source not found")
 
@@ -102,13 +140,14 @@ async def assert_can_edit_source(
 
     Members of a shared notebook who did NOT create the source cannot edit it,
     but the notebook owner can curate any source contributed to their notebook.
+    Admins may act only on sources flagged as dangerous.
     """
-    if is_admin(request):
-        return
     user_id = _user_id(request)
     if source_owner is not None and source_owner == user_id:
         return
     if user_id in await _notebook_owners_referencing(source_id, "reference"):
+        return
+    if await _admin_may_access(request, "source", source_id):
         return
     raise HTTPException(status_code=404, detail="Source not found")
 
@@ -123,9 +162,10 @@ async def assert_can_delete_source(
     - The source creator may delete their own source ONLY while it is not shared
       into a notebook owned by someone else (i.e. it is still effectively
       private to them).
+    - An admin may delete a source flagged as dangerous (moderation).
     - Everyone else (including members of a shared notebook) is denied.
     """
-    if is_admin(request):
+    if await _admin_may_access(request, "source", source_id):
         return
     user_id = _user_id(request)
     owners = await _notebook_owners_referencing(source_id, "reference")
@@ -143,13 +183,13 @@ async def assert_can_delete_source(
 async def assert_can_read_note(
     note_owner: Optional[str], note_id: str, request: Request
 ) -> None:
-    """Allow owner, admin, or a member of a notebook containing the note."""
-    if is_admin(request):
-        return
+    """Allow owner or member; admins only when the note is flagged."""
     user_id = _user_id(request)
     if note_owner is not None and note_owner == user_id:
         return
     member_ids = await user_member_notebook_ids(user_id)
     if await _resource_in_member_notebook(note_id, "artifact", member_ids):
+        return
+    if await _admin_may_access(request, "note", note_id):
         return
     raise HTTPException(status_code=404, detail="Note not found")

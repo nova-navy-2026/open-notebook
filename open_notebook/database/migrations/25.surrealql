@@ -1,0 +1,23 @@
+-- Migration 25: preserve flagged content as evidence
+--
+-- A content_flag row already survives deletion of the underlying record
+-- (content_id/session_id are plain strings, not record links, so nothing
+-- cascades). What did NOT survive was the *body*: the flag viewer read the
+-- live conversation back from LangGraph state and the document from the
+-- source/note record, so a user deleting their chat or upload erased the
+-- evidence the admin needed.
+--
+-- These fields snapshot the content at flag time, so the admin keeps the
+-- evidence regardless of what the user does afterwards.
+
+-- Full text of the flagged item (the `excerpt` field stays the short snippet).
+DEFINE FIELD IF NOT EXISTS content_snapshot ON TABLE content_flag TYPE option<string>;
+
+-- Conversation transcript at flag time, stored as a JSON string
+-- ([{"type": "human"|"ai", "content": "..."}, ...]). Stored as text rather
+-- than a nested array so the SCHEMAFULL table needs no per-key definitions.
+DEFINE FIELD IF NOT EXISTS conversation_snapshot ON TABLE content_flag TYPE option<string>;
+
+-- Set when the user later deletes the original chat session / source / note.
+DEFINE FIELD IF NOT EXISTS original_deleted ON TABLE content_flag TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS original_deleted_at ON TABLE content_flag TYPE option<datetime>;

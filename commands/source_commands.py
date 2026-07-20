@@ -18,6 +18,33 @@ except ImportError as e:
     raise ValueError("graphs not available")
 
 
+async def _scan_source_for_risk(source, notebook_ids: List[str]) -> None:
+    """Classify a processed source's text and flag it if dangerous.
+
+    Awaited rather than fired-and-forgotten: this already runs inside a
+    background job, so blocking briefly is fine and guarantees the scan
+    actually completes before the worker moves on. Never raises.
+    """
+    try:
+        from open_notebook.safety import identity_for_owner, scan_and_flag
+
+        text = getattr(source, "full_text", None) or ""
+        if not text.strip():
+            return
+
+        identity = await identity_for_owner(getattr(source, "owner", None))
+        await scan_and_flag(
+            text,
+            "source",
+            str(source.id),
+            title=getattr(source, "title", None),
+            notebook_id=notebook_ids[0] if notebook_ids else None,
+            **identity,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[risk] source scan failed for {getattr(source, 'id', '?')}: {e}")
+
+
 def full_model_dump(model):
     if isinstance(model, BaseModel):
         return model.model_dump()
@@ -132,6 +159,10 @@ async def process_source_command(
         # the actual count when it finishes.
         insights_list = await processed_source.get_insights()
         insights_created = len(insights_list)
+
+        # 5. Risk-scan the extracted text. Runs here (not at upload time)
+        # because this is where the full extracted content first exists.
+        await _scan_source_for_risk(processed_source, input_data.notebook_ids)
 
         processing_time = time.time() - start_time
         embed_status = "submitted" if input_data.embed else "skipped"

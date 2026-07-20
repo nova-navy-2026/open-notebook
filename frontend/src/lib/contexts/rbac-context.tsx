@@ -7,8 +7,7 @@ interface RBACContextType {
   hasRole: (role: UserRole) => boolean;
   hasPermission: (permission: string) => boolean;
   isAdmin: boolean;
-  isEditor: boolean;
-  isViewer: boolean;
+  isUser: boolean;
   userRoles: UserRole[];
 }
 
@@ -25,8 +24,7 @@ export function RBACProvider({ children }: { children: React.ReactNode }) {
     hasRole: storeHasRole,
     hasPermission: storeHasPermission,
     isAdmin: storeHasRole("admin"),
-    isEditor: storeHasRole("editor"),
-    isViewer: storeHasRole("viewer"),
+    isUser: storeHasRole("user"),
     userRoles: user?.roles || [],
   };
 

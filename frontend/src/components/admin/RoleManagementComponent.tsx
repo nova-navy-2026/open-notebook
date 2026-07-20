@@ -54,7 +54,7 @@ export function RoleManagementComponent() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserWithRoles | null>(null);
-  const [selectedRole, setSelectedRole] = useState<UserRole>("viewer");
+  const [selectedRole, setSelectedRole] = useState<UserRole>("user");
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredUsers = users.filter(
@@ -240,11 +240,8 @@ export function RoleManagementComponent() {
                                         <SelectItem value="admin">
                                           Admin
                                         </SelectItem>
-                                        <SelectItem value="editor">
-                                          Editor
-                                        </SelectItem>
-                                        <SelectItem value="viewer">
-                                          Viewer
+                                        <SelectItem value="user">
+                                          User
                                         </SelectItem>
                                       </SelectContent>
                                     </Select>

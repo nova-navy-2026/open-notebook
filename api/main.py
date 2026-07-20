@@ -34,6 +34,7 @@ from open_notebook.exceptions import (
 from api.routers import (
     auth,
     audit,
+    capabilities,
     chat,
     chat_agents,
     charts,
@@ -45,6 +46,7 @@ from api.routers import (
     embedding,
     embedding_rebuild,
     episode_profiles,
+    flags,
     global_chat,
     health,
     insights,
@@ -603,6 +605,8 @@ app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(permissions.router, prefix="/api", tags=["permissions"])
 app.include_router(audit.router, prefix="/api", tags=["audit"])
+app.include_router(flags.router, prefix="/api", tags=["flags"])
+app.include_router(capabilities.router, prefix="/api", tags=["capabilities"])
 app.include_router(
     opensearch.router, prefix="/api/opensearch", tags=["opensearch"]
 )

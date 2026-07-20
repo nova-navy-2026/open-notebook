@@ -24,8 +24,7 @@ interface PermissionSet {
 
 interface RolePermissions {
   admin: string[];
-  editor: string[];
-  viewer: string[];
+  user: string[];
 }
 
 const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
@@ -38,8 +37,7 @@ const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
     "view-audit",
     "export-audit",
   ],
-  editor: ["read", "write", "delete-own", "search", "view-shared"],
-  viewer: ["read", "search", "view-shared"],
+  user: ["read", "write", "delete-own", "search", "view-shared"],
 };
 
 export function PermissionsManagementComponent() {
@@ -59,8 +57,7 @@ export function PermissionsManagementComponent() {
         const data = response.data;
         setPermissions({
           admin: data?.admin ?? DEFAULT_ROLE_PERMISSIONS.admin,
-          editor: data?.editor ?? DEFAULT_ROLE_PERMISSIONS.editor,
-          viewer: data?.viewer ?? DEFAULT_ROLE_PERMISSIONS.viewer,
+          user: data?.user ?? DEFAULT_ROLE_PERMISSIONS.user,
         });
         setError(null);
       } catch (err) {
@@ -75,7 +72,7 @@ export function PermissionsManagementComponent() {
   }, []);
 
   const handlePermissionChange = (
-    role: "admin" | "editor" | "viewer",
+    role: "admin" | "user",
     permission: string,
     checked: boolean,
   ) => {
@@ -149,15 +146,14 @@ export function PermissionsManagementComponent() {
         )}
 
         <ScrollArea className="border rounded-lg p-4">
-          <div className="grid md:grid-cols-3 gap-6">
-            {(["admin", "editor", "viewer"] as const).map((role) => (
+          <div className="grid md:grid-cols-2 gap-6">
+            {(["admin", "user"] as const).map((role) => (
               <div key={role} className="border rounded-lg p-4 space-y-3">
                 <div>
                   <h3 className="font-semibold capitalize">{role}</h3>
                   <p className="text-xs text-muted-foreground">
                     {role === "admin" && "Full system access"}
-                    {role === "editor" && "Can create and modify"}
-                    {role === "viewer" && "Read-only access"}
+                    {role === "user" && "Can create and modify own content"}
                   </p>
                 </div>
 

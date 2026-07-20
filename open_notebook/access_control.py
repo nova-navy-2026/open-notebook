@@ -234,17 +234,16 @@ def build_opensearch_filter(
 
     * Returns ``None`` when access control is disabled — NOVA-Researcher
       will then run an unfiltered kNN query.
-    * Returns ``None`` when ``user_id`` is ``"__admin__"`` — admins bypass
-      ACL entirely and see every document.
     * Returns a fail-closed clause (matches nothing) when ``user_id`` is
-      missing or unknown.
+      missing, unknown, or ``"__admin__"``.
     * Otherwise returns the clearance + department clause.
+
+    NOTE: ``"__admin__"`` deliberately fails CLOSED. Admins have no blanket
+    access to user content, and the navy corpus is read-only material the risk
+    classifier never scans — so there is nothing in it an admin is entitled to
+    see. (This was an unfiltered bypass before 2026-07-20.)
     """
     if not access_enabled():
-        return None
-
-    # Admin bypass — no filter applied, all documents visible.
-    if user_id == "__admin__":
         return None
 
     user = get_user(user_id)
@@ -324,10 +323,8 @@ def is_document_allowed(
     if not access_enabled():
         return True
 
-    # Admin bypass.
-    if user_id == "__admin__":
-        return True
-
+    # No admin bypass: "__admin__" is not a known user, so it falls through to
+    # the fail-closed branch below. See build_opensearch_filter.
     user = get_user(user_id)
     if not user:
         return False
