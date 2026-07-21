@@ -89,7 +89,7 @@ export const globalChatApi = {
     return response.data
   },
 
-  sendMessage: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
+  sendMessage: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string; attached_document_name?: string; attached_document_text?: string }) => {
     const response = await apiClient.post<{
       session_id: string
       messages: NotebookChatMessage[]
@@ -101,7 +101,7 @@ export const globalChatApi = {
     return response.data
   },
 
-  sendMessageStream: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string }) => {
+  sendMessageStream: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string; attached_document_name?: string; attached_document_text?: string }) => {
     let token: string | null = null
     if (typeof window !== 'undefined') {
       const authStorage = localStorage.getItem('auth-storage')
@@ -123,6 +123,37 @@ export const globalChatApi = {
     const streamUrl = apiBase
       ? `${apiBase}/api/global-chat/execute/stream`
       : `/api/global-chat/execute/stream`
+    const response = await fetch(streamUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    return response.body
+  },
+
+  regenerateStream: async (data: { session_id: string; message: string; model_override?: string; agent_instruction?: string; app_language?: string; remove_message_ids?: string[] }) => {
+    let token: string | null = null
+    if (typeof window !== 'undefined') {
+      const authStorage = localStorage.getItem('auth-storage')
+      if (authStorage) {
+        try {
+          const { state } = JSON.parse(authStorage)
+          if (state?.token) token = state.token
+        } catch (error) {
+          console.error('Error parsing auth storage:', error)
+        }
+      }
+    }
+    const apiBase = await getApiUrl()
+    const streamUrl = apiBase
+      ? `${apiBase}/api/global-chat/regenerate/stream`
+      : `/api/global-chat/regenerate/stream`
     const response = await fetch(streamUrl, {
       method: 'POST',
       headers: {

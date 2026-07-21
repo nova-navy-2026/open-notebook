@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Image as ImageIcon, Upload, Loader2, X, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { IMAGE_ACCEPT } from "@/lib/utils/agent-file-types";
 
 import { useImageAnalysisStore } from "@/lib/stores/vision-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
@@ -134,7 +135,7 @@ export default function ImageAnalysisPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={IMAGE_ACCEPT}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) handleImageSelect(file);

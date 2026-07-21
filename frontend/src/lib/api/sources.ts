@@ -109,6 +109,25 @@ export const sourcesApi = {
     return response.data
   },
 
+  /**
+   * Extract plain text from a document (PDF/DOCX/PPTX/…) without creating a
+   * Source. Used by the chat attach button to fold a document's text into the
+   * conversation context.
+   */
+  extractText: async (
+    file: File,
+  ): Promise<{ filename: string; text: string; chars: number; truncated: boolean }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await apiClient.post<{
+      filename: string
+      text: string
+      chars: number
+      truncated: boolean
+    }>('/sources/extract-text', formData)
+    return response.data
+  },
+
   retry: async (id: string) => {
     const response = await apiClient.post<SourceResponse>(
       `/sources/${encodeURIComponent(id)}/retry`

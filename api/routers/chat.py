@@ -99,6 +99,15 @@ class ExecuteChatRequest(BaseModel):
     )
 
 
+class RegenerateChatRequest(ExecuteChatRequest):
+    remove_message_ids: List[str] = Field(
+        default_factory=list,
+        description="Ids of the previous turn's messages (the old human + "
+        "assistant) to drop before re-answering, so the new answer replaces "
+        "the old one instead of appending a duplicate turn.",
+    )
+
+
 class ExecuteChatResponse(BaseModel):
     session_id: str = Field(..., description="Session ID")
     messages: List[ChatMessage] = Field(..., description="Updated message list")
@@ -776,6 +785,55 @@ async def execute_chat_stream(
 
     # Capture identity now: the generator runs after the request scope ends,
     # so request.state is no longer safe to read from inside it.
+    risk_context = actor_context(http_request)
+
+    return StreamingResponse(
+        _stream_chat_sse(
+            session_id=full_session_id,
+            user_message=request.message,
+            context=request.context,
+            model_override=model_override,
+            agent_instruction=request.agent_instruction,
+            app_language=request.app_language,
+            risk_context=risk_context,
+            notebook_id=notebook_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/chat/regenerate/stream")
+async def regenerate_chat_stream(
+    request: RegenerateChatRequest,
+    http_request: Request,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Re-answer the last question, replacing the previous assistant turn.
+
+    Drops the old human+assistant messages from the checkpoint, then streams a
+    fresh answer for the same question (SSE, same shape as /chat/execute/stream).
+    """
+    full_session_id = _full_session_id(request.session_id)
+    session = await ChatSession.get(full_session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    notebook_id = await _ensure_session_access(full_session_id, user_id)
+
+    model_override = (
+        request.model_override
+        if request.model_override is not None
+        else getattr(session, "model_override", None)
+    )
+
+    from open_notebook.graphs.chat import remove_chat_messages
+
+    await remove_chat_messages(full_session_id, request.remove_message_ids)
+    await session.save()
+
     risk_context = actor_context(http_request)
 
     return StreamingResponse(

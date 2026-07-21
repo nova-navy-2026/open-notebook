@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { navyDocsApi } from "@/lib/api/navy-docs";
 import { useTranslation } from "@/lib/hooks/use-translation";
+import { promptLanguageLabel } from "@/lib/utils/prompt-language";
 
 interface NavyDocViewerDialogProps {
   docId: string | null;
@@ -51,7 +52,7 @@ export function NavyDocViewerDialog({
   onOpenChange,
   classificationLabel,
 }: NavyDocViewerDialogProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const nd = t.navyDocs;
 
   const [tab, setTab] = useState<"content" | "insights" | "chat">("content");
@@ -88,8 +89,9 @@ export function NavyDocViewerDialog({
     isLoading: insightsLoading,
     isError: insightsError,
   } = useQuery({
-    queryKey: ["navy-doc-insights", docId],
-    queryFn: () => navyDocsApi.getInsights(docId as string),
+    queryKey: ["navy-doc-insights", docId, language],
+    queryFn: () =>
+      navyDocsApi.getInsights(docId as string, promptLanguageLabel(language)),
     // Only generate insights when the user opens that tab (it's an LLM call).
     enabled: open && !!docId && tab === "insights",
     staleTime: Infinity,

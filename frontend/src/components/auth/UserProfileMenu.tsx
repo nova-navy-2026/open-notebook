@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, User, Settings, Shield } from "lucide-react";
+import { LogOut, User, Shield } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { Button } from "@/components/ui/button";
@@ -79,13 +79,6 @@ export function UserProfileMenu() {
               Manage Roles
             </DropdownMenuItem>
           </>
-        )}
-
-        {isAdmin && (
-          <DropdownMenuItem onClick={() => router.push("/settings")}>
-            <Settings className="h-4 w-4 mr-2" />
-            Settings
-          </DropdownMenuItem>
         )}
 
         <DropdownMenuSeparator />

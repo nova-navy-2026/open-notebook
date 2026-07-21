@@ -195,6 +195,9 @@ export interface SourceChatMessage {
   // Documents used as context to produce this (assistant) message, surfaced as
   // a per-message "sources used" affordance.
   documents?: GlobalChatDocument[]
+  // A 1-2 sentence summary of the source context that informed this (assistant)
+  // message, shown as a collapsible note above the answer.
+  contextSummary?: string
 }
 
 export interface SourceChatContextIndicator {
@@ -246,6 +249,9 @@ export interface NotebookChatMessage {
   // Documents used as context to produce this (assistant) message, surfaced as
   // a per-message "sources used" affordance.
   documents?: GlobalChatDocument[]
+  // A 1-2 sentence summary of the source context that informed this (assistant)
+  // message, shown as a collapsible note above the answer.
+  contextSummary?: string
 }
 
 export interface ChatAttachment {

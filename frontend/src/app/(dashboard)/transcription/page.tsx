@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { AUDIO_ACCEPT } from "@/lib/utils/agent-file-types";
 import {
   AudioLines,
   Captions,
@@ -165,7 +166,8 @@ export default function TranscriptionPage() {
     if (capabilities?.allowed_extensions?.length) {
       return capabilities.allowed_extensions.join(",");
     }
-    return "audio/*,video/mp4,video/webm";
+    // Same set the transcription agent accepts in the chat clip button.
+    return AUDIO_ACCEPT;
   }, [capabilities]);
 
   const diarizationDisabled = capabilities?.diarization_available === false;

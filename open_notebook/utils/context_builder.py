@@ -81,6 +81,13 @@ class ContextBuilder:
         # Extract commonly used parameters
         self.source_id: Optional[str] = kwargs.get("source_id")
         self.notebook_id: Optional[str] = kwargs.get("notebook_id")
+        # How much of a single source to pull in: "insights" (short: title +
+        # insights only) or "full content" (also the full extracted text). The
+        # per-source chat needs the full text, otherwise the model only sees
+        # insights and — when a source has none — answers "no information".
+        self.source_inclusion_level: str = kwargs.get(
+            "source_inclusion_level", "insights"
+        )
         self.include_insights: bool = kwargs.get("include_insights", True)
         self.include_notes: bool = kwargs.get("include_notes", True)
         self.max_tokens: Optional[int] = kwargs.get("max_tokens")
@@ -117,7 +124,9 @@ class ContextBuilder:
 
             # Build context based on parameters
             if self.source_id:
-                await self._add_source_context(self.source_id)
+                await self._add_source_context(
+                    self.source_id, inclusion_level=self.source_inclusion_level
+                )
 
             if self.notebook_id:
                 await self._add_notebook_context(self.notebook_id)

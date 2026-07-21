@@ -54,6 +54,9 @@ def _call_model_with_source_context_inner(
             asyncio.set_event_loop(new_loop)
             context_builder = ContextBuilder(
                 source_id=source_id,
+                # Chatting *about* this document needs its full extracted text,
+                # not just insights — otherwise the model answers "no info".
+                source_inclusion_level="full content, insights",
                 include_insights=True,
                 include_notes=False,
                 max_tokens=50000,
@@ -233,6 +236,9 @@ async def astream_source_chat_response(
         # Build source context asynchronously — no thread-in-thread overhead.
         context_builder = ContextBuilder(
             source_id=source_id,
+            # Chatting *about* this document needs its full extracted text, not
+            # just insights — otherwise the model answers "no info".
+            source_inclusion_level="full content, insights",
             include_insights=True,
             include_notes=False,
             max_tokens=50000,

@@ -10,6 +10,7 @@ import { Video, Upload, Loader2, X, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { VIDEO_ACCEPT } from "@/lib/utils/agent-file-types";
 import { useVideoTrackingStore } from "@/lib/stores/vision-store";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { AddToNotebookDropdown } from "@/components/vision/AddToNotebookDropdown";
@@ -142,7 +143,7 @@ export default function VideoTrackingPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="video/*"
+              accept={VIDEO_ACCEPT}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) handleVideoSelect(file);

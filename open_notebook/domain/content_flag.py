@@ -26,6 +26,12 @@ RISK_CATEGORIES = (
     "illegal_misconduct",
 )
 
+# Category used when a *user* (not the classifier) reports an assistant answer
+# they disliked. It rides the same admin-oversight queue so the admin sees the
+# low-rated responses alongside classifier flags, but is filterable/labelled
+# distinctly. classifier_model is left null on these rows.
+USER_FEEDBACK_CATEGORY = "user_disliked"
+
 SEVERITIES = ("low", "medium", "high")
 
 # The kinds of content that get scanned.

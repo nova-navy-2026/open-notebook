@@ -49,6 +49,37 @@ const DATA_EXTENSIONS = new Set([
   'xlsx',
 ])
 
+// Text-bearing documents the chat can pull in as context via server-side
+// extraction (content_core). Excludes tabular data (handled by the data
+// profiler) and audio/image/video (handled by their own pipelines).
+const DOCUMENT_EXTENSIONS = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'ppt',
+  'pptx',
+  'rtf',
+  'odt',
+  'epub',
+  'md',
+  'markdown',
+  'html',
+  'htm',
+])
+
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/rtf',
+  'application/vnd.oasis.opendocument.text',
+  'application/epub+zip',
+  'text/markdown',
+  'text/html',
+])
+
 const DATA_MIME_TYPES = new Set([
   'text/csv',
   'text/tab-separated-values',
@@ -95,6 +126,16 @@ export function isVisualLikeFile(file?: File | null): file is File {
 export function isDataLikeFile(file?: File | null): file is File {
   if (!file) return false
   return DATA_MIME_TYPES.has(typeForFile(file)) || DATA_EXTENSIONS.has(extensionForName(file.name))
+}
+
+export function isDocumentLikeFile(file?: File | null): file is File {
+  if (!file) return false
+  const matchesDocument =
+    DOCUMENT_MIME_TYPES.has(typeForFile(file)) || DOCUMENT_EXTENSIONS.has(extensionForName(file.name))
+  if (!matchesDocument) return false
+  // Visual/audio/data files take priority — a document is anything text-bearing
+  // that isn't one of those.
+  return !(isVisualLikeFile(file) || isAudioLikeFile(file) || isDataLikeFile(file))
 }
 
 export function getAttachmentKind(file?: File | null): AttachmentKind {

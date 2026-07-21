@@ -46,6 +46,7 @@ from api.routers import (
     embedding,
     embedding_rebuild,
     episode_profiles,
+    feedback,
     flags,
     global_chat,
     health,
@@ -606,6 +607,7 @@ app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(permissions.router, prefix="/api", tags=["permissions"])
 app.include_router(audit.router, prefix="/api", tags=["audit"])
 app.include_router(flags.router, prefix="/api", tags=["flags"])
+app.include_router(feedback.router, prefix="/api", tags=["feedback"])
 app.include_router(capabilities.router, prefix="/api", tags=["capabilities"])
 app.include_router(
     opensearch.router, prefix="/api/opensearch", tags=["opensearch"]

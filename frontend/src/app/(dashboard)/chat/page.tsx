@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { globalChatApi } from "@/lib/api/global-chat";
+import { feedbackApi } from "@/lib/api/feedback";
 import { PageInfoButton } from "@/components/common/PageInfoButton";
 import {
   conversationsToDocx,
@@ -147,7 +148,7 @@ export default function GlobalChatPage() {
       {/* Two-column layout: persistent session sidebar (ChatGPT-style) + chat */}
       <div className="flex-1 min-h-0 flex gap-3">
         {sidebarOpen ? (
-          <div className="w-64 flex-shrink-0 flex flex-col rounded-lg border bg-card/40 min-h-0">
+          <div className="w-64 flex-shrink-0 flex flex-col rounded-lg border bg-muted/50 min-h-0">
             <div className="flex items-center justify-end px-2 pt-2">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -209,6 +210,20 @@ export default function GlobalChatPage() {
             onSendMessage={chat.sendMessage}
             onDeleteMessage={chat.deleteMessage}
             onReviseReport={chat.reviseReport}
+            onRegenerate={chat.regenerate}
+            onFeedbackDown={async (message) => {
+              const idx = chat.messages.findIndex((m) => m.id === message.id)
+              let question: string | undefined
+              for (let i = idx - 1; i >= 0; i--) {
+                if (chat.messages[i].type === 'human') { question = chat.messages[i].content; break }
+              }
+              await feedbackApi.reportResponse({
+                assistant_content: message.content,
+                user_question: question,
+                session_id: chat.currentSessionId ?? undefined,
+                surface: 'global_chat',
+              })
+            }}
             modelOverride={activeModelOverride}
             onModelChange={(model) => chat.setModelOverride(model ?? null)}
             title={t.common.chat ?? "Chat"}

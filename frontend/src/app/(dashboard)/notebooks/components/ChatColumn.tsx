@@ -12,6 +12,7 @@ import { AlertCircle, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { ContextSelections } from '../[id]/page'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { SourceListResponse } from '@/lib/types/api'
+import { feedbackApi } from '@/lib/api/feedback'
 
 interface ChatColumnProps {
   notebookId: string
@@ -152,6 +153,21 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
           contextIndicators={null}
           onSendMessage={(message, modelOverride, file, deepResearch, agentOptions) => chat.sendMessage(message, modelOverride, file, deepResearch, agentOptions)}
           onReviseReport={chat.reviseReport}
+          onRegenerate={chat.regenerate}
+          onFeedbackDown={async (message) => {
+            const idx = chat.messages.findIndex((m) => m.id === message.id)
+            let question: string | undefined
+            for (let i = idx - 1; i >= 0; i--) {
+              if (chat.messages[i].type === 'human') { question = chat.messages[i].content; break }
+            }
+            await feedbackApi.reportResponse({
+              assistant_content: message.content,
+              user_question: question,
+              session_id: chat.currentSessionId ?? undefined,
+              notebook_id: notebookId,
+              surface: 'notebook_chat',
+            })
+          }}
           modelOverride={chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined}
           onModelChange={(model) => chat.setModelOverride(model ?? null)}
           notebookContextStats={contextStats}

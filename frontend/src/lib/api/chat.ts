@@ -121,6 +121,39 @@ export const chatApi = {
     return response.body
   },
 
+  regenerateStream: async (
+    data: SendNotebookChatMessageRequest & { remove_message_ids?: string[] },
+  ) => {
+    let token: string | null = null
+    if (typeof window !== 'undefined') {
+      const authStorage = localStorage.getItem('auth-storage')
+      if (authStorage) {
+        try {
+          const { state } = JSON.parse(authStorage)
+          if (state?.token) token = state.token
+        } catch (error) {
+          console.error('Error parsing auth storage:', error)
+        }
+      }
+    }
+    const apiBase = await getApiUrl()
+    const streamUrl = apiBase
+      ? `${apiBase}/api/chat/regenerate/stream`
+      : `/api/chat/regenerate/stream`
+    const response = await fetch(streamUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    return response.body
+  },
+
   buildContext: async (data: BuildContextRequest) => {
     const response = await apiClient.post<BuildContextResponse>(
       `/chat/context`,

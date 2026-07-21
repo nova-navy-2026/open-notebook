@@ -16,6 +16,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, Response
 from loguru import logger
+from pydantic import BaseModel
 from surreal_commands import execute_command_sync, submit_command
 
 from api.command_service import CommandService
@@ -186,6 +187,125 @@ async def read_upload_file(upload_file: UploadFile) -> Tuple[bytes, str, str]:
         f"({file_size / 1024:.1f} KB, {mime_type})"
     )
     return file_bytes, upload_file.filename, mime_type
+
+
+# Document types the chat "attach" button can pull in as inline context. These
+# are text-bearing documents that content_core can extract without a GPU (unlike
+# images/video, which go through the vision pipeline, and audio, which goes
+# through Whisper). Kept in sync with the chat file picker on the frontend.
+CHAT_DOCUMENT_EXTENSIONS = {
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".ppt",
+    ".pptx",
+    ".xls",
+    ".xlsx",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".rtf",
+    ".odt",
+    ".epub",
+    ".html",
+    ".htm",
+}
+
+# Cap the returned text so a huge deck/PDF can't blow up the chat prompt.
+MAX_EXTRACTED_CHARS = 60000
+
+
+class ExtractTextResponse(BaseModel):
+    filename: str
+    text: str
+    chars: int
+    truncated: bool
+
+
+@router.post("/sources/extract-text", response_model=ExtractTextResponse)
+async def extract_text(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Extract plain text from an uploaded document without creating a Source.
+
+    Used by the chat "attach" button so a user can drop a PDF/DOCX/PPTX/etc.
+    into a conversation and have its text folded into the chat context. No
+    record is persisted; the temp file is deleted before returning.
+    """
+    import tempfile
+
+    filename = file.filename or "document"
+    ext = Path(filename).suffix.lower()
+    if ext not in CHAT_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported document type '{ext}'. Allowed: "
+                f"{', '.join(sorted(CHAT_DOCUMENT_EXTENSIONS))}"
+            ),
+        )
+
+    try:
+        file_bytes, filename, _mime = await read_upload_file(file)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    tmp_dir = tempfile.mkdtemp(prefix="onb_extract_")
+    tmp_path = os.path.join(tmp_dir, os.path.basename(filename) or f"document{ext}")
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(file_bytes)
+
+        from content_core import extract_content
+
+        # "simple" engine: direct library extraction (pypdf/python-docx/
+        # python-pptx). Fast and CPU-only — no docling/OCR model load, which
+        # would be far too slow for an interactive chat attachment.
+        content_state: Dict[str, Any] = {
+            "file_path": tmp_path,
+            "document_engine": "simple",
+            "output_format": "markdown",
+        }
+        try:
+            processed = await asyncio.wait_for(
+                extract_content(content_state), timeout=120
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Timed out extracting text from the document.",
+            )
+        except Exception as e:
+            logger.error(f"extract-text failed for {filename!r}: {e}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could not extract text from the document: {e}",
+            )
+
+        text = (getattr(processed, "content", None) or "").strip()
+        if not text:
+            raise HTTPException(
+                status_code=422,
+                detail="No extractable text was found in the document.",
+            )
+        truncated = len(text) > MAX_EXTRACTED_CHARS
+        if truncated:
+            text = text[:MAX_EXTRACTED_CHARS]
+        return ExtractTextResponse(
+            filename=filename, text=text, chars=len(text), truncated=truncated
+        )
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
 
 
 async def save_uploaded_file(upload_file: UploadFile) -> str:

@@ -80,6 +80,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   threat_violence: "Threat / violence",
   exfiltration_opsec: "Exfiltration / OPSEC",
   illegal_misconduct: "Illegal / misconduct",
+  user_disliked: "User feedback: not helpful",
 };
 
 function severityVariant(
@@ -97,6 +98,7 @@ export function FlaggedContentViewer() {
   const [statusFilter, setStatusFilter] = useState("open");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   const [selected, setSelected] = useState<ContentFlag | null>(null);
   const [conversation, setConversation] = useState<ConversationMessage[] | null>(
@@ -112,6 +114,7 @@ export function FlaggedContentViewer() {
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (severityFilter !== "all") params.set("severity", severityFilter);
       if (typeFilter !== "all") params.set("content_type", typeFilter);
+      if (categoryFilter !== "all") params.set("category", categoryFilter);
 
       const response = await apiClient.get<{ flags: ContentFlag[] }>(
         `/flags?${params.toString()}`,
@@ -128,7 +131,7 @@ export function FlaggedContentViewer() {
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter, severityFilter, typeFilter]);
+  }, [statusFilter, severityFilter, typeFilter, categoryFilter]);
 
   useEffect(() => {
     fetchFlags();
@@ -225,6 +228,20 @@ export function FlaggedContentViewer() {
               <SelectItem value="assistant_message">AI replies</SelectItem>
               <SelectItem value="source">Documents</SelectItem>
               <SelectItem value="note">Notes</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              <SelectItem value="user_disliked">User feedback: not helpful</SelectItem>
+              <SelectItem value="classified_leak">Classified leakage</SelectItem>
+              <SelectItem value="threat_violence">Threat / violence</SelectItem>
+              <SelectItem value="exfiltration_opsec">Exfiltration / OPSEC</SelectItem>
+              <SelectItem value="illegal_misconduct">Illegal / misconduct</SelectItem>
             </SelectContent>
           </Select>
 

@@ -47,7 +47,10 @@ import {
   detectTextAgentInstruction,
   instructionForVisualMode,
 } from '@/lib/utils/chat-agents'
-import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
+import { getAttachmentKind, isVisualLikeFile, isAudioLikeFile, isDataLikeFile, isDocumentLikeFile } from '@/lib/utils/file-kind'
+import { sourcesApi } from '@/lib/api/sources'
+import { buildContextSummary } from '@/lib/utils/context-summary'
+import { consumeChatStream } from '@/lib/utils/chat-stream'
 import { promptLanguageLabel } from '@/lib/utils/prompt-language'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
@@ -215,14 +218,19 @@ export function useMultimodalChat({
       return
     }
     if (serverMessages.length > 0) {
-      // Preserve ephemeral blob attachments — they are never persisted to the
-      // server, so a server sync would otherwise silently drop the image preview.
+      // Preserve client-only fields that the server never persists — ephemeral
+      // blob attachments (image previews) and the per-turn context summary —
+      // so a server sync doesn't silently drop them.
       setMessages((prev) =>
         serverMessages.map((serverMsg, i) => {
           const localMsg = prev[i]
-          return localMsg?.attachments?.length
-            ? { ...serverMsg, attachments: localMsg.attachments }
-            : serverMsg
+          if (!localMsg) return serverMsg
+          const merged = { ...serverMsg }
+          if (localMsg.attachments?.length) merged.attachments = localMsg.attachments
+          if (localMsg.contextSummary && !merged.contextSummary) {
+            merged.contextSummary = localMsg.contextSummary
+          }
+          return merged
         }),
       )
     }
@@ -480,6 +488,28 @@ export function useMultimodalChat({
         startedAt?: number
       } = {}
 
+      // A document attachment (PDF/DOCX/PPTX/…) isn't a visual, audio or
+      // tabular file, so no vision/transcription/profiler agent handles it.
+      // Extract its text server-side and fold it into the chat context as an
+      // extra source, then let the normal text chat answer over it.
+      let attachedDocument: { name: string; text: string } | null = null
+      if (file && isDocumentLikeFile(file)) {
+        try {
+          const extracted = await sourcesApi.extractText(file)
+          attachedDocument = { name: extracted.filename, text: extracted.text }
+        } catch (err: unknown) {
+          const error = err as { response?: { data?: { detail?: string } }; message?: string }
+          const detail = error.response?.data?.detail || error.message || 'Failed to read the document'
+          toast.error(detail)
+          await appendAndPersistAssistant(
+            `Não consegui ler o documento anexado. Detalhe técnico: ${detail}`,
+            'ai-error',
+          )
+          setIsSending(false)
+          return
+        }
+      }
+
       try {
         // Follow-up edits to an existing deep-research report rewrite that same
         // message in place instead of producing a new one.
@@ -654,7 +684,9 @@ export function useMultimodalChat({
             message,
             file,
             agentContext,
-            preferredAgent === 'data_profiler',
+            // Force for any tabular file so it never falls through to the
+            // vision endpoint (which only accepts images/video → 400).
+            preferredAgent === 'data_profiler' || isDataLikeFile(file),
           )
           if (content) {
             await appendAndPersistAssistant(content)
@@ -680,7 +712,9 @@ export function useMultimodalChat({
             message,
             file,
             agentContext,
-            preferredAgent === 'transcription',
+            // Force for any audio file so it never falls through to the vision
+            // endpoint (which only accepts images/video → 400).
+            preferredAgent === 'transcription' || isAudioLikeFile(file),
             agentOptions?.transcription,
           )
           if (content) {
@@ -732,7 +766,35 @@ export function useMultimodalChat({
           : applyTextAgentInstruction(visualQuery)
         const rawContext = await buildContext(agentQuery)
 
-        if (!file && !isVisualFile(visualFile)) {
+        // Fold an attached document's extracted text into the context as an
+        // extra source so the model answers grounded on it (and it never
+        // reaches the vision endpoint).
+        if (attachedDocument) {
+          rawContext.sources = [
+            ...(rawContext.sources ?? []),
+            {
+              id: `attachment:${attachedDocument.name}`,
+              title: attachedDocument.name,
+              content: attachedDocument.text,
+            },
+          ]
+        }
+
+        // Only genuine image/video attachments go to the vision pipeline;
+        // everything else (text, documents, or files the agents didn't claim)
+        // answers through the normal streaming chat so we never send an
+        // unsupported file type to /vision/multimodal (which 400s).
+        if (!isVisualFile(visualFile)) {
+          const contextSummary = buildContextSummary(rawContext, {
+            based_on: t.chat.contextBasedOn,
+            source: t.chat.contextSource,
+            sources: t.chat.contextSources,
+            note: t.chat.contextNote,
+            notes: t.chat.contextNotes,
+            document: t.chat.contextDocument,
+            documents: t.chat.contextDocuments,
+          })
+
           const body = await chatApi.sendMessageStream({
             session_id: sessionId!,
             message,
@@ -758,6 +820,7 @@ export function useMultimodalChat({
                 type: 'ai',
                 content: '',
                 timestamp: new Date().toISOString(),
+                contextSummary,
               }
               setMessages((prev) => [...prev, initial])
             }
@@ -991,6 +1054,66 @@ export function useMultimodalChat({
     toast.success('Relatório atualizado.')
   }, [messages, currentSessionId, currentSession, notebookId, queryClient])
 
+  // Re-answer the question that produced a given assistant message, replacing
+  // that answer in place (server-side too, via /chat/regenerate/stream).
+  const regenerate = useCallback(async (assistantMessageId: string) => {
+    const sessionId = currentSessionId
+    if (!sessionId || isSending) return
+    const index = messages.findIndex((m) => m.id === assistantMessageId)
+    if (index < 0 || messages[index].type !== 'ai') return
+    let humanMsg: (typeof messages)[0] | undefined
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i].type === 'human') { humanMsg = messages[i]; break }
+    }
+    if (!humanMsg) return
+
+    // Drop the old assistant answer and anything after it; keep the question.
+    setMessages((prev) => prev.slice(0, index))
+    setIsSending(true)
+    try {
+      const agentQuery = applyTextAgentInstruction(humanMsg.content)
+      const rawContext = await buildContext(agentQuery)
+      const contextSummary = buildContextSummary(rawContext, {
+        based_on: t.chat.contextBasedOn,
+        source: t.chat.contextSource,
+        sources: t.chat.contextSources,
+        note: t.chat.contextNote,
+        notes: t.chat.contextNotes,
+        document: t.chat.contextDocument,
+        documents: t.chat.contextDocuments,
+      })
+      const body = await chatApi.regenerateStream({
+        session_id: sessionId,
+        message: humanMsg.content,
+        context: rawContext,
+        model_override: currentSession?.model_override ?? undefined,
+        app_language: promptLanguageLabel(language),
+        remove_message_ids: [humanMsg.id, assistantMessageId].filter(Boolean),
+      })
+      if (!body) throw new Error('No response body')
+
+      const newAiId = `ai-${Date.now()}`
+      let created = false
+      const upsert = (content: string) => {
+        setMessages((prev) => {
+          if (!created) {
+            created = true
+            return [...prev, { id: newAiId, type: 'ai' as const, content, timestamp: new Date().toISOString(), contextSummary }]
+          }
+          return prev.map((m) => m.id === newAiId ? { ...m, content } : m)
+        })
+      }
+      await consumeChatStream(body, { onDelta: upsert, onComplete: upsert })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+      await refetchCurrentSession()
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToSendMessage'))
+    } finally {
+      setIsSending(false)
+    }
+  }, [messages, currentSessionId, currentSession, isSending, buildContext, language, notebookId, queryClient, refetchCurrentSession, t])
+
   const isDeepResearchSession = messages.some(m => parseResearchJobId(m.id) !== null)
 
   return {
@@ -1005,6 +1128,7 @@ export function useMultimodalChat({
     charCount,
     pendingModelOverride,
     sendMessage,
+    regenerate,
     reviseReport,
     clearMessages,
     buildContext,

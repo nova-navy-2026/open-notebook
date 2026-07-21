@@ -158,6 +158,45 @@ class ExecuteGlobalChatRequest(BaseModel):
         description="Human-readable UI language name, used as a secondary "
         "preference for the reply language",
     )
+    attached_document_name: Optional[str] = Field(
+        None,
+        description="Filename of a document attached to this message via the "
+        "chat clip button (its text is folded into the context).",
+    )
+    attached_document_text: Optional[str] = Field(
+        None,
+        description="Extracted plain text of the attached document.",
+    )
+
+
+class RegenerateGlobalChatRequest(ExecuteGlobalChatRequest):
+    remove_message_ids: List[str] = Field(
+        default_factory=list,
+        description="Ids of the previous turn's messages (the old human + "
+        "assistant) to drop before re-answering, so the new answer replaces "
+        "the old one instead of appending a duplicate turn.",
+    )
+
+
+def _append_attached_document(
+    context: Dict[str, Any],
+    name: Optional[str],
+    text: Optional[str],
+) -> None:
+    """Fold a chat-attached document's text into the retrieved context.
+
+    Added as an ordinary source so it grounds the answer and shows up in the
+    "documents used" list, without ever being persisted into chat history.
+    """
+    if not text or not text.strip():
+        return
+    title = name or "Attached document"
+    context.setdefault("sources", []).append(
+        {"id": f"attachment:{title}", "title": title, "content": text}
+    )
+    context.setdefault("documents", []).append(
+        {"id": f"attachment:{title}", "name": title, "type": "attachment", "chunks": 1}
+    )
 
 
 class PersistGlobalChatExchangeRequest(BaseModel):
@@ -977,6 +1016,9 @@ async def execute_global_chat(
             user_id=user_id,
             auth_user_id=auth_user_id,
         )
+        _append_attached_document(
+            context, request.attached_document_name, request.attached_document_text
+        )
         context_for_prompt = _context_with_agent_instruction(
             context,
             request.agent_instruction,
@@ -1128,6 +1170,9 @@ async def execute_global_chat_stream(
         user_id=user_id,
         auth_user_id=auth_user_id,
     )
+    _append_attached_document(
+        context, request.attached_document_name, request.attached_document_text
+    )
     if request.agent_instruction:
         logger.info(
             "ChatAgent text instruction | surface=global_chat session={} "
@@ -1162,6 +1207,72 @@ async def execute_global_chat_stream(
             agent_instruction=request.agent_instruction,
             app_language=request.app_language,
             # Captured now: the generator runs after the request scope ends.
+            risk_context=actor_context(http_request),
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/global-chat/regenerate/stream")
+async def regenerate_global_chat_stream(
+    request: RegenerateGlobalChatRequest,
+    http_request: Request,
+    user_id: Optional[str] = Depends(get_navy_acl_user_id),
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    """Re-answer the last question in a global chat, replacing the old turn."""
+    full_id = (
+        request.session_id
+        if request.session_id.startswith("chat_session:")
+        else f"chat_session:{request.session_id}"
+    )
+    session = await ChatSession.get(full_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not _session_belongs_to_user(session, auth_user_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from open_notebook.graphs.chat import remove_chat_messages
+
+    await remove_chat_messages(full_id, request.remove_message_ids)
+
+    context = await _build_global_context(
+        request.message,
+        user_id=user_id,
+        auth_user_id=auth_user_id,
+    )
+    _append_attached_document(
+        context, request.attached_document_name, request.attached_document_text
+    )
+
+    model_override = (
+        request.model_override
+        if request.model_override is not None
+        else getattr(session, "model_override", None)
+    )
+
+    context_stats = {
+        "sources_count": len(context.get("sources", [])),
+        "notes_count": 0,
+        "navy_corpus_count": len(context.get("navy_corpus", [])),
+        "documents": context.get("documents", []),
+    }
+
+    await session.save()
+
+    return StreamingResponse(
+        _stream_global_chat_sse(
+            session_id=full_id,
+            user_message=request.message,
+            context=context,
+            context_stats=context_stats,
+            model_override=model_override,
+            agent_instruction=request.agent_instruction,
+            app_language=request.app_language,
             risk_context=actor_context(http_request),
         ),
         media_type="text/event-stream",

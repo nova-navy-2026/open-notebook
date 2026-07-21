@@ -111,10 +111,13 @@ export const navyDocsApi = {
     return response.data
   },
 
-  getInsights: async (docId: string): Promise<{ doc_id: string; insights: string }> => {
+  getInsights: async (
+    docId: string,
+    appLanguage?: string,
+  ): Promise<{ doc_id: string; insights: string }> => {
     const response = await apiClient.get<{ doc_id: string; insights: string }>(
       '/navy-docs/insights',
-      { params: { doc_id: docId } },
+      { params: { doc_id: docId, app_language: appLanguage } },
     )
     return response.data
   },

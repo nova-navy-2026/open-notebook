@@ -16,7 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square, Ghost, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, MessageSquare, Clock, Paperclip, X, Image as ImageIcon, Video, AudioLines, Search, Download, Copy, Table2, Pencil, Mic, Square, Ghost, Trash2, ChevronDown, ChevronUp, RefreshCw, ThumbsDown } from 'lucide-react'
 import { isDeepResearchReportMessage } from '@/lib/chat-agents/deep-research-agent'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -67,6 +67,7 @@ import { useReportTypes, useResearchTones } from '@/lib/hooks/use-research'
 import { useModelDefaults, useModels } from '@/lib/hooks/use-models'
 import { notebooksApi } from '@/lib/api/notebooks'
 import { getAttachmentKind, isAudioLikeFile, isVideoLikeFile, isVisualLikeFile } from '@/lib/utils/file-kind'
+import { CHAT_ATTACH_ACCEPT } from '@/lib/utils/agent-file-types'
 import { formatModelLabel } from '@/lib/utils/model-label'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 import { useVoiceInput } from '@/lib/hooks/use-voice-input'
@@ -132,6 +133,12 @@ interface ChatPanelProps {
   // Delete a single message. When provided, each message shows a delete control.
   // Deleting a user message also removes the assistant reply that follows it.
   onDeleteMessage?: (messageId: string) => void | Promise<void>
+  // Regenerate an assistant answer (re-asks the same question, replacing the
+  // answer). When provided, each assistant message shows a "regenerate" control.
+  onRegenerate?: (messageId: string) => void | Promise<void>
+  // Report that the user disliked an assistant answer (sent to admin oversight).
+  // When provided, each assistant message shows a "not helpful" control.
+  onFeedbackDown?: (message: SourceChatMessage, comment?: string) => void | Promise<void>
 }
 
 /** Inline "edit the report" control shown under a deep-research report message. */
@@ -208,6 +215,37 @@ function ReportEditAffordance({
           Cancelar
         </Button>
       </div>
+    </div>
+  )
+}
+
+/** Per-message collapsible note summarising, in 1-2 sentences, the source
+ * context that informed a given assistant answer. */
+function MessageContextSummary({
+  summary,
+  label,
+}: {
+  summary: string
+  label: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="w-fit max-w-full">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Lightbulb className="h-3.5 w-3.5" />
+        {label}
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </Button>
+      {open && (
+        <div className="mt-1 max-w-md rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground">
+          {summary}
+        </div>
+      )}
     </div>
   )
 }
@@ -338,10 +376,13 @@ export function ChatPanel({
   privateMode = false,
   onTogglePrivate,
   onDeleteMessage,
+  onRegenerate,
+  onFeedbackDown,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const chatInputId = useId()
   const [deleteMessageId, setDeleteMessageId] = useState<string | null>(null)
+  const [reportedMessageIds, setReportedMessageIds] = useState<Set<string>>(new Set())
   const [input, setInput] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
@@ -723,6 +764,12 @@ export function ChatPanel({
                         ))}
                       </div>
                     ) : null}
+                    {message.type === 'ai' && message.contextSummary && (
+                      <MessageContextSummary
+                        summary={message.contextSummary}
+                        label={t.chat.contextUsed}
+                      />
+                    )}
                     <div
                       className={`rounded-lg px-4 py-2 ${
                         message.type === 'human'
@@ -746,6 +793,43 @@ export function ChatPanel({
                           content={message.content}
                           notebookId={notebookId}
                         />
+                        {onRegenerate && message.content && !isStreaming && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-muted-foreground"
+                                onClick={() => onRegenerate(message.id)}
+                                aria-label={t.chat.regenerate}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t.chat.regenerate}</TooltipContent>
+                          </Tooltip>
+                        )}
+                        {onFeedbackDown && message.content && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={`h-7 px-2 ${reportedMessageIds.has(message.id) ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}`}
+                                disabled={reportedMessageIds.has(message.id)}
+                                onClick={async () => {
+                                  await onFeedbackDown(message)
+                                  setReportedMessageIds((prev) => new Set(prev).add(message.id))
+                                  toast.success(t.chat.feedbackThanks)
+                                }}
+                                aria-label={t.chat.feedbackNotHelpful}
+                              >
+                                <ThumbsDown className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t.chat.feedbackNotHelpful}</TooltipContent>
+                          </Tooltip>
+                        )}
                         {onDeleteMessage && (
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -1053,8 +1137,10 @@ export function ChatPanel({
                   <AudioLines className="h-4 w-4 flex-shrink-0" />
                 ) : selectedFileKind === 'video' ? (
                   <Video className="h-4 w-4 flex-shrink-0" />
-                ) : (
+                ) : selectedFileKind === 'image' ? (
                   <ImageIcon className="h-4 w-4 flex-shrink-0" />
+                ) : (
+                  <FileText className="h-4 w-4 flex-shrink-0" />
                 )}
                 <span className="truncate">{selectedFile.name}</span>
                 <span className="flex-shrink-0 text-muted-foreground">
@@ -1085,7 +1171,7 @@ export function ChatPanel({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp,video/mp4,video/webm,video/quicktime,video/x-msvideo,audio/wav,audio/mpeg,audio/mp3,audio/mp4,audio/x-m4a,audio/flac,audio/ogg,audio/aac,audio/webm,text/csv,text/tab-separated-values,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,.tsv,.json,.xls,.xlsx"
+                  accept={CHAT_ATTACH_ACCEPT}
                   className="hidden"
                   onChange={handleFileChange}
                 />

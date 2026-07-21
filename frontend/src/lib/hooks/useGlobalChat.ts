@@ -45,8 +45,10 @@ import {
   detectTextAgentInstruction,
   instructionForVisualMode,
 } from '@/lib/utils/chat-agents'
-import { getAttachmentKind, isVisualLikeFile } from '@/lib/utils/file-kind'
+import { getAttachmentKind, isVisualLikeFile, isAudioLikeFile, isDataLikeFile, isDocumentLikeFile } from '@/lib/utils/file-kind'
+import { sourcesApi } from '@/lib/api/sources'
 import { promptLanguageLabel } from '@/lib/utils/prompt-language'
+import { consumeChatStream } from '@/lib/utils/chat-stream'
 import type { ChatAgentUiOptions, ChatDeepResearchOptions } from '@/lib/utils/chat-agents'
 
 function createAttachment(file?: File): NotebookChatMessage['attachments'] {
@@ -478,6 +480,30 @@ export function useGlobalChat() {
     localMessagesDirtyRef.current = true
     setIsSending(true)
 
+    // A document attachment (PDF/DOCX/PPTX/…) isn't visual/audio/tabular, so no
+    // specialised agent handles it. Extract its text server-side and hand it to
+    // the backend as extra context for the normal text chat.
+    let attachedDocument: { name: string; text: string } | null = null
+    if (file && isDocumentLikeFile(file)) {
+      try {
+        const extracted = await sourcesApi.extractText(file)
+        attachedDocument = { name: extracted.filename, text: extracted.text }
+      } catch (err: unknown) {
+        const error = err as { response?: { data?: { detail?: string } }; message?: string }
+        const detail = error.response?.data?.detail || error.message || 'Failed to read the document'
+        toast.error(detail)
+        const aiMessage: NotebookChatMessage = {
+          id: `ai-error-${Date.now()}`,
+          type: 'ai',
+          content: `Não consegui ler o documento anexado. Detalhe técnico: ${detail}`,
+          timestamp: new Date().toISOString(),
+        }
+        setMessages(prev => [...prev, aiMessage])
+        setIsSending(false)
+        return
+      }
+    }
+
     try {
       const agentContext = {
         surface: 'global_chat' as const,
@@ -694,7 +720,8 @@ export function useGlobalChat() {
           message,
           dataFile,
           agentContext,
-          preferredAgent === 'data_profiler' || isDataFollowUp,
+          // Force for any tabular file so it can't be silently ignored.
+          preferredAgent === 'data_profiler' || isDataFollowUp || isDataLikeFile(dataFile),
         )
         if (content) {
           // Remember the file for future follow-ups.
@@ -753,7 +780,8 @@ export function useGlobalChat() {
           message,
           file,
           agentContext,
-          preferredAgent === 'transcription',
+          // Force for any audio file so it can't be silently ignored.
+          preferredAgent === 'transcription' || isAudioLikeFile(file),
           agentOptions?.transcription,
         )
         if (content) {
@@ -885,6 +913,12 @@ export function useGlobalChat() {
         model_override: modelOverride ?? (currentSession?.model_override ?? undefined),
         agent_instruction: agentInstruction,
         app_language: promptLanguageLabel(language),
+        ...(attachedDocument
+          ? {
+              attached_document_name: attachedDocument.name,
+              attached_document_text: attachedDocument.text,
+            }
+          : {}),
       })
 
       if (!body) throw new Error('No response body')
@@ -1214,6 +1248,63 @@ export function useGlobalChat() {
     toast.success('Relatório atualizado.')
   }, [messages, currentSessionId, currentSession, queryClient])
 
+  // Re-answer the question that produced a given assistant message, replacing
+  // that answer in place (server-side too, via /global-chat/regenerate/stream).
+  const regenerate = useCallback(async (assistantMessageId: string) => {
+    const sessionId = currentSessionId
+    if (!sessionId || isSending) return
+    const index = messages.findIndex(m => m.id === assistantMessageId)
+    if (index < 0 || messages[index].type !== 'ai') return
+    let humanMsg: NotebookChatMessage | undefined
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i].type === 'human') { humanMsg = messages[i]; break }
+    }
+    if (!humanMsg) return
+
+    setMessages(prev => prev.slice(0, index))
+    setIsSending(true)
+    try {
+      const body = await globalChatApi.regenerateStream({
+        session_id: sessionId,
+        message: humanMsg.content,
+        model_override: currentSession?.model_override ?? undefined,
+        app_language: promptLanguageLabel(language),
+        remove_message_ids: [humanMsg.id, assistantMessageId].filter(Boolean),
+      })
+      if (!body) throw new Error('No response body')
+
+      const newAiId = `ai-${Date.now()}`
+      let created = false
+      let docs: GlobalChatDocument[] | undefined
+      const upsert = (content: string) => {
+        setMessages(prev => {
+          if (!created) {
+            created = true
+            return [...prev, { id: newAiId, type: 'ai' as const, content, timestamp: new Date().toISOString(), documents: docs }]
+          }
+          return prev.map(m => m.id === newAiId ? { ...m, content, documents: docs ?? m.documents } : m)
+        })
+      }
+      await consumeChatStream(body, {
+        onDelta: upsert,
+        onComplete: upsert,
+        onContextStats: (data) => {
+          const stats = data as GlobalChatContextStats | null
+          if (stats) {
+            setContextStats(stats)
+            docs = stats.documents
+          }
+        },
+      })
+      await refetchCurrentSession()
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }; message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToSendMessage'))
+    } finally {
+      setIsSending(false)
+    }
+  }, [messages, currentSessionId, currentSession, isSending, language, refetchCurrentSession, t])
+
   const isDeepResearchSession = messages.some(m => parseResearchJobId(m.id) !== null)
 
   return {
@@ -1237,6 +1328,7 @@ export function useGlobalChat() {
     deleteMessage,
     switchSession,
     sendMessage,
+    regenerate,
     reviseReport,
     setModelOverride,
     togglePrivateChat,

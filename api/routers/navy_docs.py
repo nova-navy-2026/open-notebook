@@ -294,6 +294,7 @@ async def navy_doc_chat(
 @router.get("/navy-docs/insights", response_model=NavyDocInsightsResponse)
 async def navy_doc_insights(
     doc_id: str,
+    app_language: Optional[str] = None,
     user_id: Optional[str] = Depends(get_navy_acl_user_id),
 ):
     """Generate concise AI insights for one navy document (ACL-checked).
@@ -319,9 +320,19 @@ async def navy_doc_insights(
     # Cap the prompt size; the model auto-upgrades to large-context above 105k
     # tokens, but capping keeps insights fast/cheap.
     excerpt = content[:30000]
+    # The reply language follows the user's app UI language when provided
+    # (e.g. "European Portuguese (pt-PT)"), falling back to the document's own
+    # language. Without this, English-language corpus documents always produced
+    # English insights even for Portuguese-speaking users.
+    language_line = (
+        f"Write the insights in {app_language}.\n"
+        if app_language
+        else "Write the insights in the same language as the document.\n"
+    )
     prompt = (
-        "Analyse the following document and produce concise, useful insights "
-        "in the same language as the document. Use Markdown with these parts:\n"
+        "Analyse the following document and produce concise, useful insights. "
+        + language_line
+        + "Use Markdown with these parts:\n"
         "1. A 2-3 sentence summary.\n"
         "2. 4-7 key points as bullets.\n"
         "3. Notable entities / dates / references, if any.\n\n"

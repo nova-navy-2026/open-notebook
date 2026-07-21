@@ -92,6 +92,26 @@ agent_state.add_edge("agent", END)
 graph = agent_state.compile(checkpointer=checkpointer)
 
 
+async def remove_chat_messages(session_id: str, message_ids: list[str]) -> None:
+    """Delete messages (by id) from a session's checkpoint history.
+
+    Used by "regenerate": before re-answering, the old human+assistant turn is
+    removed so the fresh turn replaces it instead of piling up. Unknown ids are
+    ignored by the ``add_messages`` reducer, so this is safe to call best-effort.
+    """
+    ids = [mid for mid in (message_ids or []) if mid]
+    if not ids:
+        return
+    from langchain_core.messages import RemoveMessage
+
+    config = RunnableConfig(configurable={"thread_id": session_id})
+    await asyncio.to_thread(
+        graph.update_state,
+        config,
+        {"messages": [RemoveMessage(id=mid) for mid in ids]},
+    )
+
+
 def _chunk_for_stream(text: str, target_chunks: int = 48, min_size: int = 12):
     """Split an already-computed reply into a bounded number of small pieces.
 
